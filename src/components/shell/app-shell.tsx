@@ -36,7 +36,7 @@ function NavLinks({
     <nav
       className={cn(
         variant === "bar"
-          ? "flex items-stretch gap-0.5 overflow-x-auto"
+          ? "flex flex-wrap items-stretch gap-x-0.5"
           : "flex flex-col gap-0.5"
       )}
     >
