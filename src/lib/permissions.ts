@@ -1,0 +1,180 @@
+import type {
+  ModuleId,
+  PermissionAction,
+  PermissionOverride,
+  RoleId,
+  UserAccount,
+} from "./types";
+
+export type PermissionKey = `${ModuleId}:${PermissionAction}`;
+
+/** Default rights matrix per role (locked ACL picks). */
+const ROLE_MATRIX: Record<RoleId, Partial<Record<ModuleId, PermissionAction[]>>> = {
+  super_admin: {
+    owner: ["view"],
+    sic: ["view", "approve"],
+    admin: ["view", "create", "update", "upload"],
+    hr: ["view", "create", "update"],
+    finance: ["view", "create", "update", "export"],
+    supervisor: ["view", "create", "update", "submit"],
+    store: ["view", "create", "update", "submit"],
+    safety: ["view", "create", "update", "submit"],
+    labourer: ["view"],
+    dpr: ["view", "create", "update", "submit", "approve", "upload"],
+    approvals: ["view", "approve"],
+    acpl: ["view", "upload", "update", "approve"],
+    jms: ["view", "upload", "update", "approve", "export"],
+    calculators: ["view"],
+    telegram: ["view", "create"],
+    users: ["view", "create", "update", "admin"],
+    audit: ["view", "export"],
+    requests: ["view", "create", "update", "approve"],
+    submissions: ["view"],
+    trades: ["view", "create", "update", "admin"],
+    rates: ["view", "create", "update", "admin", "upload"],
+  },
+  owner: {
+    owner: ["view"],
+    sic: ["view", "approve"],
+    admin: ["view"],
+    hr: ["view"],
+    finance: ["view", "create", "update", "export"],
+    supervisor: ["view"],
+    store: ["view"],
+    safety: ["view"],
+    labourer: ["view"],
+    dpr: ["view", "approve"],
+    approvals: ["view", "approve"],
+    acpl: ["view"],
+    jms: ["view", "export"],
+    calculators: ["view"],
+    telegram: ["view", "create"],
+    audit: ["view", "export"],
+    requests: ["view"],
+    submissions: ["view"],
+    trades: ["view"],
+    rates: ["view"],
+  },
+  sic: {
+    sic: ["view"],
+    dpr: ["view", "approve"],
+    approvals: ["view", "approve"],
+    acpl: ["view", "approve"],
+    jms: ["view", "approve"],
+    supervisor: ["view"],
+    store: ["view"],
+    safety: ["view"],
+    finance: ["view"],
+    calculators: ["view"],
+    requests: ["view"],
+    submissions: ["view"],
+    rates: ["view"],
+  },
+  admin: {
+    admin: ["view", "create", "update", "upload"],
+    dpr: ["view", "create", "update", "upload", "submit"],
+    acpl: ["view", "upload"],
+    jms: ["view", "upload", "update"],
+    calculators: ["view"],
+    requests: ["view"],
+    submissions: ["view", "create", "submit"],
+    trades: ["view", "create", "update"],
+    rates: ["view", "create", "update", "upload"],
+  },
+  hr: {
+    hr: ["view", "create", "update"],
+    labourer: ["view", "create", "update"],
+    acpl: ["view", "upload", "update"],
+    calculators: ["view"],
+    submissions: ["view"],
+    trades: ["view"],
+  },
+  finance: {
+    finance: ["view", "create", "update", "export"],
+    jms: ["view"],
+    calculators: ["view"],
+    submissions: ["view"],
+    rates: ["view"],
+  },
+  supervisor: {
+    supervisor: ["view", "create", "update", "submit"],
+    dpr: ["view", "create", "update", "submit", "upload"],
+    calculators: ["view"],
+    requests: ["view", "create"],
+    submissions: ["view", "create", "submit"],
+  },
+  store: {
+    store: ["view", "create", "update", "submit"],
+    dpr: ["view", "create", "update", "submit", "upload"],
+    requests: ["view", "update", "approve"],
+    calculators: ["view"],
+    submissions: ["view", "create", "submit"],
+  },
+  safety: {
+    safety: ["view", "create", "update", "submit"],
+    dpr: ["view", "create", "update", "submit", "upload"],
+    calculators: ["view"],
+    requests: ["view", "create"],
+    submissions: ["view", "create", "submit"],
+  },
+  labourer: {
+    labourer: ["view"],
+  },
+};
+
+export function roleHas(role: RoleId, module: ModuleId, action: PermissionAction): boolean {
+  const acts = ROLE_MATRIX[role]?.[module];
+  return !!acts?.includes(action);
+}
+
+export function effectivePermission(
+  account: UserAccount | null | undefined,
+  activeRole: RoleId | null | undefined,
+  module: ModuleId,
+  action: PermissionAction
+): boolean {
+  if (!account || !activeRole) return false;
+  if (!account.roles.includes(activeRole)) return false;
+
+  const override = account.permissionOverrides.find(
+    (o) => o.module === module && o.action === action
+  );
+  if (override) return override.allow;
+
+  // Super admin active role always wins for users/admin
+  if (activeRole === "super_admin") return roleHas("super_admin", module, action);
+
+  return roleHas(activeRole, module, action);
+}
+
+export function canViewModule(
+  account: UserAccount | null | undefined,
+  activeRole: RoleId | null | undefined,
+  module: ModuleId
+): boolean {
+  return effectivePermission(account, activeRole, module, "view");
+}
+
+export function plantScopeFor(
+  account: UserAccount | null | undefined,
+  activeRole: RoleId | null | undefined
+): "all" | string[] {
+  if (!account || !activeRole) return [];
+  if (
+    activeRole === "super_admin" ||
+    activeRole === "owner" ||
+    activeRole === "sic" ||
+    activeRole === "admin" ||
+    activeRole === "hr" ||
+    activeRole === "finance"
+  ) {
+    return "all";
+  }
+  return account.plantIds.length ? account.plantIds : [];
+}
+
+export function describeOverride(o: PermissionOverride): string {
+  return `${o.module}:${o.action} → ${o.allow ? "allow" : "deny"}`;
+}
+
+export { ROLE_MATRIX };
