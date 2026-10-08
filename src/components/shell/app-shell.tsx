@@ -13,16 +13,17 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import { navForAccount, roleMeta, rolesForSwitcher } from "@/lib/roles";
+import { roleMeta, rolesForSwitcher } from "@/lib/roles";
+import { topNavFor } from "@/lib/desk";
 import { useStore } from "@/lib/store";
 import type { RoleId } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
-function NavLinks({
+function DeskNav({
   account,
   role,
   onNavigate,
-  variant = "rail",
+  variant = "bar",
 }: {
   account: ReturnType<typeof useStore>["currentAccount"];
   role: RoleId;
@@ -30,7 +31,7 @@ function NavLinks({
   variant?: "rail" | "bar";
 }) {
   const pathname = usePathname();
-  const items = navForAccount(account, role);
+  const items = topNavFor(account, role);
 
   return (
     <nav
@@ -42,7 +43,10 @@ function NavLinks({
     >
       {items.map((item) => {
         const active =
-          pathname === item.href || pathname.startsWith(item.href + "/");
+          item.href === "/home"
+            ? pathname === "/home" || pathname === "/"
+            : pathname === item.href || pathname.startsWith(item.href + "/");
+        const mobileHideMaster = item.id === "master";
         return (
           <Link
             key={item.href}
@@ -50,6 +54,7 @@ function NavLinks({
             onClick={onNavigate}
             className={cn(
               "whitespace-nowrap text-[12px] font-semibold uppercase tracking-[0.08em] transition-colors",
+              mobileHideMaster && "max-md:hidden",
               variant === "bar"
                 ? cn(
                     "border-b-2 px-3 py-2.5",
@@ -75,7 +80,7 @@ function NavLinks({
 
 function BrandMark() {
   return (
-    <Link href="/" className="flex min-w-0 items-center gap-2.5">
+    <Link href="/home" className="flex min-w-0 items-center gap-2.5">
       <span className="flex h-8 w-8 items-center justify-center rounded-sm bg-[var(--sge-brass)] font-heading text-sm font-bold text-[var(--sge-night)]">
         S
       </span>
@@ -262,21 +267,23 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </div>
         </div>
         <div className="hidden border-t border-[rgba(201,162,39,0.22)] px-3 md:block md:px-6">
-          <NavLinks account={currentAccount} role={role} variant="bar" />
+          <DeskNav account={currentAccount} role={role} variant="bar" />
         </div>
         <div className="ledger-rule" />
       </header>
 
       <div className="flex gap-1 overflow-x-auto border-b border-[var(--sge-line)] bg-[var(--sge-paper)] px-2 py-2 md:hidden">
-        {navForAccount(currentAccount, role).map((item) => (
-          <Link
-            key={item.href}
-            href={item.href}
-            className="shrink-0 rounded-sm bg-[var(--sge-paper-2)] px-2.5 py-1.5 text-xs font-semibold uppercase tracking-wide text-[var(--sge-ink-2)]"
-          >
-            {item.label}
-          </Link>
-        ))}
+        {topNavFor(currentAccount, role)
+          .filter((item) => item.id !== "master")
+          .map((item) => (
+            <Link
+              key={item.href}
+              href={item.href}
+              className="shrink-0 rounded-sm bg-[var(--sge-paper-2)] px-2.5 py-1.5 text-xs font-semibold uppercase tracking-wide text-[var(--sge-ink-2)]"
+            >
+              {item.label}
+            </Link>
+          ))}
       </div>
 
       <main className="mx-auto w-full max-w-[1200px] flex-1 px-3 py-5 md:px-6 md:py-7">
@@ -284,7 +291,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </main>
 
       <footer className="border-t border-[var(--sge-line)] bg-[var(--sge-paper)]/80 px-4 py-3 text-center text-[10px] uppercase tracking-[0.16em] text-[var(--sge-ink-3)]">
-        Shree Gayatri Enterprise · RIL Jamnagar · Yard Ledger v7
+        Shree Gayatri Enterprise · RIL Jamnagar · Yard Ledger v8
       </footer>
 
       <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
@@ -334,7 +341,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             ) : (
               <div className="text-sm font-medium">{meta.label}</div>
             )}
-            <NavLinks
+            <DeskNav
               account={currentAccount}
               role={role}
               onNavigate={() => setMobileOpen(false)}

@@ -32,6 +32,7 @@ const ROLE_MATRIX: Record<RoleId, Partial<Record<ModuleId, PermissionAction[]>>>
     submissions: ["view"],
     trades: ["view", "create", "update", "admin"],
     rates: ["view", "create", "update", "admin", "upload"],
+    master: ["view", "create", "update", "admin"],
   },
   owner: {
     owner: ["view"],
@@ -54,6 +55,7 @@ const ROLE_MATRIX: Record<RoleId, Partial<Record<ModuleId, PermissionAction[]>>>
     submissions: ["view"],
     trades: ["view"],
     rates: ["view"],
+    master: ["view", "create", "update", "admin"],
   },
   sic: {
     sic: ["view"],
@@ -99,6 +101,7 @@ const ROLE_MATRIX: Record<RoleId, Partial<Record<ModuleId, PermissionAction[]>>>
   supervisor: {
     supervisor: ["view", "create", "update", "submit"],
     dpr: ["view", "create", "update", "submit", "upload"],
+    store: ["view"],
     calculators: ["view"],
     requests: ["view", "create"],
     submissions: ["view", "create", "submit"],

@@ -18,6 +18,8 @@ import { PAINT_STAGE_ORDER } from "./paint-lifecycle";
 import { resolveActivityRate, withSupersession } from "./rate-book";
 import { roleMeta } from "./roles";
 import { migrateLegacySafetyBody } from "./safety-dpr";
+import { seedMasterCatalog } from "./master/seed-catalog";
+import type { CatalogItem, Contractor, MasterCatalog, MaterialItem } from "./master/types";
 import { createSeedState, STORAGE_KEY } from "./seed";
 import type {
   AcplPunchRow,
@@ -114,8 +116,35 @@ interface StoreApi {
   addTrade: (input: Omit<TradeDefinition, "id"> & { id?: string }) => string;
   updateLabourer: (
     id: string,
-    patch: Partial<Pick<Labourer, "trade" | "tradeSubcategory" | "name" | "wageDaily" | "active" | "siteId">>
+    patch: Partial<
+      Pick<
+        Labourer,
+        | "trade"
+        | "tradeSubcategory"
+        | "name"
+        | "wageDaily"
+        | "active"
+        | "siteId"
+        | "contractorId"
+        | "epNumber"
+        | "gatePass"
+      >
+    >
   ) => void;
+  upsertContractor: (row: Contractor) => string;
+  setContractorActive: (id: string, active: boolean) => void;
+  upsertCatalogItem: (
+    sheet: keyof Omit<MasterCatalog, "contractors" | "materials">,
+    row: CatalogItem
+  ) => string;
+  upsertMaterial: (row: MaterialItem) => string;
+  setCatalogActive: (
+    sheet: keyof MasterCatalog,
+    id: string,
+    active: boolean
+  ) => void;
+  upsertSite: (site: AppState["sites"][number]) => void;
+  addLabourer: (row: Omit<Labourer, "id"> & { id?: string }) => string;
   addWageEntry: (entry: Omit<WageLedgerEntry, "id">) => void;
   acknowledgeFinanceAlert: (id: string) => void;
   flagFinanceAlertToSic: (id: string) => void;
@@ -221,8 +250,18 @@ function migrateState(parsed: Partial<AppState>): AppState {
         : seed.rateLines,
     tradeCatalogue:
       parsed.tradeCatalogue && parsed.tradeCatalogue.length > 0
-        ? parsed.tradeCatalogue
+        ? parsed.tradeCatalogue.map((t) => ({ ...t, siteId: t.siteId ?? null }))
         : seed.tradeCatalogue,
+    masterCatalog: parsed.masterCatalog?.dprTypes?.length
+      ? {
+          ...seedMasterCatalog(),
+          ...parsed.masterCatalog,
+        }
+      : seed.masterCatalog,
+    labourers: (parsed.labourers ?? seed.labourers).map((l) => ({
+      ...l,
+      contractorId: l.contractorId ?? "con-sge",
+    })),
     sites:
       parsed.sites && parsed.sites.length >= 6
         ? parsed.sites.map((s) => ({
@@ -1346,6 +1385,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           | "wageDaily"
           | "active"
           | "siteId"
+          | "contractorId"
+          | "epNumber"
+          | "gatePass"
         >
       >
     ) => {
@@ -1358,6 +1400,154 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     },
     []
   );
+
+  const addLabourer = useCallback(
+    (row: Omit<Labourer, "id"> & { id?: string }) => {
+      const id = row.id ?? uid("lb");
+      setState((s) => ({
+        ...s,
+        labourers: [{ ...row, id }, ...s.labourers],
+        auditLog: [
+          makeAudit(s, "master", "create", `Labourer ${row.name}`),
+          ...s.auditLog,
+        ],
+      }));
+      return id;
+    },
+    []
+  );
+
+  const upsertContractor = useCallback((row: Contractor) => {
+    const id = row.id || uid("con");
+    const next = { ...row, id };
+    setState((s) => {
+      const exists = s.masterCatalog.contractors.some((c) => c.id === id);
+      return {
+        ...s,
+        masterCatalog: {
+          ...s.masterCatalog,
+          contractors: exists
+            ? s.masterCatalog.contractors.map((c) => (c.id === id ? next : c))
+            : [next, ...s.masterCatalog.contractors],
+        },
+        auditLog: [
+          makeAudit(
+            s,
+            "master",
+            exists ? "update" : "create",
+            `Contractor ${next.code}`
+          ),
+          ...s.auditLog,
+        ],
+      };
+    });
+    return id;
+  }, []);
+
+  const setContractorActive = useCallback((id: string, active: boolean) => {
+    setState((s) => ({
+      ...s,
+      masterCatalog: {
+        ...s.masterCatalog,
+        contractors: s.masterCatalog.contractors.map((c) =>
+          c.id === id ? { ...c, active } : c
+        ),
+      },
+    }));
+  }, []);
+
+  const upsertCatalogItem = useCallback(
+    (
+      sheet: keyof Omit<MasterCatalog, "contractors" | "materials">,
+      row: CatalogItem
+    ) => {
+      const id = row.id || uid("cat");
+      const next = { ...row, id };
+      setState((s) => {
+        const list = s.masterCatalog[sheet] as CatalogItem[];
+        const exists = list.some((r) => r.id === id);
+        return {
+          ...s,
+          masterCatalog: {
+            ...s.masterCatalog,
+            [sheet]: exists
+              ? list.map((r) => (r.id === id ? next : r))
+              : [next, ...list],
+          },
+          auditLog: [
+            makeAudit(
+              s,
+              "master",
+              exists ? "update" : "create",
+              `${sheet} ${next.code}`
+            ),
+            ...s.auditLog,
+          ],
+        };
+      });
+      return id;
+    },
+    []
+  );
+
+  const upsertMaterial = useCallback((row: MaterialItem) => {
+    const id = row.id || uid("mat");
+    const next = { ...row, id };
+    setState((s) => {
+      const exists = s.masterCatalog.materials.some((m) => m.id === id);
+      return {
+        ...s,
+        masterCatalog: {
+          ...s.masterCatalog,
+          materials: exists
+            ? s.masterCatalog.materials.map((m) => (m.id === id ? next : m))
+            : [next, ...s.masterCatalog.materials],
+        },
+        auditLog: [
+          makeAudit(
+            s,
+            "master",
+            exists ? "update" : "create",
+            `Material ${next.code}`
+          ),
+          ...s.auditLog,
+        ],
+      };
+    });
+    return id;
+  }, []);
+
+  const setCatalogActive = useCallback(
+    (sheet: keyof MasterCatalog, id: string, active: boolean) => {
+      setState((s) => {
+        const list = s.masterCatalog[sheet] as { id: string; active: boolean }[];
+        return {
+          ...s,
+          masterCatalog: {
+            ...s.masterCatalog,
+            [sheet]: list.map((r) => (r.id === id ? { ...r, active } : r)),
+          },
+        };
+      });
+    },
+    []
+  );
+
+  const upsertSite = useCallback((site: AppState["sites"][number]) => {
+    setState((s) => {
+      const exists = s.sites.some((x) => x.id === site.id);
+      return {
+        ...s,
+        sites: exists
+          ? s.sites.map((x) => (x.id === site.id ? site : x))
+          : [...s.sites, site],
+        auditLog: [
+          makeAudit(s, "master", exists ? "update" : "create", `Site ${site.code}`),
+          ...s.auditLog,
+        ],
+      };
+    });
+  }, []);
 
   const addWageEntry = useCallback((entry: Omit<WageLedgerEntry, "id">) => {
     setState((s) => {
@@ -1406,8 +1596,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const createUser = useCallback((input: Omit<UserAccount, "id">) => {
     let result: { ok: boolean; error?: string; id?: string } = { ok: true };
     setState((s) => {
-      if (s.currentRole !== "super_admin") {
-        result = { ok: false, error: "Only Super Admin can create users" };
+      if (s.currentRole !== "super_admin" && s.currentRole !== "owner") {
+        result = { ok: false, error: "Only Owner or Super Admin can create users" };
         return s;
       }
       if (s.users.some((u) => u.username.toLowerCase() === input.username.toLowerCase())) {
@@ -1441,8 +1631,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const updateUser = useCallback((id: string, patch: Partial<UserAccount>) => {
     let result: { ok: boolean; error?: string } = { ok: true };
     setState((s) => {
-      if (s.currentRole !== "super_admin") {
-        result = { ok: false, error: "Only Super Admin can edit users" };
+      if (s.currentRole !== "super_admin" && s.currentRole !== "owner") {
+        result = { ok: false, error: "Only Owner or Super Admin can edit users" };
         return s;
       }
       const existing = s.users.find((u) => u.id === id);
@@ -1828,6 +2018,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       updateTrade,
       addTrade,
       updateLabourer,
+      addLabourer,
+      upsertContractor,
+      setContractorActive,
+      upsertCatalogItem,
+      upsertMaterial,
+      setCatalogActive,
+      upsertSite,
       addWageEntry,
       acknowledgeFinanceAlert,
       flagFinanceAlertToSic,
@@ -1870,6 +2067,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       updateTrade,
       addTrade,
       updateLabourer,
+      addLabourer,
+      upsertContractor,
+      setContractorActive,
+      upsertCatalogItem,
+      upsertMaterial,
+      setCatalogActive,
+      upsertSite,
       addWageEntry,
       acknowledgeFinanceAlert,
       flagFinanceAlertToSic,

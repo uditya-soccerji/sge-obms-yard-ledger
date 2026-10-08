@@ -17,7 +17,7 @@ export const ROLES: RoleMeta[] = [
     label: "Super Admin",
     short: "SA",
     blurb: "Users & rights, all modules, full audit log.",
-    home: "/admin/users",
+    home: "/home",
     accent: "bg-[var(--sge-accent)]",
   },
   {
@@ -25,7 +25,7 @@ export const ROLES: RoleMeta[] = [
     label: "Owner",
     short: "Owner",
     blurb: "Daily gist, SIC pending, ACPL flags, JMS ratings, finance alerts, audit log.",
-    home: "/owner",
+    home: "/home",
     accent: "bg-[var(--sge-accent)]",
   },
   {
@@ -33,7 +33,7 @@ export const ROLES: RoleMeta[] = [
     label: "Site InCharge (SIC)",
     short: "SIC",
     blurb: "DPR approval inbox, JMS verification, site POC for RIL.",
-    home: "/sic",
+    home: "/home",
     accent: "bg-[var(--sge-steel)]",
   },
   {
@@ -41,7 +41,7 @@ export const ROLES: RoleMeta[] = [
     label: "Admin",
     short: "Admin",
     blurb: "Excel upload & data entry — ACPL, JMS, rates, master labour.",
-    home: "/admin",
+    home: "/home",
     accent: "bg-[var(--sge-slate)]",
   },
   {
@@ -49,7 +49,7 @@ export const ROLES: RoleMeta[] = [
     label: "HR",
     short: "HR",
     blurb: "Attendance, ACPL match resolve, labourer & staff registers.",
-    home: "/hr",
+    home: "/home",
     accent: "bg-[var(--sge-slate)]",
   },
   {
@@ -57,7 +57,7 @@ export const ROLES: RoleMeta[] = [
     label: "Finance",
     short: "Fin",
     blurb: "JMS payments, wage ledger, OT/advances, anomaly flags to SIC.",
-    home: "/finance",
+    home: "/home",
     accent: "bg-[var(--sge-ok)]",
   },
   {
@@ -65,7 +65,7 @@ export const ROLES: RoleMeta[] = [
     label: "Supervisor",
     short: "Supv",
     blurb: "Painting/Blasting or Scaffolding DPR — labour, equipment, plan.",
-    home: "/supervisor",
+    home: "/home",
     accent: "bg-[var(--sge-accent)]",
   },
   {
@@ -73,7 +73,7 @@ export const ROLES: RoleMeta[] = [
     label: "Store Keeper",
     short: "Store",
     blurb: "Store DPR + paint FIM PR→PO→store→issue (941)→consume→reco→942/261.",
-    home: "/store",
+    home: "/home",
     accent: "bg-[var(--sge-steel)]",
   },
   {
@@ -81,7 +81,7 @@ export const ROLES: RoleMeta[] = [
     label: "Safety Supervisor",
     short: "Safety",
     blurb: "Safety DPR (F/HSE/008) — observations, checklist, permits, sign-off.",
-    home: "/safety",
+    home: "/home",
     accent: "bg-[var(--sge-warn)]",
   },
   {
@@ -89,7 +89,7 @@ export const ROLES: RoleMeta[] = [
     label: "Labourer",
     short: "Labour",
     blurb: "Own profile — EP/gate pass, trade, attendance, equipment, wages.",
-    home: "/labourer",
+    home: "/home",
     accent: "bg-[var(--sge-ok)]",
   },
 ];

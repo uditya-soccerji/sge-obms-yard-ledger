@@ -98,7 +98,7 @@ export default function LoginPage() {
       <main className="relative flex min-h-dvh flex-col justify-center px-5 py-12 sm:px-10 lg:px-16">
         <div className="sge-enter mx-auto w-full max-w-md">
           <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--sge-brass-ink)]">
-            SGE OBMS · v7
+            SGE OBMS · v8
           </div>
           <h1 className="font-heading text-4xl font-semibold text-[var(--sge-ink)] md:text-[2.75rem]">
             Sign the yard desk

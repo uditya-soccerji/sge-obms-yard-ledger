@@ -1,3 +1,5 @@
+import type { MasterCatalog } from "./master/types";
+
 export type RoleId =
   | "super_admin"
   | "owner"
@@ -31,7 +33,8 @@ export type ModuleId =
   | "requests"
   | "submissions"
   | "trades"
-  | "rates";
+  | "rates"
+  | "master";
 
 export type PermissionAction =
   | "view"
@@ -134,6 +137,8 @@ export interface TradeDefinition {
   label: string;
   subcategories: TradeSubcategory[];
   active: boolean;
+  /** null = company-wide */
+  siteId?: string | null;
 }
 
 export interface RateLine {
@@ -245,6 +250,7 @@ export interface Labourer {
   gatePass: string;
   siteId: string;
   supervisorId: string;
+  contractorId?: string;
   wageDaily: number;
   equipmentIds: string[];
   active: boolean;
@@ -746,4 +752,6 @@ export interface AppState {
   financeAlerts: FinanceAlert[];
   auditLog: AuditEntry[];
   equipmentRequests: EquipmentRequest[];
+  /** One master store — load once, resolve site-then-company in memory. */
+  masterCatalog: MasterCatalog;
 }
