@@ -664,7 +664,8 @@ export function createSeedState(): AppState {
         password: "hr123",
         name: "S. Patel",
         roles: ["hr"],
-        siteIds: [SITE],
+        // HR covers every site, one at a time (docs §2)
+        siteIds: [...ALL_SITE_IDS],
         plantIds: [],
         staffId: "st-hr",
         permissionOverrides: [],
@@ -1397,7 +1398,8 @@ export function createSeedState(): AppState {
 
 /** v9: per-site demo data — a new key so old browsers load the new seed. */
 /** v10: EP numbers in the PP + 10 digit format (docs §1) */
-export const STORAGE_KEY = "sge-obms-ops-v10-ep";
+/** v11: attendance statuses per docs §4, HR on all sites */
+export const STORAGE_KEY = "sge-obms-ops-v11-att";
 export { SAFETY_ITEMS };
 
 /**

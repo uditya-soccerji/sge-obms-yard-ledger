@@ -13,6 +13,7 @@ import {
 } from "@/components/shared/ui-bits";
 import { Button } from "@/components/ui/button";
 import { useStore } from "@/lib/store";
+import { workedCount } from "@/lib/attendance";
 
 function SicHomePage() {
   const { state } = useStore();
@@ -20,7 +21,7 @@ function SicHomePage() {
   const pending = state.dprDocuments.filter((d) => d.status === "submitted");
   const todayDocs = state.dprDocuments.filter((d) => d.date === today);
   const attend = state.attendance.filter((a) => a.date === today);
-  const present = attend.filter((a) => a.status === "present" || a.status === "half").length;
+  const present = workedCount(attend, today);
   const jmsReview = state.jmsPackages.filter(
     (p) => p.status === "uploaded" || p.status === "sic_review"
   );

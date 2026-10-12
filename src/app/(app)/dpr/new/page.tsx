@@ -47,20 +47,25 @@ function NewDprPage() {
   const allowedTypes = allowedDprSubmitterTypes(state.currentRole, staff);
   const typeLocked = allowedTypes !== "all";
 
-  const defaultSubmitter = useMemo(() => {
-    if (
-      state.currentRole === "supervisor" ||
-      state.currentRole === "store" ||
-      state.currentRole === "safety"
-    ) {
-      return state.currentUserId ?? "st-sup1";
-    }
-    if (defaultType === "store") return "st-store";
-    if (defaultType === "safety") return "st-safety";
-    if (defaultType === "scaffolding") return "st-sup3";
-    return "st-sup1";
-  }, [state.currentRole, state.currentUserId, defaultType]);
+  const site = entrySiteId(state);
+  const fieldRole = state.currentRole === "supervisor" || state.currentRole === "store" || state.currentRole === "safety";
+  /** Staff on this DPR's site who file this type of DPR */
+  const submittersFor = (t: DprSubmitterType) =>
+    state.staff.filter((x) => {
+      if (x.siteId !== site) return false;
+      if (t === "store") return x.role === "store";
+      if (t === "safety") return x.role === "safety" || x.supervisorType === "safety";
+      if (t === "scaffolding") return x.supervisorType === "scaffolding";
+      return x.supervisorType === "painting_blasting";
+    });
+  // Field roles file their own DPR; Admin / Owner pick whose DPR it is (first on this site by default)
+  const defaultSubmitter = useMemo(
+    () => (fieldRole ? state.currentUserId ?? "" : submittersFor(defaultType)[0]?.id ?? ""),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [fieldRole, state.currentUserId, defaultType, site]
+  );
 
+  const [problems, setProblems] = useState<string[]>([]);
   const [submitterType, setSubmitterType] =
     useState<DprSubmitterType>(defaultType);
   const [submitterId, setSubmitterId] = useState(defaultSubmitter);
@@ -77,17 +82,7 @@ function NewDprPage() {
       return;
     }
     setSubmitterType(t);
-    let sid = submitterId;
-    if (
-      state.currentRole === "supervisor" ||
-      state.currentRole === "store" ||
-      state.currentRole === "safety"
-    ) {
-      sid = state.currentUserId ?? sid;
-    } else if (t === "store") sid = "st-store";
-    else if (t === "safety") sid = "st-safety";
-    else if (t === "scaffolding") sid = "st-sup3";
-    else sid = "st-sup1";
+    const sid = fieldRole ? state.currentUserId ?? "" : submittersFor(t)[0]?.id ?? "";
     setSubmitterId(sid);
     setDoc(
       blankDpr({
@@ -98,10 +93,9 @@ function NewDprPage() {
     );
   }
 
-  const [problems, setProblems] = useState<string[]>([]);
-
   function handleSave(andSubmit: boolean) {
     const next = { ...doc, submitterId, submitterType };
+    if (!submitterId) return setProblems(["Pick whose DPR this is (no one on this site files this type yet)"]);
     // Strip wrong-type bodies for safety (no paint fields)
     if (submitterType === "safety") {
       next.paintWork = undefined;
@@ -133,14 +127,7 @@ function NewDprPage() {
     router.push(`/dpr/${next.id}`);
   }
 
-  const submitters = state.staff.filter((s) => {
-    if (submitterType === "store") return s.role === "store";
-    if (submitterType === "safety")
-      return s.role === "safety" || s.supervisorType === "safety";
-    if (submitterType === "scaffolding")
-      return s.supervisorType === "scaffolding";
-    return s.supervisorType === "painting_blasting";
-  });
+  const submitters = submittersFor(submitterType);
 
   const selectableTypes: DprSubmitterType[] =
     allowedTypes === "all"

@@ -20,26 +20,30 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useStore } from "@/lib/store";
+import { Input } from "@/components/ui/input";
+import { ATTENDANCE_OPTIONS, attendanceLabel, workedCount } from "@/lib/attendance";
+import { daysAgo } from "@/lib/today";
 import type { AttendanceStatus } from "@/lib/types";
 
 function HrHomePage() {
   const { state, markAttendance } = useStore();
   const today = todayDate();
   const [msg, setMsg] = useState<string | null>(null);
+  // HR marks today or yesterday (docs §4); correcting a DPR mark needs a note
+  const [day, setDay] = useState(today);
+  const [note, setNote] = useState("");
 
-  const attendToday = state.attendance.filter((a) => a.date === today);
-  const present = attendToday.filter(
-    (a) => a.status === "present" || a.status === "half"
-  ).length;
+  const attendToday = state.attendance.filter((a) => a.date === day);
+  const present = workedCount(state.attendance, today);
   const acplFlags = state.acplMatches.filter(
     (m) => m.resolveStatus === "open" && m.flag !== "match"
   ).length;
   const fromDpr = state.attendance.filter((a) => a.sourceDprId).length;
 
   function setStatus(labourerId: string, status: AttendanceStatus) {
-    markAttendance(labourerId, status);
     const name = state.labourers.find((l) => l.id === labourerId)?.name;
-    setMsg(`Marked ${name} as ${status}`);
+    const r = markAttendance(labourerId, status, note, day);
+    setMsg(r.ok ? `Marked ${name} as ${attendanceLabel(status)} for ${day}` : r.error ?? "Not saved");
   }
 
   return (
@@ -74,6 +78,16 @@ function HrHomePage() {
         <h3 className="mb-3 font-heading text-sm font-bold uppercase tracking-wide text-[var(--sge-ink-3)]">
           Daily attendance entry
         </h3>
+        <div className="mb-3 flex flex-wrap items-end gap-3 text-sm">
+          <label>
+            <span className="text-xs text-[var(--sge-ink-3)]">Date</span>
+            <Input type="date" className="mt-1 w-40" min={daysAgo(1)} max={today} value={day} onChange={(e) => setDay(e.target.value)} />
+          </label>
+          <label className="min-w-[240px] flex-1">
+            <span className="text-xs text-[var(--sge-ink-3)]">Note (required to correct a mark from an approved DPR)</span>
+            <Input className="mt-1" value={note} onChange={(e) => setNote(e.target.value)} placeholder="e.g. gate record shows half day" />
+          </label>
+        </div>
         <div className="space-y-2">
           {state.labourers
             .filter((l) => l.active)
@@ -101,7 +115,9 @@ function HrHomePage() {
                               : "warn"
                         }
                       >
-                        {att.status}
+                        {attendanceLabel(att.status)}
+                        {att.sourceDprId ? " · DPR" : ""}
+                        {att.correctedFrom ? ` (was ${attendanceLabel(att.correctedFrom)})` : ""}
                       </StatusPill>
                     ) : (
                       <StatusPill>unset</StatusPill>
@@ -116,11 +132,9 @@ function HrHomePage() {
                         <SelectValue placeholder="Mark" />
                       </SelectTrigger>
                       <SelectContent>
-                        {(
-                          ["present", "absent", "half", "leave", "off"] as const
-                        ).map((s) => (
-                          <SelectItem key={s} value={s}>
-                            {s}
+                        {ATTENDANCE_OPTIONS.map((o) => (
+                          <SelectItem key={o.value} value={o.value}>
+                            {o.label}
                           </SelectItem>
                         ))}
                       </SelectContent>

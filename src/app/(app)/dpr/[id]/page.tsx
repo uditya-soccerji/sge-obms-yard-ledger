@@ -21,7 +21,8 @@ function DprDetailPage() {
   const params = useParams();
   const id = String(params.id);
   const router = useRouter();
-  const { state, saveDpr, submitDpr, reviewDpr } = useStore();
+  const { state, saveDpr, submitDpr, reviewDpr, unlockDpr } = useStore();
+  const [unlockReason, setUnlockReason] = useState("");
   const original = state.dprDocuments.find((d) => d.id === id);
   const [draft, setDraft] = useState<DprDocument | null>(null);
   const [sicNote, setSicNote] = useState("");
@@ -175,6 +176,36 @@ function DprDetailPage() {
             </Button>
           ) : null}
         </div>
+      ) : null}
+
+      {doc.unlocks?.length ? (
+        <Panel>
+          <div className="text-xs font-semibold uppercase text-[var(--sge-ink-3)]">Unlocked after approval</div>
+          {doc.unlocks.map((u) => (
+            <p key={u.at} className="mt-1 text-sm">{u.at.slice(0, 10)} · {u.by}: {u.reason}</p>
+          ))}
+        </Panel>
+      ) : null}
+
+      {doc.status === "sic_approved" && (state.currentRole === "owner" || state.currentRole === "super_admin") ? (
+        <Panel>
+          <h3 className="mb-2 font-heading text-sm font-bold">Unlock for editing (Owner)</h3>
+          <p className="mb-2 text-xs text-[var(--sge-ink-3)]">The DPR goes back to draft and leaves attendance until it is approved again. The reason is logged.</p>
+          <div className="flex flex-wrap items-end gap-2">
+            <Textarea className="min-w-[260px] flex-1" rows={2} value={unlockReason} onChange={(e) => setUnlockReason(e.target.value)} placeholder="Why it needs changing" />
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                const r = unlockDpr(doc.id, unlockReason);
+                setMsg(r.ok ? "Unlocked — the supervisor can edit and resubmit." : r.error ?? "Unlock blocked");
+                if (r.ok) setUnlockReason("");
+              }}
+            >
+              Unlock DPR
+            </Button>
+          </div>
+        </Panel>
       ) : null}
 
       {canReview ? (

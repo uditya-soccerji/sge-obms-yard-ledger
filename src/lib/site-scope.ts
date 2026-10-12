@@ -7,6 +7,14 @@ export function canSeeAllSites(role: RoleId | null | undefined): boolean {
   return role === "owner" || role === "super_admin";
 }
 
+/**
+ * Roles that work across sites one at a time (docs §2: HR / Finance / Admin
+ * cover all sites; SIC one or more; Owner / Super Admin everything).
+ */
+export function canSwitchSites(role: RoleId | null | undefined): boolean {
+  return role === "super_admin" || role === "owner" || role === "sic" || role === "admin" || role === "finance" || role === "hr";
+}
+
 export function isAllSites(s: Pick<AppState, "currentSiteId">): boolean {
   return s.currentSiteId === ALL_SITES;
 }

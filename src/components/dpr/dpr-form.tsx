@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { today as todayDate } from "@/lib/today";
 import { Panel, StatusPill } from "@/components/shared/ui-bits";
 import { Button } from "@/components/ui/button";
@@ -26,6 +26,7 @@ import type {
   DprSubmitterType,
 } from "@/lib/types";
 import { useStore } from "@/lib/store";
+import { ATTENDANCE_OPTIONS, otHours, timeProblem, WORKING } from "@/lib/attendance";
 
 function uid(prefix: string) {
   return `${prefix}-${Math.random().toString(36).slice(2, 9)}`;
@@ -41,7 +42,8 @@ export function blankDpr(opts: {
     id: uid("dprd"),
     date: todayDate(),
     siteId: opts.siteId,
-    plant: "CPP",
+    // Picked from the site's plant list (docs §3), never assumed
+    plant: "",
     submitterId: opts.submitterId,
     submitterType: opts.submitterType,
     status: "draft",
@@ -56,7 +58,7 @@ export function blankDpr(opts: {
         ? [
             {
               id: uid("pw"),
-              plant: "CPP",
+              plant: "",
               bay: "",
               activity: "painting",
               areaM2: 0,
@@ -70,7 +72,7 @@ export function blankDpr(opts: {
         ? [
             {
               id: uid("sw"),
-              plant: "CPP",
+              plant: "",
               location: "",
               erectM3: 0,
               dismantleM3: 0,
@@ -83,7 +85,7 @@ export function blankDpr(opts: {
     storeBody:
       opts.submitterType === "store"
         ? {
-            stockByPlant: [{ plant: "CPP", paintLitres: 0 }],
+            stockByPlant: [{ plant: "", paintLitres: 0 }],
             issues: [],
             receipts: [],
             sparesMovement: [],
@@ -117,6 +119,9 @@ export function DprForm({
   );
 
   const equipment = state.equipment.filter((e) => e.siteId === value.siteId);
+  // The DPR's site plants (docs §3: every DPR picks one of its site's plants)
+  const plants = state.sites.find((x) => x.id === value.siteId)?.plants ?? [];
+  const supervisors = state.staff.filter((x) => x.role === "supervisor" && x.siteId === value.siteId);
 
   function setMark(labourerId: string, status: AttendanceStatus) {
     const existing = value.labourMarks.find((m) => m.labourerId === labourerId);
@@ -126,10 +131,8 @@ export function DprForm({
             ? {
                 ...m,
                 status,
-                inTime:
-                  status === "present" || status === "half"
-                    ? m.inTime ?? "08:00"
-                    : undefined,
+                inTime: WORKING.includes(status) ? m.inTime ?? "08:00" : undefined,
+                outTime: WORKING.includes(status) ? m.outTime ?? (status === "half" ? "13:00" : "18:00") : undefined,
               }
             : m
         )
@@ -138,11 +141,18 @@ export function DprForm({
           {
             labourerId,
             status,
-            inTime:
-              status === "present" || status === "half" ? "08:00" : undefined,
+            inTime: WORKING.includes(status) ? "08:00" : undefined,
+            outTime: WORKING.includes(status) ? (status === "half" ? "13:00" : "18:00") : undefined,
           },
         ];
     onChange({ ...value, labourMarks });
+  }
+
+  function setTime(labourerId: string, key: "inTime" | "outTime", v: string) {
+    onChange({
+      ...value,
+      labourMarks: value.labourMarks.map((m) => (m.labourerId === labourerId ? { ...m, [key]: v || undefined } : m)),
+    });
   }
 
   function toggleEquipment(equipmentId: string) {
@@ -201,12 +211,15 @@ export function DprForm({
           </div>
           <div>
             <Label>Plant</Label>
-            <Input
-              className="mt-1"
-              disabled={readOnly}
-              value={value.plant}
-              onChange={(e) => onChange({ ...value, plant: e.target.value })}
-            />
+            <select
+                className="mt-1 h-9 w-full rounded-md border border-[var(--sge-line)] bg-[var(--sge-paper)] px-2 text-sm"
+                disabled={readOnly}
+                value={value.plant}
+                onChange={(e) => onChange({ ...value, plant: e.target.value })}
+              >
+                <option value="">Pick plant…</option>
+                {plants.map((p) => <option key={p} value={p}>{p}</option>)}
+              </select>
           </div>
           <div>
             <Label>Type</Label>
@@ -301,26 +314,37 @@ export function DprForm({
                       {l.trade} · {l.epNumber}
                     </div>
                   </div>
-                  <Select
-                    disabled={readOnly}
-                    value={mark?.status ?? ""}
-                    onValueChange={(v) =>
-                      setMark(l.id, v as AttendanceStatus)
-                    }
-                  >
-                    <SelectTrigger className="h-8 w-[130px] text-xs">
-                      <SelectValue placeholder="Mark" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {(["present", "absent", "half", "leave"] as const).map(
-                        (s) => (
-                          <SelectItem key={s} value={s}>
-                            {s}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Select
+                      disabled={readOnly}
+                      value={mark?.status ?? ""}
+                      onValueChange={(v) =>
+                        setMark(l.id, v as AttendanceStatus)
+                      }
+                    >
+                      <SelectTrigger className="h-8 w-[130px] text-xs">
+                        <SelectValue placeholder="Mark" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {ATTENDANCE_OPTIONS.map((o) => (
+                          <SelectItem key={o.value} value={o.value}>
+                            {o.label}
                           </SelectItem>
-                        )
-                      )}
-                    </SelectContent>
-                  </Select>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    {mark && WORKING.includes(mark.status) ? (
+                      <>
+                        <Input aria-label={`In-time ${l.name}`} type="time" disabled={readOnly} className="h-8 w-[104px] text-xs" value={mark.inTime ?? ""} onChange={(e) => setTime(l.id, "inTime", e.target.value)} />
+                        <Input aria-label={`Out-time ${l.name}`} type="time" disabled={readOnly} className="h-8 w-[104px] text-xs" value={mark.outTime ?? ""} onChange={(e) => setTime(l.id, "outTime", e.target.value)} />
+                        {timeProblem(mark.inTime, mark.outTime) ? (
+                          <span className="text-[11px] text-[var(--sge-crit)]">{timeProblem(mark.inTime, mark.outTime)}</span>
+                        ) : otHours(mark.inTime, mark.outTime) > 0 ? (
+                          <span className="text-[11px] font-semibold text-[var(--sge-warn)]">OT {otHours(mark.inTime, mark.outTime)} h</span>
+                        ) : null}
+                      </>
+                    ) : null}
+                  </div>
                 </div>
               );
             })}
@@ -402,7 +426,7 @@ export function DprForm({
             {value.requests.map((r, idx) => (
               <div
                 key={r.id}
-                className="grid gap-2 rounded-md border border-[var(--sge-line)] p-2 sm:grid-cols-4"
+                className="grid gap-2 rounded-md border border-[var(--sge-line)] p-2 sm:grid-cols-5"
               >
                 <Select
                   disabled={readOnly}
@@ -444,15 +468,22 @@ export function DprForm({
                 <Input
                   disabled={readOnly}
                   type="number"
+                  min="1"
                   placeholder="Qty"
                   value={r.qty ?? ""}
                   onChange={(e) => {
+                    const n = Number(e.target.value);
                     const requests = value.requests.map((x, i) =>
-                      i === idx ? { ...x, qty: Number(e.target.value) } : x
+                      i === idx ? { ...x, qty: e.target.value && n > 0 ? n : undefined } : x
                     );
                     onChange({ ...value, requests });
                   }}
                 />
+                {!readOnly ? (
+                  <Button type="button" size="sm" variant="ghost" onClick={() => onChange({ ...value, requests: value.requests.filter((_, i) => i !== idx) })}>
+                    Remove
+                  </Button>
+                ) : null}
               </div>
             ))}
           </div>
@@ -462,6 +493,7 @@ export function DprForm({
       {value.submitterType === "painting_blasting" && value.paintWork ? (
         <PaintWorkEditor
           lines={value.paintWork}
+          plants={plants}
           readOnly={readOnly}
           onChange={(paintWork) => onChange({ ...value, paintWork })}
         />
@@ -470,6 +502,7 @@ export function DprForm({
       {value.submitterType === "scaffolding" && value.scaffoldWork ? (
         <ScaffoldWorkEditor
           lines={value.scaffoldWork}
+          plants={plants}
           readOnly={readOnly}
           onChange={(scaffoldWork) => onChange({ ...value, scaffoldWork })}
         />
@@ -494,10 +527,11 @@ export function DprForm({
             </div>
             {value.storeBody.stockByPlant.map((row, idx) => (
               <div key={idx} className="grid grid-cols-2 gap-2">
-                <Input
-                  disabled={readOnly}
-                  value={row.plant}
-                  onChange={(e) => {
+                <select
+                className="mt-1 h-9 w-full rounded-md border border-[var(--sge-line)] bg-[var(--sge-paper)] px-2 text-sm"
+                disabled={readOnly}
+                value={row.plant}
+                onChange={(e) => {
                     const stockByPlant = value.storeBody!.stockByPlant.map(
                       (r, i) =>
                         i === idx ? { ...r, plant: e.target.value } : r
@@ -507,7 +541,10 @@ export function DprForm({
                       storeBody: { ...value.storeBody!, stockByPlant },
                     });
                   }}
-                />
+              >
+                <option value="">Pick plant…</option>
+                {plants.map((p) => <option key={p} value={p}>{p}</option>)}
+              </select>
                 <Input
                   disabled={readOnly}
                   type="number"
@@ -528,6 +565,14 @@ export function DprForm({
               </div>
             ))}
           </div>
+          {!readOnly ? (
+            <StoreLines
+              supervisors={supervisors.map((x) => ({ id: x.id, name: x.name }))}
+              onIssue={(issue) => onChange({ ...value, storeBody: { ...value.storeBody!, issues: [...value.storeBody!.issues, issue] } })}
+              onReceipt={(receipt) => onChange({ ...value, storeBody: { ...value.storeBody!, receipts: [...value.storeBody!.receipts, receipt] } })}
+              onAddStockRow={() => onChange({ ...value, storeBody: { ...value.storeBody!, stockByPlant: [...value.storeBody!.stockByPlant, { plant: "", paintLitres: 0 }] } })}
+            />
+          ) : null}
           <div className="space-y-1 text-sm text-[var(--sge-ink-2)]">
             <div>
               Issues: {value.storeBody.issues.length} · Receipts:{" "}
@@ -537,6 +582,11 @@ export function DprForm({
             {value.storeBody.issues.map((iss, i) => (
               <div key={i} className="font-mono text-xs text-[var(--sge-ink-3)]">
                 ISSUE {iss.qtyLitres}L {iss.sapCode} → {iss.toSupervisorId}
+              </div>
+            ))}
+            {value.storeBody.receipts.map((rc, i) => (
+              <div key={`rc-${i}`} className="font-mono text-xs text-[var(--sge-ink-3)]">
+                RECEIPT {rc.qtyLitres}L {rc.sapCode}
               </div>
             ))}
             {value.storeBody.sparesMovement.map((sp, i) => (
@@ -553,10 +603,12 @@ export function DprForm({
 
 function PaintWorkEditor({
   lines,
+  plants,
   onChange,
   readOnly,
 }: {
   lines: DprPaintWorkLine[];
+  plants: string[];
   onChange: (lines: DprPaintWorkLine[]) => void;
   readOnly?: boolean;
 }) {
@@ -576,7 +628,7 @@ function PaintWorkEditor({
                 ...lines,
                 {
                   id: uid("pw"),
-                  plant: "CPP",
+                  plant: lines[lines.length - 1]?.plant ?? "",
                   bay: "",
                   activity: "painting",
                   areaM2: 0,
@@ -596,6 +648,18 @@ function PaintWorkEditor({
             key={line.id}
             className="grid gap-2 rounded-md border border-[var(--sge-line)] p-3 sm:grid-cols-3"
           >
+            <div>
+              <Label>Plant</Label>
+              <select
+                className="mt-1 h-9 w-full rounded-md border border-[var(--sge-line)] bg-[var(--sge-paper)] px-2 text-sm"
+                disabled={readOnly}
+                value={line.plant}
+                onChange={(e) => onChange(lines.map((l, i) => (i === idx ? { ...l, plant: e.target.value } : l)))}
+              >
+                <option value="">Pick plant…</option>
+                {plants.map((p) => <option key={p} value={p}>{p}</option>)}
+              </select>
+            </div>
             <div>
               <Label>Bay / location</Label>
               <Input
@@ -682,6 +746,13 @@ function PaintWorkEditor({
                 }}
               />
             </div>
+            {!readOnly && lines.length > 1 ? (
+              <div className="flex items-end">
+                <Button type="button" size="sm" variant="ghost" onClick={() => onChange(lines.filter((_, i) => i !== idx))}>
+                  Remove line
+                </Button>
+              </div>
+            ) : null}
           </div>
         ))}
       </div>
@@ -691,10 +762,12 @@ function PaintWorkEditor({
 
 function ScaffoldWorkEditor({
   lines,
+  plants,
   onChange,
   readOnly,
 }: {
   lines: DprScaffoldWorkLine[];
+  plants: string[];
   onChange: (lines: DprScaffoldWorkLine[]) => void;
   readOnly?: boolean;
 }) {
@@ -714,7 +787,7 @@ function ScaffoldWorkEditor({
                 ...lines,
                 {
                   id: uid("sw"),
-                  plant: "CPP",
+                  plant: lines[lines.length - 1]?.plant ?? "",
                   location: "",
                   erectM3: 0,
                   dismantleM3: 0,
@@ -732,7 +805,19 @@ function ScaffoldWorkEditor({
           key={line.id}
           className="mb-3 grid gap-2 rounded-md border border-[var(--sge-line)] p-3 sm:grid-cols-4"
         >
-          <div className="sm:col-span-2">
+          <div>
+            <Label>Plant</Label>
+            <select
+                className="mt-1 h-9 w-full rounded-md border border-[var(--sge-line)] bg-[var(--sge-paper)] px-2 text-sm"
+                disabled={readOnly}
+                value={line.plant}
+                onChange={(e) => onChange(lines.map((l, i) => (i === idx ? { ...l, plant: e.target.value } : l)))}
+              >
+                <option value="">Pick plant…</option>
+                {plants.map((p) => <option key={p} value={p}>{p}</option>)}
+              </select>
+          </div>
+          <div>
             <Label>Location</Label>
             <Input
               className="mt-1"
@@ -751,6 +836,7 @@ function ScaffoldWorkEditor({
               ["erectM3", "Erect m³"],
               ["dismantleM3", "Dismantle m³"],
               ["standingM3", "Standing m³"],
+              ["liftingTrips", "Lifting & shifting (trips)"],
             ] as const
           ).map(([key, label]) => (
             <div key={key}>
@@ -759,7 +845,7 @@ function ScaffoldWorkEditor({
                 type="number"
                 className="mt-1"
                 disabled={readOnly}
-                value={line[key]}
+                value={line[key] ?? 0}
                 onChange={(e) => {
                   const next = lines.map((l, i) =>
                     i === idx ? { ...l, [key]: Number(e.target.value) } : l
@@ -769,8 +855,65 @@ function ScaffoldWorkEditor({
               />
             </div>
           ))}
+          {!readOnly && lines.length > 1 ? (
+            <div className="flex items-end">
+              <Button type="button" size="sm" variant="ghost" onClick={() => onChange(lines.filter((_, i) => i !== idx))}>
+                Remove line
+              </Button>
+            </div>
+          ) : null}
         </div>
       ))}
     </Panel>
+  );
+}
+
+/** Store DPR: add a stock row, a paint issue to a supervisor, or a receipt into the store. */
+function StoreLines({
+  supervisors,
+  onIssue,
+  onReceipt,
+  onAddStockRow,
+}: {
+  supervisors: { id: string; name: string }[];
+  onIssue: (issue: { toSupervisorId: string; sapCode: string; qtyLitres: number }) => void;
+  onReceipt: (receipt: { sapCode: string; qtyLitres: number }) => void;
+  onAddStockRow: () => void;
+}) {
+  const [kind, setKind] = useState<"issue" | "receipt">("issue");
+  const [sap, setSap] = useState("");
+  const [litres, setLitres] = useState("");
+  const [to, setTo] = useState("");
+  const toId = supervisors.some((x) => x.id === to) ? to : supervisors[0]?.id ?? "";
+  const ok = sap.trim() && Number(litres) > 0 && (kind === "receipt" || toId);
+  return (
+    <div className="mb-3 flex flex-wrap items-end gap-2 rounded-md border border-dashed border-[var(--sge-line)] p-2 text-sm">
+      <Button type="button" size="sm" variant="ghost" onClick={onAddStockRow}>Add stock row</Button>
+      <select className="h-8 rounded-md border border-[var(--sge-line)] bg-[var(--sge-paper)] px-2 text-xs" value={kind} onChange={(e) => setKind(e.target.value as "issue" | "receipt")}>
+        <option value="issue">Issue to supervisor</option>
+        <option value="receipt">Receipt into store</option>
+      </select>
+      <Input className="h-8 w-36" placeholder="SAP code" value={sap} onChange={(e) => setSap(e.target.value)} />
+      <Input className="h-8 w-24" type="number" min="0" placeholder="Litres" value={litres} onChange={(e) => setLitres(e.target.value)} />
+      {kind === "issue" ? (
+        <select className="h-8 rounded-md border border-[var(--sge-line)] bg-[var(--sge-paper)] px-2 text-xs" value={toId} onChange={(e) => setTo(e.target.value)}>
+          {supervisors.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+        </select>
+      ) : null}
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        disabled={!ok}
+        onClick={() => {
+          if (kind === "issue") onIssue({ toSupervisorId: toId, sapCode: sap.trim(), qtyLitres: Number(litres) });
+          else onReceipt({ sapCode: sap.trim(), qtyLitres: Number(litres) });
+          setSap("");
+          setLitres("");
+        }}
+      >
+        Add {kind}
+      </Button>
+    </div>
   );
 }

@@ -17,6 +17,7 @@ import { SiteComparison } from "@/components/owner/site-comparison";
 import { MoneyCard } from "@/components/work/money-card";
 import { ALL_SITES } from "@/lib/site-scope";
 import { useStore } from "@/lib/store";
+import { workedCount } from "@/lib/attendance";
 
 function OwnerHomePage() {
   const { state } = useStore();
@@ -25,7 +26,7 @@ function OwnerHomePage() {
   const siteName = state.sites.find((s) => s.id === state.currentSiteId)?.name;
   const siteCode = (id: string) => state.sites.find((s) => s.id === id)?.code ?? "";
   const attendToday = state.attendance.filter((a) => a.date === today);
-  const present = attendToday.filter((a) => a.status === "present" || a.status === "half").length;
+  const present = workedCount(attendToday, today);
   const totalActive = state.labourers.filter((l) => l.active).length;
   const todayFin = state.finance.filter((f) => f.date === today);
   const expenseToday = todayFin.filter((f) => f.kind === "expense").reduce((s, f) => s + f.amount, 0);

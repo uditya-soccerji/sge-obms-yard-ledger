@@ -37,11 +37,14 @@ function GlanceField({
   value,
   onChange,
   readOnly,
+  computed,
 }: {
   label: string;
   value: number;
   onChange: (n: number) => void;
   readOnly?: boolean;
+  /** Worked out from the observations below, so it can't be typed over */
+  computed?: boolean;
 }) {
   return (
     <div>
@@ -51,7 +54,8 @@ function GlanceField({
       <Input
         type="number"
         className="mt-0.5 h-8"
-        disabled={readOnly}
+        disabled={readOnly || computed}
+        title={computed ? "Counted from the observations in section A" : undefined}
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
       />
@@ -218,38 +222,43 @@ export function SafetyDprForm({
           />
           <GlanceField
             label="SAFE obs"
+            computed
             value={body.glance.safeObs}
             readOnly={readOnly}
             onChange={(n) => setGlance({ ...body.glance, safeObs: n })}
           />
           <GlanceField
             label="UNSAFE obs"
+            computed
             value={body.glance.unsafeObs}
             readOnly={readOnly}
             onChange={(n) => setGlance({ ...body.glance, unsafeObs: n })}
           />
           <GlanceField
             label="Closed"
+            computed
             value={body.glance.closed}
             readOnly={readOnly}
             onChange={(n) => setGlance({ ...body.glance, closed: n })}
           />
           <GlanceField
             label="Still open"
+            computed
             value={body.glance.stillOpen}
             readOnly={readOnly}
             onChange={(n) => setGlance({ ...body.glance, stillOpen: n })}
           />
           <GlanceField
             label="Late >10 days"
+            computed
             value={body.glance.lateOver10Days}
             readOnly={readOnly}
             onChange={(n) => setGlance({ ...body.glance, lateOver10Days: n })}
           />
         </div>
         <p className="mt-2 text-xs text-[var(--sge-ink-3)]">
-          SAFE / UNSAFE / closed / open counts auto-update when you edit Section A
-          observations (manual override still allowed).
+          SAFE / UNSAFE / closed / open / late counts are counted from the Section A
+          observations, so they always match them.
         </p>
       </Panel>
 

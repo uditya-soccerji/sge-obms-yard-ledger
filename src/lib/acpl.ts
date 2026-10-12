@@ -8,6 +8,7 @@ import type {
   Labourer,
 } from "./types";
 import { normalizeEp, sameName } from "./ep";
+import { WORKING } from "./attendance";
 
 function uid(prefix: string) {
   return `${prefix}-${Math.random().toString(36).slice(2, 9)}`;
@@ -20,8 +21,6 @@ function minutes(t?: string): number | null {
   return Number(m[1]) * 60 + Number(m[2]);
 }
 
-/** Statuses that mean the labourer worked that day. */
-const WORKING: AttendanceStatus[] = ["present", "half"];
 
 /**
  * One labourer-day, DPR vs gate (docs §12):

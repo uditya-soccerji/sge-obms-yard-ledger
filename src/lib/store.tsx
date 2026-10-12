@@ -21,7 +21,7 @@ import { effectivePermission } from "./permissions";
 import { PAINT_STAGE_ORDER } from "./paint-lifecycle";
 import { resolveActivityRate, withSupersession } from "./rate-book";
 import { roleMeta } from "./roles";
-import { migrateLegacySafetyBody } from "./safety-dpr";
+import { migrateLegacySafetyBody, SAFETY_CHECKLIST_SEED } from "./safety-dpr";
 import { seedMasterCatalog } from "./master/seed-catalog";
 import { supabase } from "./supabase/client";
 import {
@@ -37,9 +37,12 @@ import {
 } from "./supabase/remote";
 import type { CatalogItem, Contractor, MasterCatalog, MaterialItem } from "./master/types";
 import { createSeedState, STORAGE_KEY } from "./seed";
-import { ALL_SITES, canSeeAllSites, entrySiteId, scopeState } from "./site-scope";
+import { ALL_SITES, canSeeAllSites, canSwitchSites, entrySiteId, scopeState } from "./site-scope";
+import { daysAgo } from "./today";
+import { WORKING } from "./attendance";
 import { checkSeat, checkSites } from "./users";
 import type {
+  AcplMatchRow,
   AcplPunchRow,
   AcplResolveStatus,
   AppState,
@@ -85,11 +88,13 @@ interface StoreApi {
   switchRole: (role: RoleId) => void;
   logout: () => void;
   resetSeed: () => void;
+  /** HR marks or corrects attendance for today or yesterday; a correction needs a note */
   markAttendance: (
     labourerId: string,
     status: AttendanceStatus,
-    note?: string
-  ) => void;
+    note?: string,
+    date?: string
+  ) => { ok: boolean; error?: string };
   /** siteId defaults to the entry site (active site, or the All sites pick). */
   addFinance: (
     entry: Omit<FinanceEntry, "id" | "siteId" | "enteredBy"> & { siteId?: string }
@@ -121,6 +126,10 @@ interface StoreApi {
   saveDpr: (doc: DprDocument) => { ok: boolean; error?: string };
   submitDpr: (id: string) => void;
   reviewDpr: (id: string, decision: "sic_approved" | "sic_rejected", note: string) => { ok: boolean; error?: string };
+  /** Owner / Super Admin reopen an approved DPR for editing, with a logged reason */
+  unlockDpr: (id: string, reason: string) => { ok: boolean; error?: string };
+  /** Today's safety checklist for a site, created from the F/HSE/008 list when missing */
+  openSafetyDay: (siteId: string) => void;
   uploadAcplText: (text: string, date: string, source: "upload" | "paste") => number;
   runAcplMatch: (date: string) => number;
   resolveAcplFlag: (
@@ -289,6 +298,9 @@ function migrateState(parsed: Partial<AppState>): AppState {
     users,
     auditLog: parsed.auditLog ?? seed.auditLog,
     equipmentRequests: parsed.equipmentRequests ?? seed.equipmentRequests,
+    attendance: (parsed.attendance ?? seed.attendance).map((a) =>
+      (a.status as string) === "off" ? { ...a, status: "weekly_off" as const } : a
+    ),
     dprDocuments: (parsed.dprDocuments ?? seed.dprDocuments).map((d) =>
       d.submitterType === "safety" && d.safetyBody
         ? {
@@ -509,7 +521,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     let result:
       | { ok: true; home: string }
       | { ok: false; error: string } = { ok: false, error: "Unknown error" };
-    setState((s) => {
+    // Run the update on the current state first, so the result returned is the real outcome
+    // (React may apply the queued update later); then queue the same update
+    const step = (s: AppState): AppState => {
       if (s.impersonatorAccountId) {
         result = {
           ok: false,
@@ -587,7 +601,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         ...next,
         auditLog: [startEntry, ...s.auditLog],
       };
-    });
+    };
+    step(stateRef.current);
+    setState(step);
     return result;
   }, []);
 
@@ -595,7 +611,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     let result:
       | { ok: true; home: string }
       | { ok: false; error: string } = { ok: false, error: "Unknown error" };
-    setState((s) => {
+    // Run the update on the current state first, so the result returned is the real outcome
+    // (React may apply the queued update later); then queue the same update
+    const step = (s: AppState): AppState => {
       if (!s.impersonatorAccountId) {
         result = { ok: false, error: "Not impersonating" };
         return s;
@@ -638,7 +656,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         ...next,
         auditLog: [endEntry, ...s.auditLog],
       };
-    });
+    };
+    step(stateRef.current);
+    setState(step);
     return result;
   }, []);
 
@@ -649,28 +669,44 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const markAttendance = useCallback(
-    (labourerId: string, status: AttendanceStatus, note?: string) => {
+    (labourerId: string, status: AttendanceStatus, note?: string, date?: string) => {
+      const day = date ?? todayDate();
+      const cur = stateRef.current;
+      // HR keeps the register; supervisors mark attendance on their DPR, which SIC approves
+      if (!can(cur, "hr", "update")) return DENIED;
+      if (day > todayDate() || day < daysAgo(1)) return { ok: false, error: "Attendance can be marked for today or yesterday only (docs §4)" };
+      const existing = cur.attendance.find((a) => a.labourerId === labourerId && a.date === day);
+      if (existing?.sourceDprId && !note?.trim()) {
+        return { ok: false, error: "This mark came from an SIC-approved DPR — add a note to correct it" };
+      }
       setState((s) => {
-        if (!can(s, "hr", "update") && !can(s, "supervisor", "update")) return s;
-        const today = todayDate();
-        const existing = s.attendance.find(
-          (a) => a.labourerId === labourerId && a.date === today
-        );
+        const prev = s.attendance.find((a) => a.labourerId === labourerId && a.date === day);
         const record: AttendanceRecord = {
-          id: existing?.id ?? uid("att"),
-          date: today,
+          id: prev?.id ?? uid("att"),
+          date: day,
           labourerId,
           status,
-          inTime: status === "present" || status === "half" ? "08:00" : undefined,
+          inTime: WORKING.includes(status) ? prev?.inTime ?? "08:00" : undefined,
+          outTime: WORKING.includes(status) ? prev?.outTime : undefined,
           markedBy: s.currentUserId ?? "system",
           siteId: s.labourers.find((l) => l.id === labourerId)?.siteId ?? entrySiteId(s),
-          note,
+          note: note?.trim() || prev?.note,
+          // A correction keeps the DPR link and remembers what the DPR said
+          sourceDprId: prev?.sourceDprId,
+          correctedFrom: prev?.sourceDprId ? prev.correctedFrom ?? prev.status : undefined,
         };
-        const attendance = existing
-          ? s.attendance.map((a) => (a.id === existing.id ? record : a))
-          : [...s.attendance, record];
-        return { ...s, attendance };
+        const attendance = prev ? s.attendance.map((a) => (a.id === prev.id ? record : a)) : [...s.attendance, record];
+        const next = { ...s, attendance };
+        const name = s.labourers.find((l) => l.id === labourerId)?.name ?? labourerId;
+        return {
+          ...next,
+          auditLog: [
+            makeAudit(next, "hr", prev ? "update" : "create", `Attendance ${name} ${day}: ${prev ? `${prev.status} → ` : ""}${status}${note?.trim() ? ` · ${note.trim()}` : ""}`),
+            ...s.auditLog,
+          ],
+        };
       });
+      return { ok: true };
     },
     []
   );
@@ -810,7 +846,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const saveDpr = useCallback((doc: DprDocument) => {
     let result: { ok: boolean; error?: string } = { ok: true };
-    setState((s) => {
+    // Run the update on the current state first, so the result returned is the real outcome
+    // (React may apply the queued update later); then queue the same update
+    const step = (s: AppState): AppState => {
       if (!can(s, "dpr", "create") && !can(s, "dpr", "update")) {
         result = DENIED;
         return s;
@@ -860,7 +898,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           ...s.auditLog,
         ],
       };
-    });
+    };
+    step(stateRef.current);
+    setState(step);
     return result;
   }, []);
 
@@ -958,10 +998,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             doc.labourMarks,
             s.currentUserId ?? "st-sic"
           );
+          // The approved DPR replaces manual marks for those people, but another
+          // approved DPR's marks stay: a split day across two supervisors (docs §4)
           const keys = new Set(derived.map((a) => `${a.date}:${a.labourerId}`));
           attendance = [
             ...derived,
-            ...attendance.filter((a) => !keys.has(`${a.date}:${a.labourerId}`)),
+            ...attendance.filter((a) => a.sourceDprId || !keys.has(`${a.date}:${a.labourerId}`)),
           ];
         }
 
@@ -985,6 +1027,58 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     []
   );
 
+  const unlockDpr = useCallback((id: string, reason: string) => {
+    const cur = stateRef.current;
+    if (cur.currentRole !== "owner" && cur.currentRole !== "super_admin") return { ok: false, error: "Only the Owner or Super Admin can unlock an approved DPR" };
+    const doc = cur.dprDocuments.find((d) => d.id === id);
+    if (!doc || doc.status !== "sic_approved") return { ok: false, error: "Only an approved DPR can be unlocked" };
+    if (!reason.trim()) return { ok: false, error: "Give the reason for unlocking (it's logged)" };
+    const account = cur.users.find((u) => u.id === cur.currentAccountId);
+    setState((s) => {
+      const d = s.dprDocuments.find((x) => x.id === id);
+      if (!d || d.status !== "sic_approved") return s;
+      const at = new Date().toISOString();
+      const next = {
+        ...s,
+        dprDocuments: s.dprDocuments.map((x) =>
+          x.id === id
+            ? { ...x, status: "draft" as DprStatus, updatedAt: at, unlocks: [...(x.unlocks ?? []), { by: account?.name ?? "Owner", at, reason: reason.trim() }] }
+            : x
+        ),
+        // Attendance taken from it goes until it is approved again
+        attendance: s.attendance.filter((a) => a.sourceDprId !== id),
+      };
+      return { ...next, auditLog: [makeAudit(next, "dpr", "unlock", `${id} · ${reason.trim()}`, d.plant), ...s.auditLog] };
+    });
+    return { ok: true };
+  }, []);
+
+  const openSafetyDay = useCallback((siteId: string) => {
+    const day = todayDate();
+    if (stateRef.current.safetyDays.some((d) => d.siteId === siteId && d.date === day)) return;
+    if (!can(stateRef.current, "safety", "update")) return;
+    setState((s) =>
+      s.safetyDays.some((d) => d.siteId === siteId && d.date === day)
+        ? s
+        : {
+            ...s,
+            safetyDays: [
+              {
+                id: uid("sd"),
+                date: day,
+                officerId: s.currentUserId ?? "st-safety",
+                siteId,
+                items: SAFETY_CHECKLIST_SEED.map((row) => ({ id: row.id, label: row.label, checked: false })),
+                observations: "",
+                incidents: "Nil",
+                signed: false,
+              },
+              ...s.safetyDays,
+            ],
+          }
+    );
+  }, []);
+
   const uploadAcplText = useCallback(
     (text: string, date: string, source: "upload" | "paste") => {
       if (!can(stateRef.current, "acpl", "upload")) return 0;
@@ -995,7 +1089,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           id: uid("acpl"),
           source,
         }));
-        return { ...s, acplPunches: [...punches, ...s.acplPunches] };
+        // Uploading a day again replaces that day's punches (docs §13), never duplicates them
+        const dates = new Set(punches.map((p) => p.date));
+        return { ...s, acplPunches: [...punches, ...s.acplPunches.filter((p) => !dates.has(p.date))] };
       });
       return parsed.length;
     },
@@ -1005,15 +1101,23 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const runAcplMatch = useCallback((date: string) => {
     let count = 0;
     if (!can(stateRef.current, "acpl", "upload") && !can(stateRef.current, "acpl", "approve")) return 0;
-    setState((s) => {
-      const matches = matchAcplAgainstApproved(s, s.acplPunches, date);
+    // Run the update on the current state first, so the result returned is the real outcome
+    // (React may apply the queued update later); then queue the same update
+    const step = (s: AppState): AppState => {
+      // A flag someone already resolved stays resolved unless the data behind it changed
+      const resolved = s.acplMatches.filter((m) => m.date === date && m.resolveStatus !== "open");
+      const same = (a: AcplMatchRow, b: AcplMatchRow) =>
+        a.epNumber === b.epNumber && a.flag === b.flag && a.dprStatus === b.dprStatus && a.acplInTime === b.acplInTime && a.acplOutTime === b.acplOutTime;
+      const matches = matchAcplAgainstApproved(s, s.acplPunches, date).filter((m) => !resolved.some((r) => same(r, m)));
       count = matches.length;
       // Replace open matches for that date
       const kept = s.acplMatches.filter(
         (m) => m.date !== date || m.resolveStatus !== "open"
       );
       return { ...s, acplMatches: [...matches, ...kept] };
-    });
+    };
+    step(stateRef.current);
+    setState(step);
     return count;
   }, []);
 
@@ -1025,17 +1129,24 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       opts?: { sicOverride?: boolean }
     ) => {
       let result: { ok: boolean; error?: string } = { ok: true };
-      setState((s) => {
+      // Run the update on the current state first, so the result returned is the real outcome
+      // (React may apply the queued update later); then queue the same update
+      const step = (s: AppState): AppState => {
         const role = s.currentRole;
-        const canHr = role === "hr" || role === "super_admin";
+        // docs §12: Admin (data operator) resolves, HR too; SIC can override with a reason
+        const canResolve = role === "admin" || role === "hr" || role === "super_admin";
         const canSicOverride =
           opts?.sicOverride &&
           (role === "sic" || role === "super_admin" || role === "owner");
-        if (!canHr && !canSicOverride) {
+        if (!canResolve && !canSicOverride) {
           result = {
             ok: false,
-            error: "ACPL flags: HR resolves; SIC may override (12C).",
+            error: "ACPL flags: Admin or HR resolves; SIC may override.",
           };
+          return s;
+        }
+        if ((opts?.sicOverride || status === "dismissed") && !note?.trim()) {
+          result = { ok: false, error: "Give the reason (it's kept with the flag)" };
           return s;
         }
         const match = s.acplMatches.find((m) => m.id === id);
@@ -1056,7 +1167,25 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             : m
         );
         let attendance = s.attendance;
-        if (match.labourerId && status === "resolved_acpl") {
+        const hasRecord = s.attendance.some((a) => a.labourerId === match.labourerId && a.date === match.date);
+        if (match.labourerId && status === "resolved_acpl" && !hasRecord) {
+          // Gate punch with no attendance yet (acpl_only): the gate wins, so add it (docs §12)
+          attendance = [
+            ...attendance,
+            {
+              id: uid("att"),
+              date: match.date,
+              labourerId: match.labourerId,
+              status: "present",
+              inTime: match.acplInTime,
+              outTime: match.acplOutTime,
+              markedBy: s.currentUserId ?? "admin",
+              siteId: s.labourers.find((l) => l.id === match.labourerId)?.siteId ?? entrySiteId(s),
+              note: note ?? "From ACPL (resolved)",
+              reconciled: true,
+            },
+          ];
+        } else if (match.labourerId && status === "resolved_acpl") {
           attendance = attendance.map((a) =>
             a.labourerId === match.labourerId && a.date === match.date
               ? {
@@ -1089,7 +1218,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             ...s.auditLog,
           ],
         };
-      });
+      };
+      step(stateRef.current);
+      setState(step);
       return result;
     },
     []
@@ -1445,13 +1576,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const s = stateRef.current;
     const account = s.users.find((u) => u.id === s.currentAccountId);
     if (!account) return { ok: false as const, error: "Not signed in" };
-    const canSwitch =
-      s.currentRole === "super_admin" ||
-      s.currentRole === "owner" ||
-      s.currentRole === "sic" ||
-      s.currentRole === "admin" ||
-      s.currentRole === "finance";
-    if (!canSwitch) {
+    if (!canSwitchSites(s.currentRole)) {
       return { ok: false as const, error: "Site switch not allowed for this role" };
     }
     if (siteId === ALL_SITES) {
@@ -1825,7 +1950,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const createUserLocal = useCallback((input: Omit<UserAccount, "id">) => {
     let result: { ok: boolean; error?: string; id?: string } = { ok: true };
-    setState((s) => {
+    // Run the update on the current state first, so the result returned is the real outcome
+    // (React may apply the queued update later); then queue the same update
+    const step = (s: AppState): AppState => {
       if (s.currentRole !== "super_admin" && s.currentRole !== "owner") {
         result = { ok: false, error: "Only Owner or Super Admin can create users" };
         return s;
@@ -1855,13 +1982,17 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           ...s.auditLog,
         ],
       };
-    });
+    };
+    step(stateRef.current);
+    setState(step);
     return result;
   }, []);
 
   const updateUserLocal = useCallback((id: string, patch: Partial<UserAccount>) => {
     let result: { ok: boolean; error?: string } = { ok: true };
-    setState((s) => {
+    // Run the update on the current state first, so the result returned is the real outcome
+    // (React may apply the queued update later); then queue the same update
+    const step = (s: AppState): AppState => {
       if (s.currentRole !== "super_admin" && s.currentRole !== "owner") {
         result = { ok: false, error: "Only Owner or Super Admin can edit users" };
         return s;
@@ -1903,7 +2034,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           ...s.auditLog,
         ],
       };
-    });
+    };
+    step(stateRef.current);
+    setState(step);
     return result;
   }, []);
 
@@ -2305,6 +2438,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       saveDpr,
       submitDpr,
       reviewDpr,
+      unlockDpr,
+      openSafetyDay,
       uploadAcplText,
       runAcplMatch,
       resolveAcplFlag,
@@ -2358,6 +2493,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       saveDpr,
       submitDpr,
       reviewDpr,
+      unlockDpr,
+      openSafetyDay,
       uploadAcplText,
       runAcplMatch,
       resolveAcplFlag,

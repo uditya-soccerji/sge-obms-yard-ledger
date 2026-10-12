@@ -157,7 +157,8 @@ export interface RateLine {
   note?: string;
 }
 
-export type AttendanceStatus = "present" | "absent" | "half" | "leave" | "off";
+/** docs §4: Present, Half day, Absent, Leave, Weekly off, Overtime ("off" from older data reads as weekly_off) */
+export type AttendanceStatus = "present" | "absent" | "half" | "leave" | "weekly_off" | "overtime";
 
 /**
  * Paint FIM kanban (8 stages).
@@ -271,6 +272,8 @@ export interface AttendanceRecord {
   /** Set when derived from an SIC-approved DPR */
   sourceDprId?: string;
   reconciled?: boolean;
+  /** HR correction of a DPR-derived mark: what it was before (the DPR link stays) */
+  correctedFrom?: AttendanceStatus;
 }
 
 export interface PaintStockLine {
@@ -369,6 +372,8 @@ export interface DprScaffoldWorkLine {
   erectM3: number;
   dismantleM3: number;
   standingM3: number;
+  /** Lifting & shifting, counted in trips / loads (docs §5) */
+  liftingTrips?: number;
   note?: string;
 }
 
@@ -515,6 +520,8 @@ export interface DprDocument {
   tbtDone?: boolean;
   /** Why the DPR reports no quantity, when it reports none (docs §5) */
   zeroReason?: string;
+  /** Owner / Super Admin unlocks of an approved DPR, with the reason (docs §5) */
+  unlocks?: { by: string; at: string; reason: string }[];
   sicNote?: string;
   sicReviewedBy?: string;
   sicReviewedAt?: string;
