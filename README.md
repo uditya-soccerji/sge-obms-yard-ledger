@@ -29,7 +29,14 @@ Sites, Users/seats, Labourers, Contractors, Trades, DPR types, Activity template
 
 Deactivate, don’t delete. Site rows first, company-wide fills the rest. Roles stay in code.
 
-Storage key: `sge-obms-ops-v8-desk` — **Reset seed data** after pull.
+Storage key: `sge-obms-ops-v9-sites` — **Reset seed data** after pull.
+
+## Sites (v9)
+
+- Every site (DTA, MTF, Marine, PCG, Jetty, Gagva) has its own demo crew, attendance, DPRs, paint stock, kit, money and requests — see `src/lib/seed-sites.ts`.
+- Screens read `useStore().state`, which is cut to the active site (`src/lib/site-scope.ts`). Master Data reads `fullState`.
+- Owner / Super Admin get **All sites** in the site picker: totals across every site plus a site-by-site table on the dashboard. New entries made in All sites go to the **New →** site in the header (Finance also asks per entry).
+- Look: Vendor Desk livery — ink header, amber/ink hazard stripe, concrete page, Barlow Semi Condensed + Inter.
 
 ## Demo logins
 

@@ -19,6 +19,7 @@ import {
 } from "@/components/ui/select";
 import { estimateCost } from "@/lib/estimate";
 import { useStore } from "@/lib/store";
+import { entrySiteId } from "@/lib/site-scope";
 import type { RateCardKind } from "@/lib/types";
 
 export default function CostEstimatePage() {
@@ -27,16 +28,17 @@ export default function CostEstimatePage() {
   const [qty, setQty] = useState(500);
   const [editId, setEditId] = useState<string | null>(null);
   const [editRate, setEditRate] = useState("");
+  const activeSite = entrySiteId(state);
 
   const result = useMemo(
     () =>
       estimateCost(state.rateCards, {
         kind,
         quantity: qty,
-        siteId: state.currentSiteId,
+        siteId: activeSite,
         rateLines: state.rateLines,
       }),
-    [state.rateCards, state.rateLines, state.currentSiteId, kind, qty]
+    [state.rateCards, state.rateLines, activeSite, kind, qty]
   );
 
   return (

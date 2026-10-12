@@ -33,6 +33,8 @@ import {
 } from "./supabase/remote";
 import type { CatalogItem, Contractor, MasterCatalog, MaterialItem } from "./master/types";
 import { createSeedState, STORAGE_KEY } from "./seed";
+import { ALL_SITES, canSeeAllSites, entrySiteId, scopeState } from "./site-scope";
+import { checkSeat, checkSites } from "./users";
 import type {
   AcplPunchRow,
   AcplResolveStatus,
@@ -64,7 +66,10 @@ import type {
 } from "./types";
 
 interface StoreApi {
+  /** What screens read: cut to the active site (see scopeState). */
   state: AppState;
+  /** Every site, unfiltered — Master Data and the audit log. */
+  fullState: AppState;
   hydrated: boolean;
   currentAccount: UserAccount | null;
   login: (
@@ -79,7 +84,10 @@ interface StoreApi {
     status: AttendanceStatus,
     note?: string
   ) => void;
-  addFinance: (entry: Omit<FinanceEntry, "id" | "siteId" | "enteredBy">) => void;
+  /** siteId defaults to the entry site (active site, or the All sites pick). */
+  addFinance: (
+    entry: Omit<FinanceEntry, "id" | "siteId" | "enteredBy"> & { siteId?: string }
+  ) => void;
   toggleSafetyItem: (dayId: string, itemId: number) => void;
   signSafetyDay: (dayId: string) => void;
   applyTelegram: (input: {
@@ -121,7 +129,10 @@ interface StoreApi {
   computeRatings: (packageId: string) => void;
   markJmsPayment: (packageId: string, received: boolean, note?: string) => void;
   updateRateCard: (id: string, patch: Partial<RateCard>) => void;
+  /** siteId may be ALL_SITES ("all") for Owner / Super Admin. */
   switchSite: (siteId: string) => { ok: boolean; error?: string };
+  /** In All sites: which site new records are written to. */
+  setEntrySite: (siteId: string) => void;
   upsertRateLine: (
     input: Omit<RateLine, "id" | "superseded"> & { id?: string; superseded?: boolean }
   ) => string;
@@ -371,7 +382,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     }
     const role = account.roles[0];
     const opId = account.staffId ?? account.labourerId ?? null;
-    const siteId = account.siteIds[0] ?? s.currentSiteId;
+    const siteId = canSeeAllSites(role) ? ALL_SITES : account.siteIds[0] ?? s.currentSiteId;
     const next: AppState = {
       ...s,
       currentAccountId: account.id,
@@ -434,7 +445,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     setState((s) => {
       const account = s.users.find((u) => u.id === s.currentAccountId);
       if (!account || !account.roles.includes(role)) return s;
-      const next = { ...s, currentRole: role };
+      const next = {
+        ...s,
+        currentRole: role,
+        // A role that can't see every site drops back to the entry site
+        currentSiteId:
+          s.currentSiteId === ALL_SITES && !canSeeAllSites(role)
+            ? entrySiteId(s)
+            : s.currentSiteId,
+      };
       return {
         ...next,
         auditLog: [
@@ -618,7 +637,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           status,
           inTime: status === "present" || status === "half" ? "08:00" : undefined,
           markedBy: s.currentUserId ?? "system",
-          siteId: s.currentSiteId,
+          siteId: s.labourers.find((l) => l.id === labourerId)?.siteId ?? entrySiteId(s),
           note,
         };
         const attendance = existing
@@ -631,14 +650,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   );
 
   const addFinance = useCallback(
-    (entry: Omit<FinanceEntry, "id" | "siteId" | "enteredBy">) => {
+    (entry: Omit<FinanceEntry, "id" | "siteId" | "enteredBy"> & { siteId?: string }) => {
       setState((s) => ({
         ...s,
         finance: [
           {
             ...entry,
             id: uid("fin"),
-            siteId: s.currentSiteId,
+            siteId: entry.siteId ?? entrySiteId(s),
             enteredBy: s.currentUserId ?? "system",
           },
           ...s.finance,
@@ -1046,7 +1065,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           }
           const book = resolveActivityRate(
             s.rateLines,
-            s.currentSiteId,
+            entrySiteId(s),
             line.activity,
             line.unit
           );
@@ -1071,6 +1090,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         };
         const full: JmsPackage = {
           ...pkg,
+          siteId: pkg.siteId ?? entrySiteId(s),
           id,
           lines,
           status: "uploaded",
@@ -1302,7 +1322,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
               category: "JMS payment",
               amount: pkg.expectedIncome,
               description: `Payment received — ${pkg.label}`,
-              siteId: s.currentSiteId,
+              siteId: pkg.siteId ?? entrySiteId(s),
               enteredBy: s.currentUserId ?? "finance",
             },
             ...finance,
@@ -1348,6 +1368,23 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     if (!canSwitch) {
       return { ok: false as const, error: "Site switch not allowed for this role" };
     }
+    if (siteId === ALL_SITES) {
+      if (!canSeeAllSites(s.currentRole)) {
+        return { ok: false as const, error: "All sites is for Owner / Super Admin" };
+      }
+      setState((prev) => ({
+        ...prev,
+        currentSiteId: ALL_SITES,
+        // Keep writing to the site they were just on
+        entrySiteId:
+          prev.currentSiteId !== ALL_SITES ? prev.currentSiteId : prev.entrySiteId,
+        auditLog: [
+          makeAudit(prev, "admin", "switch_site", "Active site → All sites"),
+          ...prev.auditLog,
+        ],
+      }));
+      return { ok: true as const };
+    }
     const allowed =
       account.roles.includes("super_admin") ||
       account.siteIds.includes(siteId);
@@ -1365,6 +1402,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       ],
     }));
     return { ok: true as const };
+  }, []);
+
+  const setEntrySite = useCallback((siteId: string) => {
+    setState((s) =>
+      s.sites.some((x) => x.id === siteId && x.enabled)
+        ? { ...s, entrySiteId: siteId }
+        : s
+    );
   }, []);
 
   const upsertRateLine = useCallback(
@@ -1672,8 +1717,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         result = { ok: false, error: "Only Owner or Super Admin can create users" };
         return s;
       }
-      if (s.users.some((u) => u.username.toLowerCase() === input.username.toLowerCase())) {
-        result = { ok: false, error: "Username already exists" };
+      const invalid = checkSeat(input, s.users);
+      if (invalid) {
+        result = { ok: false, error: invalid };
         return s;
       }
       if (!input.roles.length) {
@@ -1711,6 +1757,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       if (!existing) {
         result = { ok: false, error: "User not found" };
         return s;
+      }
+      if (patch.siteIds || patch.roles) {
+        const bad = checkSites(patch.roles ?? existing.roles, patch.siteIds ?? existing.siteIds);
+        if (bad) {
+          result = { ok: false, error: bad };
+          return s;
+        }
       }
       if (
         patch.username &&
@@ -1913,7 +1966,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
               inTime: "08:00",
               note: `Via Telegram (${input.messageType}): ${input.content.slice(0, 80)}`,
               markedBy: `telegram:${input.role}`,
-              siteId: next.currentSiteId,
+              siteId: entrySiteId(next),
             };
             draft.entityId = record.id;
             next = { ...next, attendance: [record, ...next.attendance] };
@@ -1958,7 +2011,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             const dpr: DprDocument = {
               id: uid("dprd"),
               date: today,
-              siteId: next.currentSiteId,
+              siteId: entrySiteId(next),
               plant: "CPP",
               submitterId,
               submitterType:
@@ -1987,7 +2040,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             date: today,
             type: "painting" as const,
             supervisorId: submitterId,
-            siteId: next.currentSiteId,
+            siteId: entrySiteId(next),
             plant: "CPP",
             location: "Telegram ingest",
             crewCount: 0,
@@ -2010,7 +2063,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             category: "Telegram",
             amount,
             description: input.content,
-            siteId: next.currentSiteId,
+            siteId: entrySiteId(next),
             enteredBy: `telegram:${input.role}`,
           };
           draft.entityId = fin.id;
@@ -2026,7 +2079,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             batch: `TG-${Date.now().toString().slice(-6)}`,
             stage: "sge_receive" as const,
             qtyLitres: 0,
-            siteId: next.currentSiteId,
+            siteId: entrySiteId(next),
             updatedAt: today,
           };
           draft.entityId = line.id;
@@ -2114,9 +2167,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     [state.users, state.currentAccountId]
   );
 
+  const scopedState = useMemo(() => scopeState(state), [state]);
+
   const api = useMemo<StoreApi>(
     () => ({
-      state,
+      state: scopedState,
+      fullState: state,
       hydrated,
       currentAccount,
       login,
@@ -2143,6 +2199,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       markJmsPayment,
       updateRateCard,
       switchSite,
+      setEntrySite,
       upsertRateLine,
       updateTrade,
       addTrade,
@@ -2167,6 +2224,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     }),
     [
       state,
+      scopedState,
       hydrated,
       currentAccount,
       login,
@@ -2193,6 +2251,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       markJmsPayment,
       updateRateCard,
       switchSite,
+      setEntrySite,
       upsertRateLine,
       updateTrade,
       addTrade,
