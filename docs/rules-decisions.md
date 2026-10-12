@@ -252,4 +252,8 @@ Taken without a fresh Owner answer, following the rules above; change here if th
 - **ACPL match** (§12): EPs are `PP` + 10 digits (a bare 10-digit code gets its PP); an unknown EP falls back to the labourer's name and is marked "matched by name". New flag **punched_but_absent**: absent / leave / off on the DPR but punched in. Out-times are compared as well as in-times.
 - **Legacy JMS packages:** paid once, only after SIC approval, at the amount actually received; ratings need an approved JMS and re-running them replaces that package's incentive drafts; DPR matching uses only SIC-approved DPRs on the same site, plant, activity and period and sums them.
 - **Logins:** every login is linked to a staff record (field and office roles) or a labourer; Master Data creates the staff record when needed.
+- **Send back needs a reason** (§5, §19): SIC types why; the supervisor sees it on the job until they close it again, and it's in the activity log.
+- **Cost entries** (§8): date, time, category (fixed list), vendor, payment mode, remark and a bill are required. Until bills are stored in the shared database only the bill's file name is kept; "Bill to follow" saves the entry and flags it.
+- **JMS package rates:** a line without a rate takes the rate book rate of the package's own site; if none matches it is marked "rate missing" and left out of expected income, never priced with a guessed rate. The estimator may still use the nearest painting rate.
+- **Signed safety checklist** is final: its ticks can't be changed.
 - **Access:** every page and store action checks the role's rights (lib/permissions.ts). Owner gains `jms: approve` and `users: view/create/update`; an account with no plants assigned covers every plant on its sites.

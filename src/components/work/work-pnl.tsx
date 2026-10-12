@@ -6,10 +6,11 @@ import { formatINR, KpiTile, Panel, StatusPill } from "@/components/shared/ui-bi
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { monthLabel, perUnit, pnlRows, rollUp, type JobPnl, type PnlTotals } from "@/lib/work/logic";
+import { EXPENSE_CATEGORIES, monthLabel, PAYMENT_MODES, perUnit, pnlRows, rollUp, type JobPnl, type PnlTotals } from "@/lib/work/logic";
+import { useStore } from "@/lib/store";
 import { WORK_TODAY } from "@/lib/work/seed";
 import { useWork } from "@/lib/work/store";
-import type { ExpenseKind } from "@/lib/work/types";
+import type { ExpenseKind, PaymentMode } from "@/lib/work/types";
 import { cn } from "@/lib/utils";
 import { fmtM2, Msg, selectCls, tdCls, thCls, useWorkScope } from "./common";
 
@@ -199,7 +200,13 @@ function Expenses() {
   const { addExpense, removeExpense } = useWork();
   const s = useWorkScope();
   const { work } = s;
-  const [f, setF] = useState({ kind: "fixed" as ExpenseKind, siteId: "", month: "", category: "", amount: "", jobId: "", note: "" });
+  const { fullState } = useStore();
+  const vendors = fullState.vendors.filter((v) => v.status === "active").map((v) => v.name);
+  const nowTime = () => new Date().toTimeString().slice(0, 5);
+  const blank = { kind: "fixed" as ExpenseKind, siteId: "", month: "", date: WORK_TODAY, time: nowTime(), category: "", amount: "", jobId: "", vendor: "", paymentMode: "" as PaymentMode | "", note: "", billFile: "", billPending: false };
+  const [f, setF] = useState(blank);
+  // A new file input after each save, so the last bill's name doesn't carry over
+  const [fileKey, setFileKey] = useState(0);
   // Site follows the header; only All sites picks one here
   const site = s.allSites ? f.siteId || s.entrySite : s.currentSiteId;
   const costMonth = f.month || s.monthOf(site);
@@ -219,17 +226,25 @@ function Expenses() {
           onSubmit={(e) => {
             e.preventDefault();
             const r = addExpense({
-              date: WORK_TODAY,
+              date: f.date,
+              time: f.time,
               month: costMonth,
               siteId: site,
               kind: f.kind,
               category: f.category,
               amount: Number(f.amount),
               jobId: f.kind === "direct" ? f.jobId || undefined : undefined,
-              note: f.note.trim() || undefined,
+              vendor: f.vendor,
+              paymentMode: f.paymentMode || undefined,
+              note: f.note,
+              billFile: f.billFile || undefined,
+              billPending: f.billFile ? undefined : f.billPending || undefined,
             });
             setMsg(r.ok ? { ok: true, msg: "Cost added." } : { ok: false, msg: r.error });
-            if (r.ok) setF((x) => ({ ...x, category: "", amount: "", note: "" }));
+            if (r.ok) {
+              setF((x) => ({ ...blank, kind: x.kind, siteId: x.siteId, month: x.month, date: x.date }));
+              setFileKey((k) => k + 1);
+            }
           }}
         >
           <div>
@@ -262,21 +277,58 @@ function Expenses() {
             </div>
           )}
           <div>
+            <Label>Date</Label>
+            <Input type="date" className="mt-1" max={WORK_TODAY} value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} />
+          </div>
+          <div>
+            <Label>Time</Label>
+            <Input type="time" className="mt-1" value={f.time} onChange={(e) => setF({ ...f, time: e.target.value })} />
+          </div>
+          <div>
             <Label>Category</Label>
-            <Input className="mt-1" list="cost-cats" value={f.category} onChange={(e) => setF({ ...f, category: e.target.value })} placeholder="Diesel" />
-            <datalist id="cost-cats">
-              {["Staff salaries", "Compressor rent", "Bus rent", "Car rent", "Diesel", "Machinery", "PPE items", "Copper slag abrasive", "Thinner + rollers", "Scaffold hire"].map((c) => <option key={c} value={c} />)}
-            </datalist>
+            <select className={selectCls + " mt-1"} value={f.category} onChange={(e) => setF({ ...f, category: e.target.value })}>
+              <option value="">Pick…</option>
+              {EXPENSE_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
           </div>
           <div>
             <Label>Amount ₹</Label>
             <Input type="number" min="0" step="0.01" className="mt-1" value={f.amount} onChange={(e) => setF({ ...f, amount: e.target.value })} />
           </div>
           <div>
-            <Label>Note</Label>
-            <Input className="mt-1" value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} />
+            <Label>Vendor (paid to)</Label>
+            <Input className="mt-1" list="cost-vendors" value={f.vendor} onChange={(e) => setF({ ...f, vendor: e.target.value })} placeholder="e.g. Om Transport" />
+            <datalist id="cost-vendors">{vendors.map((v) => <option key={v} value={v} />)}</datalist>
+          </div>
+          <div>
+            <Label>Payment mode</Label>
+            <select className={selectCls + " mt-1"} value={f.paymentMode} onChange={(e) => setF({ ...f, paymentMode: e.target.value as PaymentMode | "" })}>
+              <option value="">Pick…</option>
+              {PAYMENT_MODES.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+            </select>
+          </div>
+          <div className="lg:col-span-2">
+            <Label>Remark</Label>
+            <Input className="mt-1" value={f.note} onChange={(e) => setF({ ...f, note: e.target.value })} placeholder="What it was for" />
+          </div>
+          <div className="lg:col-span-2">
+            <Label>Bill / receipt</Label>
+            <Input
+              key={fileKey}
+              type="file"
+              accept="image/*,application/pdf"
+              className="mt-1"
+              onChange={(e) => setF({ ...f, billFile: e.target.files?.[0]?.name ?? "", billPending: false })}
+            />
+            <label className="mt-1 flex items-center gap-1.5 text-[11px] text-[var(--sge-ink-2)]">
+              <input type="checkbox" checked={f.billPending} disabled={!!f.billFile} onChange={(e) => setF({ ...f, billPending: e.target.checked })} />
+              Bill to follow (flagged until attached)
+            </label>
           </div>
           <Button type="submit">Add cost</Button>
+          <p className="text-[11px] text-[var(--sge-ink-3)] sm:col-span-2 lg:col-span-7">
+            Only the bill&apos;s file name is kept for now; the file itself will be stored once bills move to the shared database.
+          </p>
         </form>
       ) : null}
       <Msg text={msg} />
@@ -286,6 +338,7 @@ function Expenses() {
             <tr className="border-b border-[var(--sge-line)]">
               <th className={thCls}>Type</th>
               <th className={thCls}>Category</th>
+              <th className={thCls}>Paid to</th>
               <th className={thCls}>For</th>
               <th className={thCls + " text-right"}>Amount</th>
               <th className={thCls} />
@@ -298,6 +351,14 @@ function Expenses() {
                 <tr key={x.id} className="border-b border-[var(--sge-line)]">
                   <td className={tdCls}><StatusPill tone={x.kind === "fixed" ? "default" : "accent"}>{x.kind}</StatusPill></td>
                   <td className={tdCls}>{x.category}{x.note ? <div className="text-[10px] text-[var(--sge-ink-3)]">{x.note}</div> : null}</td>
+                  <td className={tdCls + " text-xs"}>
+                    {x.vendor ?? "—"}
+                    {x.paymentMode ? <span className="text-[var(--sge-ink-3)]"> · {PAYMENT_MODES.find((m) => m.id === x.paymentMode)?.label}</span> : null}
+                    <div className="text-[10px] text-[var(--sge-ink-3)]">
+                      {x.date}{x.time ? ` ${x.time}` : ""}{x.enteredByName ? ` · by ${x.enteredByName}` : ""}
+                    </div>
+                    {x.billPending ? <StatusPill tone="warn">Bill to follow</StatusPill> : x.billFile ? <div className="font-mono text-[10px] text-[var(--sge-ink-3)]">{x.billFile}</div> : null}
+                  </td>
                   <td className={tdCls + " text-xs"}>{job ? `${job.jobNo} · ${job.location}` : `${s.siteCode(x.siteId)} · ${monthLabel(x.month)}`}</td>
                   <td className={tdCls + " text-right tabular-nums"}>{formatINR(x.amount)}</td>
                   <td className={tdCls}>

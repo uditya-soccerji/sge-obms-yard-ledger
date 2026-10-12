@@ -326,6 +326,29 @@ export function paymentSummary(rows: PaymentRow[]) {
 
 export const DEFAULT_WAGE = 800;
 
+/** Cost categories (docs §8: a fixed list; moves to Master Data with the shared database). */
+export const EXPENSE_CATEGORIES = [
+  "Staff salaries",
+  "Compressor rent",
+  "Bus rent",
+  "Car rent",
+  "Diesel",
+  "Machinery",
+  "PPE items",
+  "Copper slag abrasive",
+  "Thinner + rollers",
+  "Scaffold hire",
+  "Transport",
+  "Other",
+] as const;
+
+export const PAYMENT_MODES: { id: "cash" | "upi" | "bank" | "credit"; label: string }[] = [
+  { id: "cash", label: "Cash" },
+  { id: "upi", label: "UPI" },
+  { id: "bank", label: "Bank" },
+  { id: "credit", label: "Credit" },
+];
+
 export interface JobLabour {
   days: number;
   cost: number;

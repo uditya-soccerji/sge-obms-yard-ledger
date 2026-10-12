@@ -1,7 +1,7 @@
 "use client";
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { canCloseJob, currentMonthOf, entryDiffs, isMonthClosed, jobJmsQty, lineStatus, nextMonth, round3 } from "./logic";
+import { canCloseJob, currentMonthOf, EXPENSE_CATEGORIES, entryDiffs, isMonthClosed, jobJmsQty, lineStatus, nextMonth, round3 } from "./logic";
 import { createWorkSeed, WORK_STORAGE_KEY, WORK_TODAY } from "./seed";
 import { applyScenario, type ScenarioId } from "./scenarios";
 import { useStore } from "../store";
@@ -22,7 +22,8 @@ interface WorkApi {
   addDpr: (input: Omit<DprEntry, "id" | "supervisorId">) => Result;
   requestClose: (jobId: string) => Result;
   confirmJms: (jobId: string) => Result;
-  rejectClose: (jobId: string) => Result;
+  /** SIC sends a closed job back to the supervisor, with the reason (docs §5, §19) */
+  rejectClose: (jobId: string, reason: string) => Result;
   setJmsStatus: (jmsId: string, status: JmsStatus) => void;
   /** Close one site's current month and carry its unfinished work forward */
   closeMonth: (siteId: string) => Result;
@@ -191,19 +192,22 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
     const at = new Date().toISOString();
     setWork((s) => ({
       ...s,
-      jobs: s.jobs.map((j) => (j.id === jobId ? { ...j, status: "awaiting_sic", closeRequestedAt: at, closeRequestedBy: actor.current.accountId } : j)),
+      jobs: s.jobs.map((j) => (j.id === jobId ? { ...j, status: "awaiting_sic", closeRequestedAt: at, closeRequestedBy: actor.current.accountId, sentBack: undefined } : j)),
     }));
     log({ kind: "job_closed", siteId: siteOfJob(w, job), subjectStaffId: job.supervisorId, title: `${job.jobNo} closed — confirm JMS`, detail: `${job.location} · ${round3(jobJmsQty(job, w.dprs))} m² final shade`, tab: "jobs", refId: job.id });
     return { ok: true };
   }, [log]);
 
-  const rejectClose = useCallback<WorkApi["rejectClose"]>((jobId) => {
+  const rejectClose = useCallback<WorkApi["rejectClose"]>((jobId, reason) => {
     if (!rights().canConfirm) return NOT_ALLOWED;
     const w = ref.current;
     const job = w.jobs.find((j) => j.id === jobId);
     if (!job || job.status !== "awaiting_sic") return { ok: false, error: "Job isn't waiting for SIC" };
-    log({ kind: "job_sent_back", problem: true, siteId: siteOfJob(w, job), subjectStaffId: job.supervisorId, title: `${job.jobNo} sent back by SIC`, detail: job.location, tab: "jobs", refId: job.id });
-    setWork((s) => ({ ...s, jobs: s.jobs.map((j) => (j.id === jobId ? { ...j, status: "open", closeRequestedAt: undefined, closeRequestedBy: undefined } : j)) }));
+    const why = reason.trim();
+    if (!why) return { ok: false, error: "Give a reason so the supervisor knows what to fix" };
+    log({ kind: "job_sent_back", problem: true, siteId: siteOfJob(w, job), subjectStaffId: job.supervisorId, title: `${job.jobNo} sent back by SIC`, detail: `${job.location} · ${why}`, tab: "jobs", refId: job.id });
+    const sentBack = { by: actor.current.name, at: new Date().toISOString(), reason: why };
+    setWork((s) => ({ ...s, jobs: s.jobs.map((j) => (j.id === jobId ? { ...j, status: "open", closeRequestedAt: undefined, closeRequestedBy: undefined, sentBack } : j)) }));
     return { ok: true };
   }, [log]);
 
@@ -332,13 +336,32 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
     if (!rights().canMoney) return NOT_ALLOWED;
     if (!(input.amount > 0)) return { ok: false, error: "Amount must be above zero" };
     if (!input.category.trim()) return { ok: false, error: "Category is required" };
+    // docs §8: date, time, amount, category, vendor, payment mode, remark, bill
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date)) return { ok: false, error: "Pick the date" };
+    if (!input.time || !/^\d{2}:\d{2}$/.test(input.time)) return { ok: false, error: "Enter the time" };
+    if (!(EXPENSE_CATEGORIES as readonly string[]).includes(input.category.trim())) return { ok: false, error: "Pick a category from the list" };
+    if (!input.vendor?.trim()) return { ok: false, error: "Enter who was paid (vendor)" };
+    if (!input.paymentMode) return { ok: false, error: "Pick the payment mode" };
+    if (!input.note?.trim()) return { ok: false, error: "Add a remark" };
+    if (!input.billFile && !input.billPending) return { ok: false, error: "Attach the bill / receipt, or tick 'Bill to follow'" };
     if (input.kind === "direct" && !input.jobId) return { ok: false, error: "A direct cost needs a job" };
     // A direct cost belongs to the month it was spent; a fixed cost to the month picked
     const month = input.kind === "direct" ? input.date.slice(0, 7) : input.month;
     if (!/^\d{4}-\d{2}$/.test(month)) return { ok: false, error: "Pick the month this cost belongs to" };
     const id = uid("ex");
-    setWork((s) => ({ ...s, expenses: [...s.expenses, { ...input, month, category: input.category.trim(), id }] }));
-    log({ kind: "expense_added", siteId: input.siteId, title: `Cost ₹${input.amount.toLocaleString("en-IN")} · ${input.category.trim()}`, detail: input.kind === "fixed" ? `Fixed · ${month}` : "Direct (job)", tab: "pnl", refId: id });
+    const entry: Expense = {
+      ...input,
+      month,
+      category: input.category.trim(),
+      vendor: input.vendor?.trim(),
+      note: input.note?.trim(),
+      id,
+      enteredBy: actor.current.accountId,
+      enteredByName: actor.current.name,
+      enteredAt: new Date().toISOString(),
+    };
+    setWork((s) => ({ ...s, expenses: [...s.expenses, entry] }));
+    log({ kind: "expense_added", problem: !!input.billPending, siteId: input.siteId, title: `Cost ₹${input.amount.toLocaleString("en-IN")} · ${entry.category} · ${entry.vendor}`, detail: `${input.kind === "fixed" ? `Fixed · ${month}` : "Direct (job)"} · ${input.paymentMode}${input.billPending ? " · bill to follow" : ""}`, tab: "pnl", refId: id });
     return { ok: true, id };
   }, [log]);
 

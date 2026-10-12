@@ -26,6 +26,8 @@ export function WorkJobs() {
   const [dprFor, setDprFor] = useState<string | null>(null);
   const [showEntries, setShowEntries] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ ok: boolean; msg: string } | null>(null);
+  // Job being sent back, and the reason typed for it
+  const [sendBack, setSendBack] = useState<{ jobId: string; reason: string } | null>(null);
   const mine = (j: Job) => s.role !== "supervisor" || j.supervisorId === state.currentUserId;
   // Closed jobs imported as JMS only (e.g. August) have no DPR entries; they live on the JMS tab
   const hasEntries = (j: Job) => work.dprs.some((d) => d.jobId === j.id);
@@ -95,6 +97,11 @@ export function WorkJobs() {
                   {s.allSites ? ` · ${s.siteCode(line.siteId)}` : ""}
                 </div>
                 <Trail jobId={job.id} jmsId={job.jmsId} />
+                {job.status === "open" && job.sentBack ? (
+                  <p className="mt-1 rounded-sm bg-[var(--sge-crit-wash)] px-2 py-1 text-[11px] text-[var(--sge-crit)]">
+                    <b>Sent back by {job.sentBack.by}:</b> {job.sentBack.reason}
+                  </p>
+                ) : null}
               </div>
               <div className="flex flex-wrap gap-2">
                 {job.status === "open" && s.canEnter ? (
@@ -117,8 +124,8 @@ export function WorkJobs() {
                 ) : null}
                 {job.status === "awaiting_sic" && s.canConfirm ? (
                   <>
-                    <Button size="sm" variant="outline" onClick={() => { const r = rejectClose(job.id); setMsg(r.ok ? { ok: true, msg: `${job.jobNo} sent back to the supervisor.` } : { ok: false, msg: r.error }); }}>
-                      Send back
+                    <Button size="sm" variant="outline" onClick={() => setSendBack(sendBack?.jobId === job.id ? null : { jobId: job.id, reason: "" })}>
+                      {sendBack?.jobId === job.id ? "Cancel" : "Send back"}
                     </Button>
                     <Button
                       size="sm"
@@ -133,6 +140,24 @@ export function WorkJobs() {
                 ) : null}
               </div>
             </div>
+
+            {sendBack?.jobId === job.id ? (
+              <form
+                className="mt-3 flex flex-wrap items-end gap-2 rounded-sm border border-[var(--sge-crit)]/40 bg-[var(--sge-crit-wash)]/50 p-2.5"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const r = rejectClose(job.id, sendBack.reason);
+                  setMsg(r.ok ? { ok: true, msg: `${job.jobNo} sent back to the supervisor with your reason.` } : { ok: false, msg: r.error });
+                  if (r.ok) setSendBack(null);
+                }}
+              >
+                <div className="min-w-[240px] flex-1">
+                  <Label>Why is it going back? (the supervisor sees this)</Label>
+                  <Input className="mt-1" value={sendBack.reason} onChange={(e) => setSendBack({ jobId: job.id, reason: e.target.value })} placeholder="e.g. final coat DFT below 100 µm at TT3 north side" />
+                </div>
+                <Button type="submit" size="sm" variant="outline">Send back to supervisor</Button>
+              </form>
+            ) : null}
 
             <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
               <StageChips stages={job.stages} areas={areas} final={fin} />
