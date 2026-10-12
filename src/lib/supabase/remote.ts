@@ -5,7 +5,7 @@ import type {
   MasterCatalog,
   MaterialItem,
 } from "../master/types";
-import type { PermissionOverride, RoleId, Site, UserAccount } from "../types";
+import type { PermissionOverride, PlantDetail, RoleId, Site, UserAccount } from "../types";
 
 interface ProfileRow {
   id: string;
@@ -28,6 +28,8 @@ interface SiteRow {
   enabled: boolean;
   rp_tags: string[];
   plants: string[];
+  /** Added by migration 20261013_001; absent before it is applied */
+  plant_details?: PlantDetail[] | null;
 }
 
 function toAccount(p: ProfileRow): UserAccount {
@@ -55,6 +57,7 @@ function toSite(s: SiteRow): Site {
     enabled: s.enabled,
     rpTags: s.rp_tags,
     plants: s.plants,
+    plantDetails: s.plant_details ?? [],
   };
 }
 
@@ -264,6 +267,7 @@ export async function remoteSaveSite(site: Site): Promise<string | null> {
     enabled: site.enabled,
     rp_tags: site.rpTags,
     plants: site.plants,
+    plant_details: site.plantDetails ?? [],
   });
   if (error) {
     console.error("site save failed", site.code, error.message);

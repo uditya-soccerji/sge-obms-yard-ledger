@@ -1,4 +1,4 @@
-import type { AppState, RoleId, Site } from "./types";
+import type { AppState, PlantDetail, RoleId, Site } from "./types";
 
 /** `currentSiteId` value meaning "every site" — Owner / Super Admin only. */
 export const ALL_SITES = "all";
@@ -39,6 +39,64 @@ export function checkSiteCode(code: string, siteId: string, sites: Pick<Site, "i
   if (!code) return "Site code is required";
   if (!/^[A-Z]{2,6}$/.test(code)) return "Site code must be 2–6 capital letters (e.g. DTA, MARINE)";
   if (sites.some((s) => s.id !== siteId && s.code === code)) return `Site code ${code} is already used`;
+  return null;
+}
+
+/** RP tags from a comma field: upper-case, de-duplicated (e.g. "rp2, RP5" → RP2, RP5). */
+export function parseRpTags(text: string): string[] {
+  return [...new Set(parsePlants(text).map((t) => t.toUpperCase().replace(/\s+/g, "")))];
+}
+
+const sameName = (a: string, b: string) => a.trim().toLowerCase() === b.trim().toLowerCase();
+
+/** Every plant of a site with its RP and locations, in the site's plant order (B02). */
+export function sitePlantDetails(site: Pick<Site, "plants" | "plantDetails">): PlantDetail[] {
+  return site.plants.map(
+    (name) => site.plantDetails?.find((d) => sameName(d.name, name)) ?? { name, locations: [] }
+  );
+}
+
+/** A plant's RP: its own, else the site's when the site runs a single RP. */
+export function plantRp(site: Pick<Site, "plants" | "plantDetails" | "rpTags">, plant: string): string | undefined {
+  const own = site.plantDetails?.find((d) => sameName(d.name, plant))?.rp;
+  return own ?? (site.rpTags.length === 1 ? site.rpTags[0] : undefined);
+}
+
+/** A location's RP: its own, else its plant's. */
+export function locationRp(site: Pick<Site, "plants" | "plantDetails" | "rpTags">, plant: string, location: string): string | undefined {
+  const loc = site.plantDetails?.find((d) => sameName(d.name, plant))?.locations.find((l) => sameName(l.name, location));
+  return loc?.rp ?? plantRp(site, plant);
+}
+
+/**
+ * Clean plant details for saving: one entry per plant still on the site
+ * (renamed / removed plants drop out), names trimmed, blank and duplicate
+ * locations removed, and only plants with an RP or locations kept.
+ */
+export function buildPlantDetails(plants: string[], details: PlantDetail[]): PlantDetail[] {
+  return plants.flatMap((name) => {
+    const d = details.find((x) => sameName(x.name, name));
+    if (!d) return [];
+    const seen = new Set<string>();
+    const locations = d.locations.flatMap((l) => {
+      const n = l.name.trim().replace(/\s+/g, " ");
+      if (!n || seen.has(n.toLowerCase())) return [];
+      seen.add(n.toLowerCase());
+      return [{ name: n, ...(l.rp ? { rp: l.rp } : {}) }];
+    });
+    if (!d.rp && locations.length === 0) return [];
+    return [{ name, ...(d.rp ? { rp: d.rp } : {}), locations }];
+  });
+}
+
+/** Every plant / location RP must be one of the site's RPs. Returns a message, or null. */
+export function checkPlantRps(rpTags: string[], details: PlantDetail[]): string | null {
+  for (const d of details) {
+    if (d.rp && !rpTags.includes(d.rp)) return `${d.name}: ${d.rp} isn't one of this site's RPs (${rpTags.join(", ") || "none"})`;
+    for (const l of d.locations) {
+      if (l.rp && !rpTags.includes(l.rp)) return `${d.name} · ${l.name}: ${l.rp} isn't one of this site's RPs`;
+    }
+  }
   return null;
 }
 

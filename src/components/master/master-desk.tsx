@@ -19,8 +19,17 @@ import { canAccessMasterData } from "@/lib/desk";
 import { ROLES } from "@/lib/roles";
 import { useStore } from "@/lib/store";
 import type { CatalogItem, MaterialItem } from "@/lib/master/types";
-import type { Labourer, RoleId, Site, UserAccount } from "@/lib/types";
-import { checkSiteCode, entrySiteId, parsePlants } from "@/lib/site-scope";
+import type { Labourer, PlantDetail, RoleId, Site, UserAccount } from "@/lib/types";
+import {
+  buildPlantDetails,
+  checkPlantRps,
+  checkSiteCode,
+  entrySiteId,
+  parsePlants,
+  parseRpTags,
+  plantRp,
+  sitePlantDetails,
+} from "@/lib/site-scope";
 import { checkSeat, checkSites, MIN_PASSWORD } from "@/lib/users";
 import type { StaffMember } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -143,33 +152,47 @@ function SitesSheet({ showInactive }: { showInactive: boolean }) {
   const { fullState: state, upsertSite } = useStore();
   const rows = state.sites.filter((s) => showInactive || s.enabled);
   const [draft, setDraft] = useState<Site | null>(null);
-  // Plants are edited as free text and split only on save (B01)
+  // Plants and RPs are edited as free text and split only on save (B01)
   const [plantsText, setPlantsText] = useState("");
+  const [rpText, setRpText] = useState("");
+  // Per-plant RP + locations (B02), matched to the typed plant names on save
+  const [details, setDetails] = useState<PlantDetail[]>([]);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
   function open(site: Site) {
     setDraft(site);
     setPlantsText(site.plants.join(", "));
+    setRpText(site.rpTags.join(", "));
+    setDetails(sitePlantDetails(site));
     setMsg(null);
   }
 
   async function save() {
     if (!draft) return;
+    const plants = parsePlants(plantsText);
+    const rpTags = parseRpTags(rpText);
+    const plantDetails = buildPlantDetails(plants, details);
     const site = {
       ...draft,
       code: draft.code.trim().toUpperCase(),
       name: draft.name.trim() || draft.code.trim().toUpperCase(),
-      plants: parsePlants(plantsText),
+      rpTags,
+      plants,
+      plantDetails,
     };
-    const bad = checkSiteCode(site.code, site.id, state.sites);
+    const bad = checkSiteCode(site.code, site.id, state.sites) ?? checkPlantRps(rpTags, plantDetails);
     if (bad) return setMsg({ ok: false, text: bad });
     setSaving(true);
     const err = await upsertSite(site);
     setSaving(false);
     if (err) return setMsg({ ok: false, text: err });
     setDraft(null);
-    setMsg({ ok: true, text: `Saved ${site.code} · ${site.plants.length} plant${site.plants.length === 1 ? "" : "s"}` });
+    const locs = plantDetails.reduce((n, d) => n + d.locations.length, 0);
+    setMsg({
+      ok: true,
+      text: `Saved ${site.code} · ${plants.length} plant${plants.length === 1 ? "" : "s"} · ${locs} location${locs === 1 ? "" : "s"}`,
+    });
   }
 
   async function toggle(site: Site) {
@@ -194,6 +217,7 @@ function SitesSheet({ showInactive }: { showInactive: boolean }) {
               enabled: true,
               rpTags: [],
               plants: [],
+              plantDetails: [],
             })
           }
         >
@@ -204,10 +228,14 @@ function SitesSheet({ showInactive }: { showInactive: boolean }) {
         <SiteForm
           value={draft}
           plantsText={plantsText}
+          rpText={rpText}
+          details={details}
           saving={saving}
           error={msg && !msg.ok ? msg.text : null}
           onChange={setDraft}
           onPlantsText={setPlantsText}
+          onRpText={setRpText}
+          onDetails={setDetails}
           onSave={() => void save()}
           onCancel={() => {
             setDraft(null);
@@ -221,24 +249,36 @@ function SitesSheet({ showInactive }: { showInactive: boolean }) {
             <th className="py-2">Code</th>
             <th>Name</th>
             <th>RP</th>
-            <th>Plants</th>
+            <th>Plants · RP · locations</th>
             <th>State</th>
             <th />
           </tr>
         </thead>
         <tbody>
           {rows.map((s) => (
-            <tr key={s.id} className="border-t border-[var(--sge-line)]">
-              <td className="py-2 font-mono text-xs">{s.code}</td>
-              <td>{s.name}</td>
-              <td className="text-xs">{s.rpTags.join("/") || "—"}</td>
-              <td className="text-xs">{s.plants.join(", ")}</td>
-              <td>
+            <tr key={s.id} className="border-t border-[var(--sge-line)] align-top">
+              <td className="py-2 pr-3 font-mono text-xs">{s.code}</td>
+              <td className="py-2 pr-3">{s.name}</td>
+              <td className="whitespace-nowrap py-2 pr-3 text-xs">{s.rpTags.join(" / ") || "—"}</td>
+              <td className="py-2 pr-3 text-xs">
+                {sitePlantDetails(s).map((d, i) => {
+                  const rp = plantRp(s, d.name);
+                  const extra = [rp, d.locations.length ? `${d.locations.length} loc` : ""].filter(Boolean).join(" · ");
+                  return (
+                    <span key={d.name}>
+                      {i ? ", " : ""}
+                      {d.name}
+                      {extra ? <span className="text-[var(--sge-ink-3)]"> ({extra})</span> : null}
+                    </span>
+                  );
+                })}
+              </td>
+              <td className="py-2">
                 <StatusPill tone={s.enabled ? "ok" : "default"}>
                   {s.enabled ? "active" : "inactive"}
                 </StatusPill>
               </td>
-              <td className="text-right">
+              <td className="py-2 text-right">
                 <Button size="sm" variant="outline" onClick={() => open(s)}>
                   Edit
                 </Button>{" "}
@@ -261,22 +301,32 @@ function SitesSheet({ showInactive }: { showInactive: boolean }) {
 function SiteForm({
   value,
   plantsText,
+  rpText,
+  details,
   saving,
   error,
   onChange,
   onPlantsText,
+  onRpText,
+  onDetails,
   onSave,
   onCancel,
 }: {
   value: Site;
   plantsText: string;
+  rpText: string;
+  details: PlantDetail[];
   saving: boolean;
   error: string | null;
   onChange: (s: Site) => void;
   onPlantsText: (text: string) => void;
+  onRpText: (text: string) => void;
+  onDetails: (d: PlantDetail[]) => void;
   onSave: () => void;
   onCancel: () => void;
 }) {
+  const plants = parsePlants(plantsText);
+  const rpTags = parseRpTags(rpText);
   return (
     <div className="mb-4 grid gap-2 rounded-sm border border-[var(--sge-line)] bg-[var(--sge-linen)] p-3 sm:grid-cols-2">
       <div>
@@ -296,6 +346,15 @@ function SiteForm({
         />
       </div>
       <div className="sm:col-span-2">
+        <Label>RPs run at this site (comma)</Label>
+        <Input
+          className="mt-1"
+          value={rpText}
+          placeholder="e.g. RP2, RP5"
+          onChange={(e) => onRpText(e.target.value)}
+        />
+      </div>
+      <div className="sm:col-span-2">
         <Label>Plants (comma)</Label>
         <Input
           className="mt-1"
@@ -304,9 +363,14 @@ function SiteForm({
           onChange={(e) => onPlantsText(e.target.value)}
         />
         <p className="mt-1 text-[11px] text-[var(--sge-ink-3)]">
-          {parsePlants(plantsText).length} plant{parsePlants(plantsText).length === 1 ? "" : "s"} · separate with commas
+          {plants.length} plant{plants.length === 1 ? "" : "s"} · separate with commas
         </p>
       </div>
+      {plants.length ? (
+        <div className="sm:col-span-2">
+          <PlantDetailsEditor plants={plants} rpTags={rpTags} details={details} onDetails={onDetails} />
+        </div>
+      ) : null}
       <div className="flex items-center gap-2 sm:col-span-2">
         <Button size="sm" onClick={onSave} disabled={saving}>
           {saving ? "Saving…" : "Save"}
@@ -316,6 +380,114 @@ function SiteForm({
         </Button>
         {error ? <span className="text-xs text-[var(--sge-crit)]">{error}</span> : null}
       </div>
+    </div>
+  );
+}
+
+const rpSelectCls =
+  "h-8 rounded-sm border border-[var(--sge-line)] bg-[var(--sge-paper)] px-1.5 text-xs text-[var(--sge-ink)]";
+
+/** Each plant's RP and its locations (a location may override the RP). B02. */
+function PlantDetailsEditor({
+  plants,
+  rpTags,
+  details,
+  onDetails,
+}: {
+  plants: string[];
+  rpTags: string[];
+  details: PlantDetail[];
+  onDetails: (d: PlantDetail[]) => void;
+}) {
+  const key = (n: string) => n.trim().toLowerCase();
+  const find = (name: string) => details.find((d) => key(d.name) === key(name));
+  const put = (name: string, next: PlantDetail) =>
+    onDetails([...details.filter((d) => key(d.name) !== key(name)), next]);
+  const siteRp = rpTags.length === 1 ? rpTags[0] : "";
+
+  return (
+    <div className="rounded-sm border border-[var(--sge-line)] bg-[var(--sge-paper)]">
+      <div className="border-b border-[var(--sge-line)] px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--sge-ink-3)]">
+        Plants · RP · locations
+      </div>
+      {plants.map((plant) => {
+        const d: PlantDetail = find(plant) ?? { name: plant, locations: [] };
+        const setLocs = (locations: PlantDetail["locations"]) => put(plant, { ...d, name: plant, locations });
+        return (
+          <div key={key(plant)} className="border-b border-[var(--sge-line)] px-3 py-2 last:border-b-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-heading text-sm font-bold tracking-wide">{plant}</span>
+              <select
+                aria-label={`RP for ${plant}`}
+                className={rpSelectCls}
+                value={d.rp ?? ""}
+                onChange={(e) => put(plant, { ...d, name: plant, rp: e.target.value || undefined })}
+              >
+                <option value="">{siteRp ? `Site RP (${siteRp})` : "RP —"}</option>
+                {rpTags.map((rp) => (
+                  <option key={rp} value={rp}>
+                    {rp}
+                  </option>
+                ))}
+              </select>
+              <span className="text-[11px] text-[var(--sge-ink-3)]">
+                {d.locations.length} location{d.locations.length === 1 ? "" : "s"}
+              </span>
+              <Button
+                size="sm"
+                variant="outline"
+                className="ml-auto h-7 text-xs"
+                onClick={() => setLocs([...d.locations, { name: "" }])}
+              >
+                Add location
+              </Button>
+            </div>
+            {d.locations.length ? (
+              <div className="mt-2 space-y-1.5 pl-3">
+                {d.locations.map((loc, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <Input
+                      aria-label={`${plant} location ${i + 1}`}
+                      className="h-8 text-sm"
+                      value={loc.name}
+                      placeholder="Location / area"
+                      onChange={(e) => setLocs(d.locations.map((l, j) => (j === i ? { ...l, name: e.target.value } : l)))}
+                    />
+                    <select
+                      aria-label={`RP for ${plant} location ${i + 1}`}
+                      className={rpSelectCls}
+                      value={loc.rp ?? ""}
+                      onChange={(e) =>
+                        setLocs(
+                          d.locations.map((l, j) =>
+                            j === i ? { name: l.name, ...(e.target.value ? { rp: e.target.value } : {}) } : l
+                          )
+                        )
+                      }
+                    >
+                      <option value="">Same as plant</option>
+                      {rpTags.map((rp) => (
+                        <option key={rp} value={rp}>
+                          {rp}
+                        </option>
+                      ))}
+                    </select>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-8 text-xs"
+                      aria-label={`Remove ${loc.name || "location"}`}
+                      onClick={() => setLocs(d.locations.filter((_, j) => j !== i))}
+                    >
+                      Remove
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        );
+      })}
     </div>
   );
 }

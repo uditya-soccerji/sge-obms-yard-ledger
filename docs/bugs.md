@@ -10,7 +10,7 @@ Screenshots, when saved as files, go in `docs/bugs/` as `B<nn>-<n>.png`. Never i
 | # | Reported | Role · site · page | Bug | Status |
 |---|---|---|---|---|
 | B01 | 2026-10-13 | Super Admin · all sites · Master Data → Sites | Can't type a comma (or a space after a word) in "Plants (comma)", so plants can't be added on Add site or Edit | fixed |
-| B02 | 2026-10-13 | Super Admin · MTF · Master Data → Sites | Feature: plants need locations under them, and each plant/location needs an RP (MTF runs RP2 and RP5) | open (ready to build) |
+| B02 | 2026-10-13 | Super Admin · MTF · Master Data → Sites | Feature: plants need locations under them, and each plant/location needs an RP (MTF runs RP2 and RP5) | fixed (migration to apply at deploy) |
 | B03 | 2026-10-13 | Supervisor (Prasan Da, viewed as) · MTF · DPR → New | New supervisor's DPR shows an empty Labour attendance, and there's no way to give them labourers | open (rules agreed, §20) |
 | B04 | 2026-10-13 | Admin · DPR approvals | Admin approves DPR work quantities on SIC's behalf; both logged | open (rule agreed) |
 | B05 | 2026-10-13 | Supervisor · DPR → Equipment assigned | Equipment needs a detailed per-supervisor "setup" list (kinds, expiry, FEFO/FIFO), with expiry added by the supervisor | open (ready to build) |
@@ -84,7 +84,15 @@ Screenshots, when saved as files, go in `docs/bugs/` as `B<nn>-<n>.png`. Never i
 - Answer (2026-10-13): **MTF is both the site and a plant** in it. Plant MTF has the 5 "MTF" locations; plant RRTF has 8. The live MTF plant list (MTF, ARMA, RRTF) is correct as it stands. ARMA has no locations listed yet.
 - RPs (2026-10-13): **MTF – RP5, RRTF – RP5, ARMA – RP2** (ARMA is RP2 at both MTF and DTA). Every location takes its plant's RP; none differ. DTA's other plants take the site's RP2 by default.
 - Status: all questions answered. Ready to build when the app folder is free. The migration needs a confirm before it's applied to the live database.
-- Fix: _pending (app folder busy; needs answers)_
+- Fix (2026-10-13, branch `fix/bugs-2026-10-13`). Built smaller than the plan above: no new tables, one JSON column on the site row, so it saves with the site under the existing `sites_write` policy.
+  - Data: `Site.plantDetails: { name, rp?, locations: { name, rp? }[] }[]` (`src/lib/types.ts`). A plant with no entry has no locations and takes the site's RP when the site runs one RP. A location with no RP takes its plant's.
+  - Pure helpers in `src/lib/site-scope.ts`: `sitePlantDetails`, `plantRp`, `locationRp`, `buildPlantDetails` (trim, drop blank/duplicate locations, drop renamed/removed plants), `checkPlantRps` (every RP must be one the site runs), `parseRpTags`.
+  - Master Data → Sites → Edit: new **RPs run at this site** field, and under the plants a **Plants · RP · locations** editor. Each plant gets an RP picker (default "Site RP"); **Add location** rows each have name, RP ("Same as plant" or an override) and Remove. The table column now reads e.g. `MTF (RP5 · 5 loc), ARMA (RP2), RRTF (RP5 · 8 loc)`. Cell spacing fixed (codes / RP ran into the next column).
+  - Supabase: migration `supabase/migrations/20261013_001_site_plant_details.sql` adds `sites.plant_details jsonb not null default '[]'` (must be an array). `remote.ts` loads and saves it.
+  - Seed (`src/lib/seed.ts`): MTF = MTF RP5 (5 locations), ARMA RP2, RRTF RP5 (8 locations); DTA's ARMA RP2.
+  - Not in B02: Work jobs / DPR lines picking plant → location from this list. That's B07 (painting line) and merge plan PR 2.
+- Verified on `npm run dev` as Super Admin (local data only): entered MTF's RPs and all 13 locations through the editor → "Saved MTF · 3 plants · 13 locations". After a page reload: RRTF RP5, RRTF location 6 "RIL-2", MTF location 2 "Saipem to DTA product (CT vicinity)" all kept. A location RP override saved and reloaded, then was removed again. Site RPs set to only RP5 → refused: "ARMA: RP2 isn't one of this site's RPs (RP5)". DTA's plants show RP2 from the site. No console errors; `tsc` + `eslint src` clean.
+- **Before deploy:** apply the migration to the live Supabase project (`sge-obms`) **first**. Every site save now writes `plant_details`, so without the column all site saves would fail with "Not saved: …". Then enter MTF's RPs and locations on the live site (same steps as above).
 
 ### B03: New supervisor has no labourers to mark, and nobody can assign any
 - Reported: 2026-10-13 · Role: Super Admin viewing as supervisor Prasan Da (@pda) · Site: MTF · Page: DPR → New (painting/blasting, plant RRTF)

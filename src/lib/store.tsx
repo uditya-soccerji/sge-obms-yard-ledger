@@ -339,6 +339,7 @@ function migrateState(parsed: Partial<AppState>): AppState {
             ...s,
             rpTags: s.rpTags ?? [],
             plants: s.plants ?? [],
+            plantDetails: s.plantDetails ?? [],
           }))
         : seed.sites,
     wageLedger: parsed.wageLedger ?? seed.wageLedger,

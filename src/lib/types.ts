@@ -230,6 +230,24 @@ export interface Site {
   rpTags: string[];
   /** Plants / work areas within the site */
   plants: string[];
+  /**
+   * Per-plant RP and locations (B02), keyed by plant name. A plant with no
+   * entry has no locations and takes the site's RP when the site has one.
+   */
+  plantDetails?: PlantDetail[];
+}
+
+export interface PlantLocation {
+  name: string;
+  /** Unset = same RP as its plant */
+  rp?: string;
+}
+
+export interface PlantDetail {
+  /** Matches a name in `Site.plants` (ignoring case) */
+  name: string;
+  rp?: string;
+  locations: PlantLocation[];
 }
 
 export interface StaffMember {
