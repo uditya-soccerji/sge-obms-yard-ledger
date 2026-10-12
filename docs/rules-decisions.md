@@ -38,6 +38,9 @@ Answers from the module-by-module review. Not built yet; implemented together at
 - **Deadline:** next day by 10:00.
 - **Before submitting:** permit + TBT confirmed, every crew member's attendance marked, work quantity filled (m² / m³ above zero, or a reason for zero).
 - **SIC review:** approve, or reject with a reason; a rejected DPR goes back to the supervisor to fix and resubmit.
+- **Admin on behalf of SIC (decided 2026-10-13):** Admin may approve a DPR's work quantities on the SIC's behalf. The log records both: who approved, and on whose behalf. The SIC is notified.
+- **Painting & blasting line (decided 2026-10-13):** plant, location, activity, area m², MPS, paint type, and litres consumed **per paint type** (one or more paints per line).
+- **Notifications (decided 2026-10-13):** saving or submitting a DPR notifies the site's SIC and Admin.
 - **After approval:** locked. Owner / Super Admin can unlock, with a logged reason.
 - **Types:** Painting & blasting, Scaffolding, Safety, Store — plus new DPRs for HR, Admin and other logins (contents to define).
 - **Painting line:** plant, location / bay, MPS scheme, job start date and end date all required (start/end are used to check the JMS). Max 2,000 m² per line. Warn when litres are far off the MPS norm for the area.
@@ -67,6 +70,8 @@ Answers from the module-by-module review. Not built yet; implemented together at
 - **Expiry:** warn 15 days before. (Expired kit is not blocked — not chosen.)
 - **Checklist:** ticked on the DPR every day the item is used.
 - **Status:** supervisor flags a fault; the store manager repairs it and changes the status back.
+- **Supervisor setup (decided 2026-10-13):** each supervisor has a setup of assigned items (compressor, hopper, airless spray painting machine, harness, PPE kit, IFR, helmet, gloves, rope access, …), each with expiry, listed FEFO or FIFO. The supervisor can add the expiry himself (logged).
+- **Who is told (decided 2026-10-13):** any equipment status change goes to the SIC, the site's store manager and the central store manager (all sites).
 
 ## 8. Finance
 - **Who adds entries:** Owner / Super Admin only (Finance, SIC, Admin, Store not chosen).
@@ -77,6 +82,7 @@ Answers from the module-by-module review. Not built yet; implemented together at
 ## 9. Requests (spares, equipment, material)
 - **Who raises:** supervisors, safety supervisor, SIC / Admin, store keeper.
 - **Flow:** Open → SIC approves → store fulfils → requester confirms received.
+- **Store dashboard (decided 2026-10-13):** issue / exchange requests show urgent first, with filters: SIC approval pending, fulfilled, not fulfilled, rejected.
 - **Time limit:** none; just show the age.
 - **On fulfil:** issued from stock (deducts store stock), note / reason required when part-filled or cancelled, requester taps "received" to close.
 
@@ -237,7 +243,7 @@ Management accounting (costing + P&L), not statutory books — Tally stays for G
 - **Major change:** Owner and Super Admin are notified when a labourer is moved off a supervisor's crew (transfer or removal).
 - **Supervisor picking labourers:** only when Owner / Super Admin has given that supervisor the right. A pick is a **request** that the SIC approves before the labourer joins the crew.
 - **Labourer already on another crew:** the request needs SIC approval, and the current supervisor is notified. If the current supervisor **releases** the labourer, they become free and the transfer can go ahead (still through SIC approval).
-- **Attendance:** marking attendance for one's own crew is submitted directly; the SIC gets a notification, not an approval step.
+- **Attendance:** marking attendance for one's own crew is submitted directly; the SIC gets a notification, not an approval step. Work quantities on the DPR are still approved, by the SIC or by Admin on the SIC's behalf (§5).
 
 ## Still open
 - **OT source:** neither ACPL nor eSSL monthly reports carry in/out times. Need an eSSL report with punch times (e.g. "Daily Attendance / In-Out" export) or in/out typed on the DPR.

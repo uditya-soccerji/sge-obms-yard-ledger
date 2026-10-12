@@ -12,6 +12,11 @@ Screenshots, when saved as files, go in `docs/bugs/` as `B<nn>-<n>.png`. Never i
 | B01 | 2026-10-13 | Super Admin · all sites · Master Data → Sites | Can't type a comma (or a space after a word) in "Plants (comma)", so plants can't be added on Add site or Edit | confirmed |
 | B02 | 2026-10-13 | Super Admin · MTF · Master Data → Sites | Feature: plants need locations under them, and each plant/location needs an RP (MTF runs RP2 and RP5) | open (ready to build) |
 | B03 | 2026-10-13 | Supervisor (Prasan Da, viewed as) · MTF · DPR → New | New supervisor's DPR shows an empty Labour attendance, and there's no way to give them labourers | open (rules agreed, §20) |
+| B04 | 2026-10-13 | Admin · DPR approvals | Admin approves DPR work quantities on SIC's behalf; both logged | open (rule agreed) |
+| B05 | 2026-10-13 | Supervisor · DPR → Equipment assigned | Equipment needs a detailed per-supervisor "setup" list (kinds, expiry, FEFO/FIFO), with expiry added by the supervisor | open (questions) |
+| B06 | 2026-10-13 | Store / Central store · dashboard | Equipment status changes reach SIC + site store + central store; requests board with urgent first and status buttons | open (questions) |
+| B07 | 2026-10-13 | Supervisor (Prasan Da) · MTF · DPR → Painting/blasting work | Line needs plant, location, activity, area m², MPS, paint type and litres per paint type | open |
+| B08 | 2026-10-13 | Supervisor · DPR → Save / Submit | Save and Submit should notify SIC and Admin | open (question) |
 
 ## Details
 <!-- One section per bug:
@@ -99,6 +104,36 @@ Screenshots, when saved as files, go in `docs/bugs/` as `B<nn>-<n>.png`. Never i
   2. A supervisor **picking** labourers needs SIC approval. **Attendance** for their crew is submitted directly, and the SIC only gets a notification.
   3. A labourer on **another crew** needs SIC approval, and that supervisor is notified. If they **release** the labourer, the transfer can go ahead.
 - Build adds to the fix plan: `CrewRequest` (requester, labourer, from-supervisor, status: requested / released / approved / rejected); events `crew_changed` (problem flag for moves off a crew → Owner/SA), `crew_requested` (to SIC + current supervisor, instant), `crew_released`, `crew_approved` / `crew_rejected` (to requester), `attendance_submitted` (to SIC, daily summary).
-- Check with owner during build: point 2 makes attendance count when it's submitted. Today attendance becomes official only when the SIC approves the DPR (§5, `reviewDpr` → `attendanceFromApprovedDpr`). Does the SIC still approve the DPR's **work** quantities (§5), while attendance no longer waits for that?
+- Answered (2026-10-13): attendance counts on submit (SIC notified). Work quantities are still approved, by the SIC or by Admin on the SIC's behalf (see B04). So `attendanceFromApprovedDpr` moves from approval to submit.
 - Fix: _pending (app folder busy)_
+
+### B04: Admin approves work quantities on the SIC's behalf
+- Owner rule (2026-10-13, `rules-decisions.md` §5): Admin may approve a DPR's work quantities **on behalf of the SIC**. Both are logged: who approved, as whom ("Admin for SIC <name>").
+- Today: Admin's rights have `dpr: view/create/update/upload/submit` with no `approve` (`ROLE_MATRIX.admin`, `src/lib/permissions.ts`). `reviewDpr` records only `sicReviewedBy`.
+- Fix plan: give Admin `dpr: approve` and `approvals: view/approve` for their sites. The review record gets `approvedBy`, `approvedAs: "sic" | "admin_for_sic"` and `onBehalfOf` (the site's SIC). Audit/event text: "Approved by N. Sharma (Admin) on behalf of R. Mehta (SIC)". The SIC gets a notification that Admin approved.
+
+### B05: Supervisor equipment "setup", in detail
+- Ask: under each supervisor, a **setup** listing every item assigned: Compressor, Hopper, Airless spray painting machine, Harness, PPE kit, IFR, Helmet, Gloves, Rope access. Each with expiry, opening in detail. List order can be **FEFO** (first expiry first out) or **FIFO** (first issued first out). The **supervisor can add the expiry** himself.
+- Screenshot (Prasan Da, MTF, DPR → New): "Equipment assigned" shows a flat tick list of the site's items (AIR-MTF-01 airless, COM-MTF-02 compressor, HAR-MTF-03 harness) with status and expiry. Nothing is per supervisor, there's no detail view, and expiry can't be edited.
+- Today: `EquipmentItem` (`src/lib/types.ts`) knows only 4 kinds (hopper, compressor, airless, harness), one optional `expiryDate`, status ok/due/fault and `assignedTo`. The DPR lists every item on the site (`dpr-form.tsx`: `state.equipment.filter(e => e.siteId === value.siteId)`).
+- Fix plan: kinds list in Master Data (the 9 above, extendable). Item fields: tag (§7 `TYPE-SITE-##`), kind, assigned supervisor, issued on, expiry, status, qty for consumables (gloves, PPE kits), and a history of status/expiry changes. Setup view per supervisor with a FEFO/FIFO toggle and expiry badges (§7: warn 15 days before). The DPR lists only the supervisor's own setup. The supervisor can set or adjust an expiry; that's logged and the store is notified (B06).
+- Questions: what is **IFR**? Are gloves / PPE kits tracked by **quantity** (consumables) rather than one tag each?
+
+### B06: Equipment status → SIC + site store + central store; store requests board
+- Ask: any change in equipment status is shown to the **SIC**, the **Store manager of that site** and a **Central store manager** who sees all sites. Requests for **issue or exchange** appear on the store dashboard, **urgent first**, with buttons/filters: **SIC approval pending, fulfilled, not fulfilled, rejected**.
+- Today: there's one `store` role (site-scoped) and no central store. `EquipmentRequestStatus` is open / fulfilling / fulfilled / cancelled, with no SIC-approval or reject step, although §9 says "Open → SIC approves → store fulfils → requester confirms". Requests have `kind` spare/equipment/material/other, with no "exchange".
+- Fix plan: request statuses `sic_pending → approved → fulfilled | not_fulfilled | rejected` (reason required for reject / not fulfilled, §9), kind + `issue | exchange`. A store dashboard board sorted urgent-first with those filters. Events `equipment_status` (to SIC + site store + central store) and `request_*` (to requester, SIC, store).
+- Question: is the **Central store manager** a Store login with access to all sites (like HR / Finance, §2), or a separate role?
+
+### B07: Painting/blasting line fields
+- Ask: each painting & blasting work line has **Plant name, Location, Activity, Area m², MPS, Paint type, and litres consumed per paint type**.
+- Screenshot (Prasan Da, MTF, DPR → New → Painting / blasting work): the line has Bay / location (free text), Activity (Painting), Area m² (0), MPS (a plain number, "2") and one **Paint litres** box. There's **no plant on the line** (one plant for the whole DPR at the top), **no paint type**, and only one litres figure.
+- Today: the old DPR line (`DprPaintWorkLine`) has plant, bay, activity, areaM2, mpsScheme (number) and a single `paintLitres`. The Work `DprEntry` has one `paintSap` + `litres`, so only one paint per line.
+- Fix plan: line = plant (Master Data, B02) → location (B02) → activity → area m² (from members, max 2,000 per §5) → MPS (picked from the MPS list, not typed) → **paints: [{ paint type / SAP, litres }]** (one or more, "Add paint"). Paint stock deduction (§6) then runs per paint type, and litres far off the MPS norm are flagged (§5). Fold into merge plan PR 2 / PR 4.
+
+### B08: Save and Submit notify SIC and Admin
+- Ask: when a supervisor **saves** or **submits** a DPR, the **SIC and Admin** are notified. (Screenshot buttons: "Save draft" and "Save & submit to SIC".)
+- Today: the old DPR desk writes no notification events; Work events cover jobs, JMS and paint only.
+- Fix plan: events `dpr_saved` and `dpr_submitted` for the site's SIC and Admin(s). Submit is instant (§19). Rename the button "Save & submit" (it goes to SIC and Admin).
+- Question: should a **draft save** also be instant, or go into the daily summary? Suggested: daily summary, so the bell isn't flooded by every save.
 
