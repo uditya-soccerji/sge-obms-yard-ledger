@@ -55,7 +55,11 @@ Screenshots, when saved as files, go in `docs/bugs/` as `B<nn>-<n>.png`. Never i
 | MTF | Haul road |
 | MTF | Culvert-2 |
 | RRTF | North culvert |
-| RRTF | RRTF ISBL/OSBL CORRIDOR, LPG RAIL GANTRY, LPG RACK, RIL-1, RIL-2 (one cell; one location or five? asked) |
+| RRTF | RRTF ISBL/OSBL CORRIDOR |
+| RRTF | LPG RAIL GANTRY |
+| RRTF | LPG RACK |
+| RRTF | RIL-1 |
+| RRTF | RIL-2 |
 | RRTF | South culvert |
 | RRTF | Street-3 end culvert |
 
@@ -65,6 +69,7 @@ Screenshots, when saved as files, go in `docs/bugs/` as `B<nn>-<n>.png`. Never i
   1. Migration `supabase/migrations/<date>_site_plants_locations.sql`: a `site_plants` table (site_id, name, rp, active) and a `plant_locations` table (plant_id, name, rp, active), with RLS like `sites`. Keep `sites.plants` filled for one release so nothing breaks.
   2. Master Data → Sites: per site, a plant table (name, RP from the site's RP list) with locations under each (name, RP; default = the plant's RP).
   3. Work jobs and DPR lines pick plant → location from Master Data (fits merge plan PR 2 "one plant list per site").
-- Open questions: RP for MTF, ARMA and RRTF (and for each location if it differs from its plant)? Is the LPG/RIL cell one location or five? Does ARMA stay under MTF?
+- Answers (2026-10-13): MTF is a **site**, not a plant. RRTF and ARMA are **plants**. The LPG/RIL cell is **five separate locations**. ARMA stays under **both** DTA and MTF (each site has its own ARMA plant, which §3 allows).
+- Still open: (a) the five locations marked "MTF" in the sheet: do they sit directly under the MTF site (no plant), or under a plant? Should the "MTF" entry in MTF's plant list be removed? (b) RP for RRTF, for ARMA at MTF and for ARMA at DTA (and for any location that differs from its plant).
 - Fix: _pending (app folder busy; needs answers)_
 
