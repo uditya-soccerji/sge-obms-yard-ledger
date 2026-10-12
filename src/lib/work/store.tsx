@@ -39,6 +39,8 @@ interface WorkApi {
   /** Mark every current event as seen by this account (bell) */
   markSeen: (accountId: string) => void;
   resetWork: () => void;
+  /** Log an event raised outside the Work store (e.g. crew changes, docs §20) */
+  notify: (e: Omit<WorkEvent, "id" | "seq" | "at" | "day" | "actorName" | "actorRole">) => void;
 }
 
 const WorkContext = createContext<WorkApi | null>(null);
@@ -469,8 +471,8 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const api = useMemo<WorkApi>(
-    () => ({ work, hydrated, addPlanLine, startJob, addDpr, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, markSeen, resetWork }),
-    [work, hydrated, addPlanLine, startJob, addDpr, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, markSeen, resetWork]
+    () => ({ work, hydrated, addPlanLine, startJob, addDpr, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, markSeen, resetWork, notify: log }),
+    [work, hydrated, addPlanLine, startJob, addDpr, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, markSeen, resetWork, log]
   );
   return <WorkContext.Provider value={api}>{children}</WorkContext.Provider>;
 }

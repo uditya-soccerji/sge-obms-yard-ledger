@@ -16,6 +16,7 @@ import {
   parseAcplCsv,
 } from "./acpl";
 import { dprCrew, validateDprForSubmit } from "./dpr-validate";
+import { approveBlock, checkCrewRequest } from "./crew";
 import { scoreFromMatchRatio } from "./estimate";
 import { effectivePermission } from "./permissions";
 import { PAINT_STAGE_ORDER } from "./paint-lifecycle";
@@ -43,6 +44,7 @@ import { WORKING } from "./attendance";
 import { checkSeat, checkSites } from "./users";
 import type {
   AcplMatchRow,
+  CrewRequest,
   AcplPunchRow,
   AcplResolveStatus,
   AppState,
@@ -157,6 +159,15 @@ interface StoreApi {
     input: Omit<RateLine, "id" | "superseded"> & { id?: string; superseded?: boolean }
   ) => string;
   updateTrade: (id: string, patch: Partial<TradeDefinition>) => void;
+  /** Crews (docs §20) */
+  assignCrew: (
+    labourerIds: string[],
+    supervisorId: string
+  ) => { ok: boolean; error?: string; moved: { labourerId: string; name: string; fromSupervisorId: string | null }[] };
+  removeFromCrew: (labourerId: string) => { ok: boolean; error?: string };
+  requestCrew: (labourerIds: string[], note?: string) => { ok: boolean; error?: string; created: CrewRequest[] };
+  releaseCrew: (requestId: string) => { ok: boolean; error?: string };
+  decideCrew: (requestId: string, approve: boolean, note: string) => { ok: boolean; error?: string };
   addTrade: (input: Omit<TradeDefinition, "id"> & { id?: string }) => string;
   updateLabourer: (
     id: string,
@@ -299,6 +310,7 @@ function migrateState(parsed: Partial<AppState>): AppState {
     users,
     auditLog: parsed.auditLog ?? seed.auditLog,
     equipmentRequests: parsed.equipmentRequests ?? seed.equipmentRequests,
+    crewRequests: parsed.crewRequests ?? [],
     attendance: (parsed.attendance ?? seed.attendance).map((a) =>
       (a.status as string) === "off" ? { ...a, status: "weekly_off" as const } : a
     ),
@@ -949,7 +961,16 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           ...equipmentRequests,
         ];
       }
-      const next = { ...s, dprDocuments, equipmentRequests };
+      // docs §20: the crew's attendance counts when the DPR is submitted; the SIC is
+      // told, and approves only the work quantities. A resubmit replaces the marks.
+      const derived = attendanceFromApprovedDpr(id, doc.date, doc.siteId, doc.labourMarks, doc.submitterId);
+      const keys = new Set(derived.map((a) => `${a.date}:${a.labourerId}`));
+      const attendance = [
+        ...derived,
+        // Another DPR's marks stay: a split day across two supervisors (docs §4)
+        ...s.attendance.filter((a) => a.sourceDprId !== id && (a.sourceDprId || !keys.has(`${a.date}:${a.labourerId}`))),
+      ];
+      const next = { ...s, dprDocuments, equipmentRequests, attendance };
       return {
         ...next,
         auditLog: [
@@ -957,7 +978,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             next,
             "dpr",
             "submit",
-            `Submitted ${id} (frozen until SIC review)`,
+            `Submitted ${id} (frozen until SIC review; attendance recorded)`,
             doc.plant
           ),
           ...s.auditLog,
@@ -990,26 +1011,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             : d
         );
 
-        let attendance = s.attendance;
-        if (decision === "sic_approved") {
-          attendance = attendance.filter((a) => a.sourceDprId !== id);
-          const derived = attendanceFromApprovedDpr(
-            id,
-            doc.date,
-            doc.siteId,
-            doc.labourMarks,
-            s.currentUserId ?? "st-sic"
-          );
-          // The approved DPR replaces manual marks for those people, but another
-          // approved DPR's marks stay: a split day across two supervisors (docs §4)
-          const keys = new Set(derived.map((a) => `${a.date}:${a.labourerId}`));
-          attendance = [
-            ...derived,
-            ...attendance.filter((a) => a.sourceDprId || !keys.has(`${a.date}:${a.labourerId}`)),
-          ];
-        }
-
-        const next = { ...s, dprDocuments, attendance };
+        // Attendance was recorded at submit (docs §20); review covers the work quantities
+        const next = { ...s, dprDocuments };
         return {
           ...next,
           auditLog: [
@@ -1722,6 +1725,139 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     },
     []
   );
+
+  /** SIC / Owner / SA put labourers on a supervisor's crew (docs §20). Reports who moved off another crew. */
+  const assignCrew = useCallback((labourerIds: string[], supervisorId: string) => {
+    const cur = stateRef.current;
+    if (!can(cur, "crew", "approve")) return { ...DENIED, moved: [] };
+    const sup = cur.staff.find((x) => x.id === supervisorId && x.role === "supervisor");
+    if (!sup) return { ok: false as const, error: "Pick a supervisor", moved: [] };
+    const picked = cur.labourers.filter((l) => labourerIds.includes(l.id) && l.active && l.supervisorId !== supervisorId);
+    if (!picked.length) return { ok: false as const, error: "Pick at least one labourer not already on this crew", moved: [] };
+    const off = picked.filter((l) => l.siteId !== sup.siteId);
+    if (off.length) return { ok: false as const, error: `${off[0].name} works on another site`, moved: [] };
+    const moved = picked.map((l) => ({ labourerId: l.id, name: l.name, fromSupervisorId: l.supervisorId || null }));
+    const ids = new Set(picked.map((l) => l.id));
+    setState((s) => {
+      const next = {
+        ...s,
+        labourers: s.labourers.map((l) => (ids.has(l.id) ? { ...l, supervisorId } : l)),
+        // A direct move settles any open request for these labourers
+        crewRequests: s.crewRequests.map((r) =>
+          ids.has(r.labourerId) && (r.status === "requested" || r.status === "released")
+            ? { ...r, status: (r.toSupervisorId === supervisorId ? "approved" : "cancelled") as CrewRequest["status"], decidedBy: s.currentUserId ?? undefined, decidedAt: new Date().toISOString() }
+            : r
+        ),
+      };
+      return {
+        ...next,
+        auditLog: [
+          ...moved.map((m) =>
+            makeAudit(next, "crew", "assign", `${m.name} → ${sup.name}${m.fromSupervisorId ? ` (from ${s.staff.find((x) => x.id === m.fromSupervisorId)?.name ?? m.fromSupervisorId})` : " (was unassigned)"}`)
+          ),
+          ...s.auditLog,
+        ],
+      };
+    });
+    return { ok: true as const, moved };
+  }, []);
+
+  /** Take a labourer off their crew (unassigned). A major change (docs §20). */
+  const removeFromCrew = useCallback((labourerId: string) => {
+    const cur = stateRef.current;
+    if (!can(cur, "crew", "approve")) return DENIED;
+    const lab = cur.labourers.find((l) => l.id === labourerId);
+    if (!lab?.supervisorId) return { ok: false as const, error: "Not on a crew" };
+    const from = cur.staff.find((x) => x.id === lab.supervisorId)?.name ?? lab.supervisorId;
+    setState((s) => {
+      const next = { ...s, labourers: s.labourers.map((l) => (l.id === labourerId ? { ...l, supervisorId: "" } : l)) };
+      return { ...next, auditLog: [makeAudit(next, "crew", "remove", `${lab.name} taken off ${from}'s crew`), ...s.auditLog] };
+    });
+    return { ok: true as const };
+  }, []);
+
+  /** A supervisor with the right asks for labourers; the SIC approves (docs §20). */
+  const requestCrew = useCallback((labourerIds: string[], note?: string) => {
+    const cur = stateRef.current;
+    const me = cur.staff.find((x) => x.id === cur.currentUserId && x.role === "supervisor");
+    if (!me || !can(cur, "crew", "create")) return { ...DENIED, created: [] as CrewRequest[] };
+    const created: CrewRequest[] = [];
+    for (const id of labourerIds) {
+      const lab = cur.labourers.find((l) => l.id === id);
+      if (!lab) continue;
+      const bad = checkCrewRequest(lab, me.id, me.siteId, [...cur.crewRequests, ...created]);
+      if (bad) return { ok: false as const, error: bad, created: [] as CrewRequest[] };
+      created.push({
+        id: uid("cr"),
+        siteId: me.siteId,
+        labourerId: lab.id,
+        toSupervisorId: me.id,
+        fromSupervisorId: lab.supervisorId || null,
+        requestedBy: me.id,
+        requestedAt: new Date().toISOString(),
+        status: "requested",
+        ...(note?.trim() ? { note: note.trim() } : {}),
+      });
+    }
+    if (!created.length) return { ok: false as const, error: "Pick at least one labourer", created };
+    setState((s) => {
+      const next = { ...s, crewRequests: [...created, ...s.crewRequests] };
+      return {
+        ...next,
+        auditLog: [
+          ...created.map((r) => makeAudit(next, "crew", "request", `${me.name} asked for ${s.labourers.find((l) => l.id === r.labourerId)?.name ?? r.labourerId}`)),
+          ...s.auditLog,
+        ],
+      };
+    });
+    return { ok: true as const, created };
+  }, []);
+
+  /** The current supervisor lets a requested labourer go (docs §20). */
+  const releaseCrew = useCallback((requestId: string) => {
+    const cur = stateRef.current;
+    const r = cur.crewRequests.find((x) => x.id === requestId);
+    if (!r || r.status !== "requested" || !r.fromSupervisorId) return { ok: false as const, error: "Nothing to release" };
+    if (cur.currentUserId !== r.fromSupervisorId && !can(cur, "crew", "approve")) return DENIED;
+    setState((s) => {
+      const next = { ...s, crewRequests: s.crewRequests.map((x) => (x.id === requestId ? { ...x, status: "released" as const, releasedAt: new Date().toISOString() } : x)) };
+      return { ...next, auditLog: [makeAudit(next, "crew", "release", `${s.labourers.find((l) => l.id === r.labourerId)?.name ?? r.labourerId} released`), ...s.auditLog] };
+    });
+    return { ok: true as const };
+  }, []);
+
+  /** SIC approves (labourer joins the crew) or rejects a request (docs §20). */
+  const decideCrew = useCallback((requestId: string, approve: boolean, note: string) => {
+    const cur = stateRef.current;
+    if (!can(cur, "crew", "approve")) return DENIED;
+    const r = cur.crewRequests.find((x) => x.id === requestId);
+    if (!r) return { ok: false as const, error: "Request not found" };
+    const lab = cur.labourers.find((l) => l.id === r.labourerId);
+    if (approve) {
+      const block = approveBlock(r, lab);
+      if (block) return { ok: false as const, error: block };
+    } else if (!note.trim()) {
+      return { ok: false as const, error: "Give a reason so the supervisor knows why" };
+    }
+    setState((s) => {
+      const now = new Date().toISOString();
+      const next = {
+        ...s,
+        labourers: approve ? s.labourers.map((l) => (l.id === r.labourerId ? { ...l, supervisorId: r.toSupervisorId } : l)) : s.labourers,
+        crewRequests: s.crewRequests.map((x) =>
+          x.id === requestId
+            ? { ...x, status: (approve ? "approved" : "rejected") as CrewRequest["status"], decidedBy: s.currentUserId ?? undefined, decidedAt: now, ...(note.trim() ? { note: note.trim() } : {}) }
+            : x
+        ),
+      };
+      const to = s.staff.find((x) => x.id === r.toSupervisorId)?.name ?? r.toSupervisorId;
+      return {
+        ...next,
+        auditLog: [makeAudit(next, "crew", approve ? "approve" : "reject", `${lab?.name ?? r.labourerId} → ${to}${note.trim() ? ` · ${note.trim()}` : ""}`), ...s.auditLog],
+      };
+    });
+    return { ok: true as const };
+  }, []);
 
   const addLabourer = useCallback(
     (row: Omit<Labourer, "id"> & { id?: string }) => {
@@ -2467,6 +2603,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       upsertMaterial,
       setCatalogActive,
       upsertSite,
+      assignCrew,
+      removeFromCrew,
+      requestCrew,
+      releaseCrew,
+      decideCrew,
       addStaff,
       addWageEntry,
       acknowledgeFinanceAlert,
@@ -2522,6 +2663,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       upsertMaterial,
       setCatalogActive,
       upsertSite,
+      assignCrew,
+      removeFromCrew,
+      requestCrew,
+      releaseCrew,
+      decideCrew,
       addStaff,
       addWageEntry,
       acknowledgeFinanceAlert,

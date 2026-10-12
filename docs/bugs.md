@@ -11,7 +11,7 @@ Screenshots, when saved as files, go in `docs/bugs/` as `B<nn>-<n>.png`. Never i
 |---|---|---|---|---|
 | B01 | 2026-10-13 | Super Admin · all sites · Master Data → Sites | Can't type a comma (or a space after a word) in "Plants (comma)", so plants can't be added on Add site or Edit | fixed |
 | B02 | 2026-10-13 | Super Admin · MTF · Master Data → Sites | Feature: plants need locations under them, and each plant/location needs an RP (MTF runs RP2 and RP5) | fixed (migration to apply at deploy) |
-| B03 | 2026-10-13 | Supervisor (Prasan Da, viewed as) · MTF · DPR → New | New supervisor's DPR shows an empty Labour attendance, and there's no way to give them labourers | open (rules agreed, §20) |
+| B03 | 2026-10-13 | Supervisor (Prasan Da, viewed as) · MTF · DPR → New | New supervisor's DPR shows an empty Labour attendance, and there's no way to give them labourers | fixed (shared database still to do) |
 | B04 | 2026-10-13 | Admin · DPR approvals | Admin approves DPR work quantities on SIC's behalf; both logged | open (rule agreed) |
 | B05 | 2026-10-13 | Supervisor · DPR → Equipment assigned | Equipment needs a detailed per-supervisor "setup" list (kinds, expiry, FEFO/FIFO), with expiry added by the supervisor | open (ready to build) |
 | B06 | 2026-10-13 | Store / Central store · dashboard | Equipment status changes reach SIC + site store + central store; requests board with urgent first and status buttons | open (ready to build) |
@@ -118,7 +118,25 @@ Screenshots, when saved as files, go in `docs/bugs/` as `B<nn>-<n>.png`. Never i
   3. A labourer on **another crew** needs SIC approval, and that supervisor is notified. If they **release** the labourer, the transfer can go ahead.
 - Build adds to the fix plan: `CrewRequest` (requester, labourer, from-supervisor, status: requested / released / approved / rejected); events `crew_changed` (problem flag for moves off a crew → Owner/SA), `crew_requested` (to SIC + current supervisor, instant), `crew_released`, `crew_approved` / `crew_rejected` (to requester), `attendance_submitted` (to SIC, daily summary).
 - Answered (2026-10-13): attendance counts on submit (SIC notified). Work quantities are still approved, by the SIC or by Admin on the SIC's behalf (see B04). So `attendanceFromApprovedDpr` moves from approval to submit.
-- Fix: _pending (app folder busy)_
+- Fix (2026-10-13, branch `fix/bugs-2026-10-13`), parts (a)–(d) plus attendance on submit:
+  - Rights: new module `crew` (`src/lib/types.ts`, `ROLE_MATRIX`). Owner / Super Admin `view, approve, update`; SIC `view, approve`; supervisor `view` only. The per-person **"Can pick own crew"** right is the override `crew:create`, switched in Master Data → Users / seats (a checkbox under each supervisor's role, Owner / SA only).
+  - Rules in `src/lib/crew.ts` (pure): `canManageCrew`, `canPickOwnCrew`, `checkCrewRequest` (active, same site, not already on the crew, not already requested), `approveBlock` (a labourer still on another crew can't be approved until released).
+  - Store (`src/lib/store.tsx`): `assignCrew`, `removeFromCrew`, `requestCrew`, `releaseCrew`, `decideCrew` (reject needs a reason); `AppState.crewRequests`. Every action writes an audit entry (module `crew`).
+  - Notifications (`src/lib/work/events.ts`): `crew_changed` (problem when someone moves off a crew → Owner / SA), `crew_requested`, `crew_released`, `crew_decided` (instant). The SIC of the site and both supervisors involved are told. New `alsoStaffId` so a second supervisor hears; `notify()` on the Work API; bell links open Operations → Crews.
+  - **Operations → Crews** (`src/components/crew/crew-desk.tsx`, `/crew`): SIC / Owner / SA pick a supervisor, see the crew, "Take off crew", add from **Unassigned** / **On other crews**, and Approve / Reject requests. A supervisor sees **My crew**, Releases labourers others ask for, and (with the right) requests labourers with a note for the SIC.
+  - Master Data → Labourers: new **Supervisor** column (a change there goes through the same crew actions, logged + notified); **Add labourer** starts with no crew (was `staff[0]` = Super Admin).
+  - DPR form: an empty crew shows "No labourers are on this supervisor's crew yet… Operations → Crews".
+  - **Attendance now counts on submit** (`submitDpr` derives it; `reviewDpr` only reviews the work). A resubmit replaces that DPR's marks; another DPR's marks stay (split day, §4).
+- Verified on `npm run dev` (local data, demo logins):
+  - Super Admin ticked "Can pick own crew" for @paint → "@paint can now pick their own crew".
+  - SIC → Crews (DTA): took Imran Shaikh off K. Solanki (3 → 2) and moved Ramesh Kumar from V. Chauhan (→ 3). SIC's bell showed both as **PROBLEM**.
+  - @paint (V. Chauhan) saw "My crew 23", no take-off buttons; requested Imran Shaikh (note "Need for B-12 blasting") and Mahesh Rathod (M. Rathwa's crew).
+  - @scaffold (M. Rathwa) got an instant "V. Chauhan asks for Mahesh Rathod… they must release first", saw only that request, had no pick box, and released him.
+  - SIC: Reject without a reason was refused; approved both → V. Chauhan's crew 25 incl. both.
+  - A new request for Anil Prajapati (still on M. Rathwa's crew, not released) showed Approve disabled with "Waiting for the current supervisor to release". Rejected with a reason.
+  - Super Admin filed K. Solanki's DPR: the crew listed Ramesh Kumar (the SIC's move), and Submit recorded 3 attendance marks while the DPR stayed **submitted** (not approved); audit "attendance recorded".
+  - Audit log listed all 9 crew actions in order. `tsc` + `eslint src` clean, no console errors.
+- **Not done (e):** labourers and crews still live in each browser, not Supabase (AGENTS.md §2). On the live site, a crew change made on one device won't show on another until labourers move to the shared database. That's a backend step of its own (migration + RLS); confirm before it's applied.
 
 ### B04: Admin approves work quantities on the SIC's behalf
 - Owner rule (2026-10-13, `rules-decisions.md` §5): Admin may approve a DPR's work quantities **on behalf of the SIC**. Both are logged: who approved, as whom ("Admin for SIC <name>").

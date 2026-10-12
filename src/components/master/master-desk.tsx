@@ -18,6 +18,8 @@ import { MASTER_SHEETS, type MasterSheetId } from "@/lib/master/types";
 import { canAccessMasterData } from "@/lib/desk";
 import { ROLES } from "@/lib/roles";
 import { useStore } from "@/lib/store";
+import { useWork } from "@/lib/work/store";
+import { hasPickRight, withPickRight } from "@/lib/crew";
 import type { CatalogItem, MaterialItem } from "@/lib/master/types";
 import type { Labourer, PlantDetail, RoleId, Site, UserAccount } from "@/lib/types";
 import {
@@ -723,6 +725,12 @@ function UsersSheet({ showInactive }: { showInactive: boolean }) {
                   if (!r.ok) setMsg({ ok: false, text: r.error ?? "Failed" });
                 });
               }}
+              onPickRight={(on) => {
+                // docs §20: Owner / SA let a supervisor pick their own crew (requests still need the SIC)
+                void updateUser(u.id, { permissionOverrides: withPickRight(u.permissionOverrides, on) }).then((r) => {
+                  setMsg(r.ok ? { ok: true, text: `@${u.username} ${on ? "can now" : "can no longer"} pick their own crew` } : { ok: false, text: r.error ?? "Failed" });
+                });
+              }}
             />
           ))}
         </tbody>
@@ -792,6 +800,7 @@ function UserRow({
   onSites,
   onViewAs,
   onLink,
+  onPickRight,
 }: {
   user: UserAccount;
   isSa: boolean;
@@ -802,6 +811,7 @@ function UserRow({
   onSites: (ids: string[]) => string | null;
   onViewAs: () => void;
   onLink: (staffId: string) => void;
+  onPickRight: (on: boolean) => void;
 }) {
   const { fullState: state } = useStore();
   const linked = user.staffId
@@ -846,7 +856,21 @@ function UserRow({
           )}
         </div>
       </td>
-      <td className="py-2 text-xs">{user.roles.join(", ")}</td>
+      <td className="py-2 text-xs">
+        {user.roles.join(", ")}
+        {user.roles.includes("supervisor") ? (
+          <label className="mt-1 flex items-center gap-1.5 text-[11px] text-[var(--sge-ink-2)]">
+            <input
+              type="checkbox"
+              aria-label={`@${user.username} can pick own crew`}
+              disabled={!canEdit}
+              checked={hasPickRight(user)}
+              onChange={(e) => onPickRight(e.target.checked)}
+            />
+            Can pick own crew
+          </label>
+        ) : null}
+      </td>
       <td className="py-2 text-xs">
         {editing ? (
           <div className="space-y-1.5">
@@ -924,8 +948,31 @@ function LabourSheet({
   scope: ScopeFilter;
   showInactive: boolean;
 }) {
-  const { fullState: state, updateLabourer, addLabourer } = useStore();
+  const { fullState: state, updateLabourer, addLabourer, assignCrew, removeFromCrew } = useStore();
+  const { notify } = useWork();
   const [q, setQ] = useState("");
+  const [crewMsg, setCrewMsg] = useState<string | null>(null);
+  const supsOf = (siteId: string) => state.staff.filter((x) => x.role === "supervisor" && x.siteId === siteId);
+  const nameOf = (id: string) => state.staff.find((x) => x.id === id)?.name ?? id;
+
+  /** Changing a labourer's supervisor here is a crew change: logged and notified (docs §20). */
+  function setSupervisor(l: Labourer, supervisorId: string) {
+    if (supervisorId === l.supervisorId) return;
+    const r = supervisorId ? assignCrew([l.id], supervisorId) : removeFromCrew(l.id);
+    if (!r.ok) return setCrewMsg(r.error ?? "Not changed");
+    setCrewMsg(null);
+    notify({
+      kind: "crew_changed",
+      siteId: l.siteId,
+      problem: !!l.supervisorId,
+      subjectStaffId: l.supervisorId || supervisorId,
+      alsoStaffId: supervisorId || undefined,
+      title: supervisorId ? `${l.name} → ${nameOf(supervisorId)}'s crew` : `${l.name} taken off ${nameOf(l.supervisorId)}'s crew`,
+      detail: l.supervisorId ? `Was with ${nameOf(l.supervisorId)} · changed in Master Data` : "Was unassigned · changed in Master Data",
+      tab: "/operations?p=crew",
+      refId: l.id,
+    });
+  }
   const contractors = state.masterCatalog.contractors.filter((c) => c.active);
   const trades = state.tradeCatalogue.filter((t) => t.active);
   const activeSite = entrySiteId(state);
@@ -946,7 +993,8 @@ function LabourSheet({
       epNumber: "EP-",
       gatePass: "GP-",
       siteId: entrySiteId(state),
-      supervisorId: state.staff[0]?.id ?? "",
+      // Starts on no crew; the SIC (or Owner / SA) puts them on one (docs §20, B03)
+      supervisorId: "",
       contractorId: contractors[0]?.id ?? "con-sge",
       wageDaily: 0,
       equipmentIds: [],
@@ -970,11 +1018,13 @@ function LabourSheet({
           Add labourer
         </Button>
         <span className="text-xs text-[var(--sge-ink-3)]">{rows.length} rows</span>
+        {crewMsg ? <span className="text-xs text-[var(--sge-crit)]">{crewMsg}</span> : null}
       </div>
-      <div className="grid grid-cols-[1.4fr_0.8fr_0.8fr_0.9fr_4.5rem_5.5rem] gap-2 border-b border-[var(--sge-line)] px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--sge-ink-3)]">
+      <div className="grid grid-cols-[1.4fr_0.8fr_0.8fr_1fr_0.9fr_4.5rem_5.5rem] gap-2 border-b border-[var(--sge-line)] px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--sge-ink-3)]">
         <span>Name</span>
         <span>Trade</span>
         <span>Contractor</span>
+        <span>Supervisor</span>
         <span>EP</span>
         <span>Wage</span>
         <span />
@@ -984,7 +1034,7 @@ function LabourSheet({
         rowHeight={44}
         height={Math.min(520, Math.max(180, rows.length * 44 + 8))}
         render={(l: Labourer) => (
-          <div className="grid h-full grid-cols-[1.4fr_0.8fr_0.8fr_0.9fr_4.5rem_5.5rem] items-center gap-2 border-b border-[var(--sge-line)] px-2 text-sm">
+          <div className="grid h-full grid-cols-[1.4fr_0.8fr_0.8fr_1fr_0.9fr_4.5rem_5.5rem] items-center gap-2 border-b border-[var(--sge-line)] px-2 text-sm">
             <Input
               value={l.name}
               onChange={(e) => updateLabourer(l.id, { name: e.target.value })}
@@ -1010,6 +1060,22 @@ function LabourSheet({
               {contractors.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
+                </option>
+              ))}
+            </select>
+            <select
+              aria-label={`Supervisor for ${l.name}`}
+              className="h-8 rounded-sm border border-[var(--sge-line)] bg-[var(--sge-paper)] text-xs"
+              value={l.supervisorId}
+              onChange={(e) => setSupervisor(l, e.target.value)}
+            >
+              <option value="">— No crew —</option>
+              {l.supervisorId && !supsOf(l.siteId).some((x) => x.id === l.supervisorId) ? (
+                <option value={l.supervisorId}>{nameOf(l.supervisorId)}</option>
+              ) : null}
+              {supsOf(l.siteId).map((x) => (
+                <option key={x.id} value={x.id}>
+                  {x.name}
                 </option>
               ))}
             </select>

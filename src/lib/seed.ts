@@ -1369,6 +1369,7 @@ export function createSeedState(): AppState {
         flaggedToSic: false,
       },
     ],
+    crewRequests: [],
     equipmentRequests: [
       {
         id: "er-1",

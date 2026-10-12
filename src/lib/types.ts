@@ -34,7 +34,9 @@ export type ModuleId =
   | "submissions"
   | "trades"
   | "rates"
-  | "master";
+  | "master"
+  /** Supervisor crews: who works under whom (docs §20) */
+  | "crew";
 
 export type PermissionAction =
   | "view"
@@ -287,7 +289,7 @@ export interface AttendanceRecord {
   markedBy: string;
   siteId: string;
   note?: string;
-  /** Set when derived from an SIC-approved DPR */
+  /** Set when derived from a submitted DPR (docs §20: attendance counts on submit) */
   sourceDprId?: string;
   reconciled?: boolean;
   /** HR correction of a DPR-derived mark: what it was before (the DPR link stays) */
@@ -834,6 +836,32 @@ export interface AppState {
   financeAlerts: FinanceAlert[];
   auditLog: AuditEntry[];
   equipmentRequests: EquipmentRequest[];
+  /** Supervisor requests to take a labourer onto their crew (docs §20) */
+  crewRequests: CrewRequest[];
   /** One master store — load once, resolve site-then-company in memory. */
   masterCatalog: MasterCatalog;
 }
+
+export type CrewRequestStatus = "requested" | "released" | "approved" | "rejected" | "cancelled";
+
+/**
+ * A supervisor asking for a labourer (docs §20). Needs SIC approval; when the
+ * labourer is on another crew, that supervisor is told and must release them first.
+ */
+export interface CrewRequest {
+  id: string;
+  siteId: string;
+  labourerId: string;
+  /** Supervisor (staff id) who wants the labourer */
+  toSupervisorId: string;
+  /** Supervisor the labourer is with when asked; null = unassigned */
+  fromSupervisorId: string | null;
+  requestedBy: string;
+  requestedAt: string;
+  status: CrewRequestStatus;
+  releasedAt?: string;
+  decidedBy?: string;
+  decidedAt?: string;
+  note?: string;
+}
+

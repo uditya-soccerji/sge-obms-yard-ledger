@@ -20,7 +20,12 @@ export type EventKind =
   | "expense_added"
   | "expense_voided"
   | "jms_status"
-  | "wo_warning";
+  | "wo_warning"
+  // Crews (docs §20)
+  | "crew_changed"
+  | "crew_requested"
+  | "crew_released"
+  | "crew_decided";
 
 export interface WorkEvent {
   id: string;
@@ -35,13 +40,15 @@ export interface WorkEvent {
   siteId: string;
   /** Staff id the event is about (job's supervisor), for "tell the submitter" */
   subjectStaffId?: string;
+  /** A second staff member to tell (e.g. the other supervisor in a crew move) */
+  alsoStaffId?: string;
   title: string;
   detail: string;
   /** Super Admin who did it while using "View as" */
   impersonatedBy?: string;
   /** Problems are highlighted and pass the "Problems only" filter */
   problem?: boolean;
-  /** Work tab to open (e.g. "jobs", "payments") */
+  /** Work tab to open (e.g. "jobs", "payments"), or an app path starting with "/" */
   tab: string;
   refId?: string;
 }
@@ -54,7 +61,7 @@ export interface Viewer {
 }
 
 /** Events that need someone to act, or tell the submitter the outcome: instant. */
-export const INSTANT: EventKind[] = ["job_closed", "jms_confirmed", "job_sent_back"];
+export const INSTANT: EventKind[] = ["job_closed", "jms_confirmed", "job_sent_back", "crew_requested", "crew_released", "crew_decided"];
 
 export const KIND_LABEL: Record<EventKind, string> = {
   dpr_added: "DPR entry",
@@ -72,6 +79,10 @@ export const KIND_LABEL: Record<EventKind, string> = {
   expense_voided: "Cost voided",
   jms_status: "JMS status",
   wo_warning: "Work order warning",
+  crew_changed: "Crew changed",
+  crew_requested: "Crew request",
+  crew_released: "Labourer released",
+  crew_decided: "Crew request decided",
 };
 
 const onSite = (v: Viewer, siteId: string) => v.siteIds.length === 0 || v.siteIds.includes(siteId);
@@ -80,7 +91,7 @@ const onSite = (v: Viewer, siteId: string) => v.siteIds.length === 0 || v.siteId
 export function isFor(e: WorkEvent, v: Viewer): boolean {
   if (v.role === "owner" || v.role === "super_admin") return true;
   if (!onSite(v, e.siteId)) return false;
-  const mine = !!v.staffId && e.subjectStaffId === v.staffId;
+  const mine = !!v.staffId && (e.subjectStaffId === v.staffId || e.alsoStaffId === v.staffId);
   switch (e.kind) {
     case "dpr_added":
     case "job_started":
@@ -109,6 +120,13 @@ export function isFor(e: WorkEvent, v: Viewer): boolean {
     case "expense_added":
     case "expense_voided":
       return v.role === "finance";
+    // docs §20: SIC hears about every crew change and request on the site; the
+    // supervisors involved are told; Owner / SA get everything (moves off a crew are problems)
+    case "crew_changed":
+    case "crew_requested":
+    case "crew_released":
+    case "crew_decided":
+      return mine || v.role === "sic";
   }
 }
 

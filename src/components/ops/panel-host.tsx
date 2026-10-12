@@ -14,6 +14,7 @@ const PANELS: Record<OpsPanelId, ComponentType> = {
   dpr: dynamic(() => import("@/app/(app)/dpr/page"), { loading, ssr: false }),
   store: dynamic(() => import("@/app/(app)/store/page"), { loading, ssr: false }),
   safety: dynamic(() => import("@/app/(app)/safety/page"), { loading, ssr: false }),
+  crew: dynamic(() => import("@/app/(app)/crew/page"), { loading, ssr: false }),
   approvals: dynamic(() => import("@/app/(app)/approvals/sic/page"), {
     loading,
     ssr: false,
