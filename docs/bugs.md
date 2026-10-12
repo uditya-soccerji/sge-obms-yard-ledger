@@ -11,6 +11,7 @@ Screenshots, when saved as files, go in `docs/bugs/` as `B<nn>-<n>.png`. Never i
 |---|---|---|---|---|
 | B01 | 2026-10-13 | Super Admin · all sites · Master Data → Sites | Can't type a comma (or a space after a word) in "Plants (comma)", so plants can't be added on Add site or Edit | confirmed |
 | B02 | 2026-10-13 | Super Admin · MTF · Master Data → Sites | Feature: plants need locations under them, and each plant/location needs an RP (MTF runs RP2 and RP5) | open (ready to build) |
+| B03 | 2026-10-13 | Supervisor (Prasan Da, viewed as) · MTF · DPR → New | New supervisor's DPR shows an empty Labour attendance, and there's no way to give them labourers | needs owner |
 
 ## Details
 <!-- One section per bug:
@@ -74,4 +75,24 @@ Screenshots, when saved as files, go in `docs/bugs/` as `B<nn>-<n>.png`. Never i
 - RPs (2026-10-13): **MTF – RP5, RRTF – RP5, ARMA – RP2** (ARMA is RP2 at both MTF and DTA). Every location takes its plant's RP; none differ. DTA's other plants take the site's RP2 by default.
 - Status: all questions answered. Ready to build when the app folder is free. The migration needs a confirm before it's applied to the live database.
 - Fix: _pending (app folder busy; needs answers)_
+
+### B03: New supervisor has no labourers to mark, and nobody can assign any
+- Reported: 2026-10-13 · Role: Super Admin viewing as supervisor Prasan Da (@pda) · Site: MTF · Page: DPR → New (painting/blasting, plant RRTF)
+- Expected (user): a supervisor sees the labourers assigned to them; or, if Owner / Super Admin gives them the right, picks labourers from the list themselves; otherwise the SIC assigns labourers to the supervisor, who then marks their attendance.
+- Actual: the **Labour attendance** panel is empty, with no message and no way to add anyone.
+- Backend findings (code on `main`):
+  1. The DPR crew is "active labourers whose `supervisorId` = the DPR submitter" (`src/components/dpr/dpr-form.tsx`, `crew`). A new supervisor has none, so the list is empty.
+  2. **No screen can set a labourer's supervisor.** Master Data → Labourers has no Supervisor column, and HR / labourer pages don't set it either. Worse, **Add labourer defaults the supervisor to `state.staff[0]`** (the Super Admin staff record), so new labourers land on nobody's crew.
+  3. **SIC has no labourer rights at all** (`ROLE_MATRIX.sic` in `src/lib/permissions.ts`). Only Owner / Super Admin (Master Data) and HR (`labourer: view/create/update`) can edit labourers.
+  4. Per-user rights already exist in the data (`UserAccount.permissionOverrides`, read by `effectivePermission`), but **no screen sets them**. Every login is created with `[]`.
+  5. **Labourers are stored only in each browser** (not in Supabase yet, AGENTS.md §2). An assignment made on the office laptop won't appear on the supervisor's phone. For assignments to work across devices, labourers must move to the shared database.
+  6. The DPR form shows no message when the crew is empty.
+- Rule check: §1 makes "supervisor" a required labourer field; §4 allows a split day across two supervisors. The "self-pick if allowed, else SIC assigns" rule isn't written yet. **Owner to confirm** (questions in chat), then add it to `docs/rules-decisions.md` §1/§4.
+- Fix plan:
+  - (a) A **Crew** screen: SIC (own sites), Owner and Super Admin pick a supervisor and tick labourers from that site's list. A supervisor with the right uses the same screen for their own crew only.
+  - (b) A new right `labourer: assign`, given to SIC by default and switchable per supervisor by Owner / Super Admin (a small "Rights" toggle in Users / seats).
+  - (c) A Supervisor column in Master Data → Labourers; new labourers start with **no** supervisor instead of `staff[0]`.
+  - (d) In the DPR form, an empty-crew message ("No labourers assigned to you — ask your SIC"), plus "Add from site list" for supervisors who have the right.
+  - (e) Move labourers + assignments to Supabase (migration + RLS: SIC for their sites, supervisor for own crew when allowed). That's the step that makes it work across devices; confirm before applying to live.
+- Fix: _pending (app folder busy; needs owner answers)_
 
