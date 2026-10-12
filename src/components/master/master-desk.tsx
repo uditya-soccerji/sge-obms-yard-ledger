@@ -274,7 +274,7 @@ function SiteForm({
 }
 
 function UsersSheet({ showInactive }: { showInactive: boolean }) {
-  const { state, createUser, updateUser, startImpersonation } = useStore();
+  const { state, createUser, updateUser, setUserPassword, startImpersonation } = useStore();
   const router = useRouter();
   const isSa =
     state.currentRole === "super_admin" && !state.impersonatorAccountId;
@@ -326,9 +326,9 @@ function UsersSheet({ showInactive }: { showInactive: boolean }) {
         <div className="sm:col-span-4">
           <Button
             size="sm"
-            onClick={() => {
-              const r = createUser({
-                username: username.trim(),
+            onClick={async () => {
+              const r = await createUser({
+                username: username.trim().toLowerCase(),
                 password,
                 name: name.trim() || username.trim(),
                 roles: [role],
@@ -367,7 +367,16 @@ function UsersSheet({ showInactive }: { showInactive: boolean }) {
               key={u.id}
               user={u}
               isSa={isSa}
-              onToggle={() => updateUser(u.id, { active: !u.active })}
+              onToggle={async () => {
+                const r = await updateUser(u.id, { active: !u.active });
+                if (!r.ok) setMsg(r.error ?? "Failed");
+              }}
+              onResetPassword={async () => {
+                const pw = window.prompt(`New password for @${u.username} (min 6 characters)`);
+                if (!pw) return;
+                const r = await setUserPassword(u.id, pw);
+                setMsg(r.ok ? `Password reset for @${u.username}` : r.error ?? "Failed");
+              }}
               onViewAs={() => {
                 const r = startImpersonation(u.id);
                 if (r.ok) router.push(r.home);
@@ -384,11 +393,13 @@ function UserRow({
   user,
   isSa,
   onToggle,
+  onResetPassword,
   onViewAs,
 }: {
   user: UserAccount;
   isSa: boolean;
   onToggle: () => void;
+  onResetPassword: () => void;
   onViewAs: () => void;
 }) {
   const { state } = useStore();
@@ -417,6 +428,9 @@ function UserRow({
             View as
           </Button>
         ) : null}
+        <Button size="sm" variant="ghost" onClick={onResetPassword}>
+          Reset password
+        </Button>
         <Button size="sm" variant="ghost" onClick={onToggle}>
           {user.active ? "Deactivate" : "Activate"}
         </Button>

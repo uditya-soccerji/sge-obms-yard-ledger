@@ -20,7 +20,17 @@ import { roleMeta } from "./roles";
 import { migrateLegacySafetyBody } from "./safety-dpr";
 import { seedMasterCatalog } from "./master/seed-catalog";
 import { supabase } from "./supabase/client";
-import { remoteAudit, remoteLogin, remoteLogout } from "./supabase/remote";
+import {
+  remoteAudit,
+  remoteCreateUser,
+  remoteLoadMaster,
+  remoteLogin,
+  remoteLogout,
+  remoteSaveMaster,
+  remoteSaveSite,
+  remoteSetPassword,
+  remoteUpdateUser,
+} from "./supabase/remote";
 import type { CatalogItem, Contractor, MasterCatalog, MaterialItem } from "./master/types";
 import { createSeedState, STORAGE_KEY } from "./seed";
 import type {
@@ -151,8 +161,17 @@ interface StoreApi {
   addWageEntry: (entry: Omit<WageLedgerEntry, "id">) => void;
   acknowledgeFinanceAlert: (id: string) => void;
   flagFinanceAlertToSic: (id: string) => void;
-  createUser: (input: Omit<UserAccount, "id">) => { ok: boolean; error?: string; id?: string };
-  updateUser: (id: string, patch: Partial<UserAccount>) => { ok: boolean; error?: string };
+  createUser: (
+    input: Omit<UserAccount, "id">
+  ) => Promise<{ ok: boolean; error?: string; id?: string }>;
+  updateUser: (
+    id: string,
+    patch: Partial<UserAccount>
+  ) => Promise<{ ok: boolean; error?: string }>;
+  setUserPassword: (
+    id: string,
+    password: string
+  ) => Promise<{ ok: boolean; error?: string }>;
   startImpersonation: (targetAccountId: string) =>
     | { ok: true; home: string }
     | { ok: false; error: string };
@@ -379,11 +398,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const res = await remoteLogin(username, password);
       if (!res.ok) return { ok: false as const, error: res.error };
       const { me, users, sites } = res.session;
+      const master = await remoteLoadMaster();
       const role = me.roles[0];
       const s = stateRef.current;
       const siteId = me.siteIds[0] ?? s.currentSiteId;
       const next: AppState = {
         ...s,
+        masterCatalog: master ?? s.masterCatalog,
         users,
         sites: sites.length ? sites : s.sites,
         currentAccountId: me.id,
@@ -1461,6 +1482,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const upsertContractor = useCallback((row: Contractor) => {
     const id = row.id || uid("con");
     const next = { ...row, id };
+    void remoteSaveMaster("contractors", next);
     setState((s) => {
       const exists = s.masterCatalog.contractors.some((c) => c.id === id);
       return {
@@ -1486,6 +1508,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const setContractorActive = useCallback((id: string, active: boolean) => {
+    const row = stateRef.current.masterCatalog.contractors.find((c) => c.id === id);
+    if (row) void remoteSaveMaster("contractors", { ...row, active });
     setState((s) => ({
       ...s,
       masterCatalog: {
@@ -1504,6 +1528,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     ) => {
       const id = row.id || uid("cat");
       const next = { ...row, id };
+      void remoteSaveMaster(sheet, next);
       setState((s) => {
         const list = s.masterCatalog[sheet] as CatalogItem[];
         const exists = list.some((r) => r.id === id);
@@ -1534,6 +1559,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const upsertMaterial = useCallback((row: MaterialItem) => {
     const id = row.id || uid("mat");
     const next = { ...row, id };
+    void remoteSaveMaster("materials", next);
     setState((s) => {
       const exists = s.masterCatalog.materials.some((m) => m.id === id);
       return {
@@ -1560,6 +1586,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const setCatalogActive = useCallback(
     (sheet: keyof MasterCatalog, id: string, active: boolean) => {
+      const row = (
+        stateRef.current.masterCatalog[sheet] as (CatalogItem | Contractor | MaterialItem)[]
+      ).find((r) => r.id === id);
+      if (row) void remoteSaveMaster(sheet, { ...row, active });
       setState((s) => {
         const list = s.masterCatalog[sheet] as { id: string; active: boolean }[];
         return {
@@ -1575,6 +1605,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   );
 
   const upsertSite = useCallback((site: AppState["sites"][number]) => {
+    void remoteSaveSite(site);
     setState((s) => {
       const exists = s.sites.some((x) => x.id === site.id);
       return {
@@ -1634,7 +1665,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     }));
   }, []);
 
-  const createUser = useCallback((input: Omit<UserAccount, "id">) => {
+  const createUserLocal = useCallback((input: Omit<UserAccount, "id">) => {
     let result: { ok: boolean; error?: string; id?: string } = { ok: true };
     setState((s) => {
       if (s.currentRole !== "super_admin" && s.currentRole !== "owner") {
@@ -1669,7 +1700,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     return result;
   }, []);
 
-  const updateUser = useCallback((id: string, patch: Partial<UserAccount>) => {
+  const updateUserLocal = useCallback((id: string, patch: Partial<UserAccount>) => {
     let result: { ok: boolean; error?: string } = { ok: true };
     setState((s) => {
       if (s.currentRole !== "super_admin" && s.currentRole !== "owner") {
@@ -1708,6 +1739,63 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       };
     });
     return result;
+  }, []);
+
+  /** Real user management via the admin-users edge function when Supabase is on. */
+  const createUser = useCallback(
+    async (input: Omit<UserAccount, "id">) => {
+      if (!supabase) return createUserLocal(input);
+      const r = await remoteCreateUser(input);
+      if (!r.ok) return { ok: false, error: r.error };
+      const account = r.account;
+      setState((s) => {
+        const next = { ...s, users: [account, ...s.users.filter((u) => u.id !== account.id)] };
+        return {
+          ...next,
+          auditLog: [
+            makeAudit(
+              next,
+              "users",
+              "create",
+              `Created ${account.username} · roles [${account.roles.join(", ")}]`
+            ),
+            ...s.auditLog,
+          ],
+        };
+      });
+      return { ok: true, id: account.id };
+    },
+    [createUserLocal]
+  );
+
+  const updateUser = useCallback(
+    async (id: string, patch: Partial<UserAccount>) => {
+      if (!supabase) return updateUserLocal(id, patch);
+      if (patch.username !== undefined) {
+        return { ok: false, error: "Usernames cannot be changed once created" };
+      }
+      const r = await remoteUpdateUser(id, patch);
+      if (!r.ok) return { ok: false, error: r.error };
+      return updateUserLocal(id, patch);
+    },
+    [updateUserLocal]
+  );
+
+  const setUserPassword = useCallback(async (id: string, password: string) => {
+    if (!supabase) return { ok: false, error: "Backend not configured" };
+    const r = await remoteSetPassword(id, password);
+    if (!r.ok) return { ok: false, error: r.error };
+    setState((s) => {
+      const target = s.users.find((u) => u.id === id);
+      return {
+        ...s,
+        auditLog: [
+          makeAudit(s, "users", "set_password", `Password reset for ${target?.username ?? id}`),
+          ...s.auditLog,
+        ],
+      };
+    });
+    return { ok: true };
   }, []);
 
   const createEquipmentRequest = useCallback(
@@ -2071,6 +2159,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       flagFinanceAlertToSic,
       createUser,
       updateUser,
+      setUserPassword,
       startImpersonation,
       endImpersonation,
       createEquipmentRequest,
@@ -2120,6 +2209,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       flagFinanceAlertToSic,
       createUser,
       updateUser,
+      setUserPassword,
       startImpersonation,
       endImpersonation,
       createEquipmentRequest,
