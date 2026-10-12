@@ -74,7 +74,7 @@ export default function LoginPage() {
             Enterprise
           </p>
           <p className="mt-5 max-w-sm text-base leading-relaxed text-[#b8c0c8]">
-            Yard Ledger is the field desk for daily progress, dual paint books,
+            SGE Operations Hub is the field desk for daily progress, dual paint books,
             and role-locked DPR — same operations, a new shift.
           </p>
         </div>

@@ -88,7 +88,7 @@ function BrandMark() {
       </span>
       <span className="min-w-0">
         <span className="block font-heading text-base font-semibold leading-none text-[#ffffff]">
-          SGE Yard Ledger
+          SGE Operations Hub
         </span>
         <span className="mt-0.5 block text-[10px] uppercase tracking-[0.16em] text-[var(--sge-brass)]">
           OBMS · ops desk
@@ -319,13 +319,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </main>
 
       <footer className="border-t border-[var(--sge-line)] bg-[var(--sge-paper)]/80 px-4 py-3 text-center text-[10px] uppercase tracking-[0.16em] text-[var(--sge-ink-3)]">
-        Shree Gayatri Enterprise · RIL Jamnagar · Yard Ledger v8
+        Shree Gayatri Enterprise · RIL Jamnagar · Operations Hub v8
       </footer>
 
       <Sheet open={mobileOpen} onOpenChange={setMobileOpen}>
         <SheetContent side="left" className="w-[280px] bg-[var(--sge-paper)] p-0">
           <SheetHeader className="border-b border-[var(--sge-line)] px-4 py-3 text-left">
-            <SheetTitle className="font-heading">Yard Ledger</SheetTitle>
+            <SheetTitle className="font-heading">SGE Operations Hub</SheetTitle>
           </SheetHeader>
           <div className="space-y-3 p-3">
             {canSwitchSite && switchableSites.length > 1 ? (
