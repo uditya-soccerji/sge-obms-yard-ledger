@@ -16,6 +16,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { roleMeta, rolesForSwitcher } from "@/lib/roles";
 import { NotificationBell } from "@/components/work/notifications";
 import { canAccessWork, topNavFor } from "@/lib/desk";
+import { canUseTestTools } from "@/lib/permissions";
 import { ALL_SITES, canSeeAllSites, canSwitchSites, entrySiteId } from "@/lib/site-scope";
 import { useStore } from "@/lib/store";
 import type { RoleId } from "@/lib/types";
@@ -118,6 +119,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     ? state.users.find((u) => u.id === state.impersonatorAccountId) ?? null
     : null;
   const viewingAs = !!impersonator && !!currentAccount;
+  const showReset = canUseTestTools(role, viewingAs);
 
   const canSwitchSite = canSwitchSites(role);
   const switchableSites = state.sites.filter(
@@ -263,18 +265,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 {meta.short}
               </div>
             )}
-            <Button
-              variant="ghost"
-              size="sm"
-              className="hidden rounded-sm text-[#b8c0c8] hover:bg-[var(--sge-night-2)] hover:text-[#ffffff] md:inline-flex"
-              onClick={() => {
-                resetSeed();
-                router.push("/");
-              }}
-            >
-              <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
-              Reset
-            </Button>
+            {showReset ? (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="hidden rounded-sm text-[#b8c0c8] hover:bg-[var(--sge-night-2)] hover:text-[#ffffff] md:inline-flex"
+                onClick={() => {
+                  resetSeed();
+                  router.push("/");
+                }}
+              >
+                <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+                Reset
+              </Button>
+            ) : null}
             <Button
               variant="ghost"
               size="sm"
@@ -403,18 +407,20 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 Exit to Super Admin
               </Button>
             ) : null}
-            <Button
-              variant="outline"
-              className="w-full rounded-sm"
-              onClick={() => {
-                resetSeed();
-                setMobileOpen(false);
-                router.push("/");
-              }}
-            >
-              <RefreshCw className="mr-2 h-4 w-4" />
-              Reset seed data
-            </Button>
+            {showReset ? (
+              <Button
+                variant="outline"
+                className="w-full rounded-sm"
+                onClick={() => {
+                  resetSeed();
+                  setMobileOpen(false);
+                  router.push("/");
+                }}
+              >
+                <RefreshCw className="mr-2 h-4 w-4" />
+                Reset seed data
+              </Button>
+            ) : null}
             <Button
               variant="outline"
               className="w-full rounded-sm"
