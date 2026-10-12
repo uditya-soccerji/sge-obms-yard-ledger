@@ -46,9 +46,23 @@ export function validateDprForSubmit(
     const lines = doc.paintWork ?? [];
     const total = lines.reduce((s, l) => s + (l.areaM2 || 0), 0);
     lines.forEach((l, i) => {
-      if (!l.plant) out.push(`Painting line ${i + 1}: pick the plant`);
-      if (l.areaM2 < 0) out.push(`Painting line ${i + 1}: area can't be negative`);
-      if (l.areaM2 > MAX_LINE_M2) out.push(`Painting line ${i + 1}: ${l.areaM2} m² is over the ${MAX_LINE_M2.toLocaleString("en-IN")} m² per line limit`);
+      const n = `Painting line ${i + 1}`;
+      if (!l.plant) out.push(`${n}: pick the plant`);
+      if (!l.bay.trim()) out.push(`${n}: pick or type the location`);
+      if (l.areaM2 < 0) out.push(`${n}: area can't be negative`);
+      if (l.areaM2 > MAX_LINE_M2) out.push(`${n}: ${l.areaM2} m² is over the ${MAX_LINE_M2.toLocaleString("en-IN")} m² per line limit`);
+      // docs §5 (B07): MPS, and litres per paint type, on every painting line
+      if (l.activity === "painting") {
+        if (l.mpsScheme == null) out.push(`${n}: pick the MPS`);
+        const paints = l.paints ?? [];
+        if (l.areaM2 > 0 && !paints.some((p) => p.litres > 0)) out.push(`${n}: add the paint type(s) and litres used`);
+        paints.forEach((p, j) => {
+          if (!p.type.trim()) out.push(`${n}, paint ${j + 1}: pick the paint type`);
+          if (!(p.litres > 0)) out.push(`${n}, paint ${j + 1}: litres must be above 0`);
+        });
+        const types = paints.map((p) => p.type.trim().toLowerCase()).filter(Boolean);
+        if (new Set(types).size < types.length) out.push(`${n}: the same paint type is entered twice`);
+      }
     });
     if (!(total > 0) && !doc.zeroReason?.trim()) out.push("Enter the m² done, or give a reason for zero");
   }

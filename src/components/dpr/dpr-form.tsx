@@ -20,12 +20,17 @@ import { blankSafetyBody } from "@/lib/safety-dpr";
 import type {
   AttendanceStatus,
   DprDocument,
+  DprPaintUse,
   DprPaintWorkLine,
   DprRequest,
   DprScaffoldWorkLine,
   DprSubmitterType,
+  Site,
 } from "@/lib/types";
 import { useStore } from "@/lib/store";
+import { useWork } from "@/lib/work/store";
+import { sitePlantDetails } from "@/lib/site-scope";
+import { lineLitres, mpsNumber, mpsOptions, normLitres, normWarning, paintChoicesFor } from "@/lib/dpr-paint";
 import { ATTENDANCE_OPTIONS, otHours, timeProblem, WORKING } from "@/lib/attendance";
 
 function uid(prefix: string) {
@@ -62,8 +67,9 @@ export function blankDpr(opts: {
               bay: "",
               activity: "painting",
               areaM2: 0,
-              mpsScheme: 2,
+              mpsScheme: undefined,
               paintLitres: 0,
+              paints: [],
             },
           ]
         : undefined,
@@ -120,7 +126,14 @@ export function DprForm({
 
   const equipment = state.equipment.filter((e) => e.siteId === value.siteId);
   // The DPR's site plants (docs §3: every DPR picks one of its site's plants)
-  const plants = state.sites.find((x) => x.id === value.siteId)?.plants ?? [];
+  const site = state.sites.find((x) => x.id === value.siteId);
+  const plants = site?.plants ?? [];
+  // MPS picked from a list (B07): schemes with norms + the work order's service items
+  const { work } = useWork();
+  const mpsList = useMemo(
+    () => mpsOptions(work.serviceItems.map((x) => mpsNumber(x.mps)).filter((n): n is number => n != null)),
+    [work.serviceItems]
+  );
   const supervisors = state.staff.filter((x) => x.role === "supervisor" && x.siteId === value.siteId);
 
   function setMark(labourerId: string, status: AttendanceStatus) {
@@ -494,6 +507,8 @@ export function DprForm({
         <PaintWorkEditor
           lines={value.paintWork}
           plants={plants}
+          site={site}
+          mpsList={mpsList}
           readOnly={readOnly}
           onChange={(paintWork) => onChange({ ...value, paintWork })}
         />
@@ -604,14 +619,27 @@ export function DprForm({
 function PaintWorkEditor({
   lines,
   plants,
+  site,
+  mpsList,
   onChange,
   readOnly,
 }: {
   lines: DprPaintWorkLine[];
   plants: string[];
+  /** The DPR's site, for each plant's Master Data locations (B02) */
+  site?: Site;
+  mpsList: number[];
   onChange: (lines: DprPaintWorkLine[]) => void;
   readOnly?: boolean;
 }) {
+  const fieldCls =
+    "mt-1 h-9 w-full rounded-md border border-[var(--sge-line)] bg-[var(--sge-paper)] px-2 text-sm";
+  const setLine = (idx: number, patch: Partial<DprPaintWorkLine>) =>
+    onChange(lines.map((l, i) => (i === idx ? { ...l, ...patch } : l)));
+  // Keep the old single total in step with the per-paint rows (other screens still read it)
+  const setPaints = (idx: number, paints: DprPaintUse[]) =>
+    setLine(idx, { paints, paintLitres: lineLitres({ paints }) });
+
   return (
     <Panel>
       <div className="mb-3 flex items-center justify-between">
@@ -632,8 +660,9 @@ function PaintWorkEditor({
                   bay: "",
                   activity: "painting",
                   areaM2: 0,
-                  mpsScheme: 2,
+                  mpsScheme: lines[lines.length - 1]?.mpsScheme,
                   paintLitres: 0,
+                  paints: [],
                 },
               ])
             }
@@ -643,118 +672,174 @@ function PaintWorkEditor({
         ) : null}
       </div>
       <div className="space-y-3">
-        {lines.map((line, idx) => (
-          <div
-            key={line.id}
-            className="grid gap-2 rounded-md border border-[var(--sge-line)] p-3 sm:grid-cols-3"
-          >
-            <div>
-              <Label>Plant</Label>
-              <select
-                className="mt-1 h-9 w-full rounded-md border border-[var(--sge-line)] bg-[var(--sge-paper)] px-2 text-sm"
-                disabled={readOnly}
-                value={line.plant}
-                onChange={(e) => onChange(lines.map((l, i) => (i === idx ? { ...l, plant: e.target.value } : l)))}
-              >
-                <option value="">Pick plant…</option>
-                {plants.map((p) => <option key={p} value={p}>{p}</option>)}
-              </select>
-            </div>
-            <div>
-              <Label>Bay / location</Label>
-              <Input
-                className="mt-1"
-                disabled={readOnly}
-                value={line.bay}
-                onChange={(e) => {
-                  const next = lines.map((l, i) =>
-                    i === idx ? { ...l, bay: e.target.value } : l
-                  );
-                  onChange(next);
-                }}
-              />
-            </div>
-            <div>
-              <Label>Activity</Label>
-              <Select
-                disabled={readOnly}
-                value={line.activity}
-                onValueChange={(v) => {
-                  const next = lines.map((l, i) =>
-                    i === idx
-                      ? { ...l, activity: v as "painting" | "blasting" }
-                      : l
-                  );
-                  onChange(next);
-                }}
-              >
-                <SelectTrigger className="mt-1">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="painting">Painting</SelectItem>
-                  <SelectItem value="blasting">Blasting</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label>Area m²</Label>
-              <Input
-                type="number"
-                className="mt-1"
-                disabled={readOnly}
-                value={line.areaM2}
-                onChange={(e) => {
-                  const next = lines.map((l, i) =>
-                    i === idx ? { ...l, areaM2: Number(e.target.value) } : l
-                  );
-                  onChange(next);
-                }}
-              />
-            </div>
-            <div>
-              <Label>MPS</Label>
-              <Input
-                type="number"
-                className="mt-1"
-                disabled={readOnly}
-                value={line.mpsScheme ?? ""}
-                onChange={(e) => {
-                  const next = lines.map((l, i) =>
-                    i === idx
-                      ? { ...l, mpsScheme: Number(e.target.value) }
-                      : l
-                  );
-                  onChange(next);
-                }}
-              />
-            </div>
-            <div>
-              <Label>Paint litres</Label>
-              <Input
-                type="number"
-                className="mt-1"
-                disabled={readOnly}
-                value={line.paintLitres ?? ""}
-                onChange={(e) => {
-                  const next = lines.map((l, i) =>
-                    i === idx
-                      ? { ...l, paintLitres: Number(e.target.value) }
-                      : l
-                  );
-                  onChange(next);
-                }}
-              />
-            </div>
-            {!readOnly && lines.length > 1 ? (
-              <div className="flex items-end">
-                <Button type="button" size="sm" variant="ghost" onClick={() => onChange(lines.filter((_, i) => i !== idx))}>
-                  Remove line
-                </Button>
+        {lines.map((line, idx) => {
+          const locations = site && line.plant
+            ? (sitePlantDetails(site).find((d) => d.name === line.plant)?.locations ?? []).map((l) => l.name)
+            : [];
+          const choices = paintChoicesFor(line.mpsScheme);
+          const paints = line.paints ?? [];
+          const warn = normWarning(line);
+          const listId = `${line.id}-locations`;
+          const paintListId = `${line.id}-paints`;
+          return (
+            <div key={line.id} className="rounded-md border border-[var(--sge-line)] p-3">
+              <div className="grid gap-2 sm:grid-cols-3">
+                <div>
+                  <Label>Plant</Label>
+                  <select
+                    className={fieldCls}
+                    disabled={readOnly}
+                    value={line.plant}
+                    onChange={(e) => setLine(idx, { plant: e.target.value })}
+                  >
+                    <option value="">Pick plant…</option>
+                    {plants.map((p) => <option key={p} value={p}>{p}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <Label>Location</Label>
+                  <Input
+                    className="mt-1"
+                    disabled={readOnly}
+                    list={locations.length ? listId : undefined}
+                    placeholder={locations.length ? "Pick or type a location" : "Type the location / bay"}
+                    value={line.bay}
+                    onChange={(e) => setLine(idx, { bay: e.target.value })}
+                  />
+                  {locations.length ? (
+                    <datalist id={listId}>
+                      {locations.map((l) => <option key={l} value={l} />)}
+                    </datalist>
+                  ) : null}
+                </div>
+                <div>
+                  <Label>Activity</Label>
+                  <select
+                    className={fieldCls}
+                    disabled={readOnly}
+                    value={line.activity}
+                    onChange={(e) => setLine(idx, { activity: e.target.value as DprPaintWorkLine["activity"] })}
+                  >
+                    <option value="painting">Painting</option>
+                    <option value="blasting">Blasting</option>
+                  </select>
+                </div>
+                <div>
+                  <Label>Area m²</Label>
+                  <Input
+                    type="number"
+                    className="mt-1"
+                    disabled={readOnly}
+                    value={line.areaM2}
+                    onChange={(e) => setLine(idx, { areaM2: Number(e.target.value) })}
+                  />
+                </div>
+                <div>
+                  <Label>MPS</Label>
+                  <select
+                    className={fieldCls}
+                    disabled={readOnly}
+                    value={line.mpsScheme ?? ""}
+                    onChange={(e) => setLine(idx, { mpsScheme: e.target.value ? Number(e.target.value) : undefined })}
+                  >
+                    <option value="">Pick MPS…</option>
+                    {mpsList.map((m) => <option key={m} value={m}>MPS-{m}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <Label>Total paint</Label>
+                  <div className="mt-2 font-heading text-sm font-bold tabular-nums">
+                    {lineLitres(line)} L
+                    {normLitres(line) != null ? (
+                      <span className="ml-2 text-xs font-normal text-[var(--sge-ink-3)]">norm ~{normLitres(line)} L</span>
+                    ) : null}
+                  </div>
+                </div>
               </div>
-            ) : null}
-          </div>
-        ))}
+
+              {line.activity === "painting" ? (
+                <div className="mt-3 rounded-sm border border-[var(--sge-line)] bg-[var(--sge-linen)] p-2">
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--sge-ink-3)]">
+                      Paint used (litres per type)
+                    </span>
+                    {!readOnly ? (
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-7 text-xs"
+                        onClick={() => setPaints(idx, [...paints, { id: uid("pu"), type: "", litres: 0 }])}
+                      >
+                        Add paint
+                      </Button>
+                    ) : null}
+                  </div>
+                  {paints.length === 0 ? (
+                    <p className="text-xs text-[var(--sge-ink-3)]">
+                      No paint entered{line.mpsScheme == null ? " — pick the MPS to see its paints" : ""}.
+                    </p>
+                  ) : null}
+                  {choices.length ? (
+                    <datalist id={paintListId}>
+                      {choices.map((c) => <option key={c.name} value={c.name} />)}
+                    </datalist>
+                  ) : null}
+                  <div className="space-y-1.5">
+                    {paints.map((p, j) => (
+                      <div key={p.id} className="flex items-center gap-2">
+                        <Input
+                          aria-label={`Line ${idx + 1} paint ${j + 1} type`}
+                          className="h-8 text-sm"
+                          disabled={readOnly}
+                          list={choices.length ? paintListId : undefined}
+                          placeholder={choices.length ? "Pick or type the paint" : "Type the paint"}
+                          value={p.type}
+                          onChange={(e) => {
+                            const type = e.target.value;
+                            const sap = choices.find((c) => c.name === type)?.sap || undefined;
+                            setPaints(idx, paints.map((x, k) => (k === j ? { ...x, type, sap } : x)));
+                          }}
+                        />
+                        <Input
+                          aria-label={`Line ${idx + 1} paint ${j + 1} litres`}
+                          type="number"
+                          className="h-8 w-28 text-sm"
+                          disabled={readOnly}
+                          value={p.litres}
+                          onChange={(e) =>
+                            setPaints(idx, paints.map((x, k) => (k === j ? { ...x, litres: Number(e.target.value) } : x)))
+                          }
+                        />
+                        <span className="text-xs text-[var(--sge-ink-3)]">L</span>
+                        {!readOnly ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="h-8 text-xs"
+                            onClick={() => setPaints(idx, paints.filter((_, k) => k !== j))}
+                          >
+                            Remove
+                          </Button>
+                        ) : null}
+                      </div>
+                    ))}
+                  </div>
+                  {warn ? <p className="mt-1.5 text-xs text-[var(--sge-brass-ink)]">⚠ {warn}</p> : null}
+                </div>
+              ) : null}
+
+              {!readOnly && lines.length > 1 ? (
+                <div className="mt-2 flex justify-end">
+                  <Button type="button" size="sm" variant="ghost" onClick={() => onChange(lines.filter((_, i) => i !== idx))}>
+                    Remove line
+                  </Button>
+                </div>
+              ) : null}
+            </div>
+          );
+        })}
       </div>
     </Panel>
   );

@@ -379,8 +379,20 @@ export interface DprPaintWorkLine {
   activity: "painting" | "blasting";
   areaM2: number;
   mpsScheme?: number;
+  /** Total litres; kept equal to the sum of `paints` when those are entered */
   paintLitres?: number;
+  /** Litres per paint type used on this line (docs §5, B07) */
+  paints?: DprPaintUse[];
   note?: string;
+}
+
+export interface DprPaintUse {
+  id: string;
+  /** Paint type, e.g. "Type 17 : HB epoxy surface tolerant" or "Thinner" */
+  type: string;
+  /** RIL SAP material code when known */
+  sap?: string;
+  litres: number;
 }
 
 export interface DprScaffoldWorkLine {

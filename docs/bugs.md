@@ -15,7 +15,7 @@ Screenshots, when saved as files, go in `docs/bugs/` as `B<nn>-<n>.png`. Never i
 | B04 | 2026-10-13 | Admin · DPR approvals | Admin approves DPR work quantities on SIC's behalf; both logged | open (rule agreed) |
 | B05 | 2026-10-13 | Supervisor · DPR → Equipment assigned | Equipment needs a detailed per-supervisor "setup" list (kinds, expiry, FEFO/FIFO), with expiry added by the supervisor | open (ready to build) |
 | B06 | 2026-10-13 | Store / Central store · dashboard | Equipment status changes reach SIC + site store + central store; requests board with urgent first and status buttons | open (ready to build) |
-| B07 | 2026-10-13 | Supervisor (Prasan Da) · MTF · DPR → Painting/blasting work | Line needs plant, location, activity, area m², MPS, paint type and litres per paint type | open |
+| B07 | 2026-10-13 | Supervisor (Prasan Da) · MTF · DPR → Painting/blasting work | Line needs plant, location, activity, area m², MPS, paint type and litres per paint type | fixed |
 | B08 | 2026-10-13 | Supervisor · DPR → Save / Submit | Save and Submit should notify SIC and Admin | open (ready to build) |
 
 ## Details
@@ -144,6 +144,16 @@ Screenshots, when saved as files, go in `docs/bugs/` as `B<nn>-<n>.png`. Never i
 - Screenshot (Prasan Da, MTF, DPR → New → Painting / blasting work): the line has Bay / location (free text), Activity (Painting), Area m² (0), MPS (a plain number, "2") and one **Paint litres** box. There's **no plant on the line** (one plant for the whole DPR at the top), **no paint type**, and only one litres figure.
 - Today: the old DPR line (`DprPaintWorkLine`) has plant, bay, activity, areaM2, mpsScheme (number) and a single `paintLitres`. The Work `DprEntry` has one `paintSap` + `litres`, so only one paint per line.
 - Fix plan: line = plant (Master Data, B02) → location (B02) → activity → area m² (from members, max 2,000 per §5) → MPS (picked from the MPS list, not typed) → **paints: [{ paint type / SAP, litres }]** (one or more, "Add paint"). Paint stock deduction (§6) then runs per paint type, and litres far off the MPS norm are flagged (§5). Fold into merge plan PR 2 / PR 4.
+
+- Note: on `main` the line already had its own Plant picker. The screenshot came from the older branch the other chat had open.
+- Fix (2026-10-13, branch `fix/bugs-2026-10-13`):
+  - New pure helpers `src/lib/dpr-paint.ts`: `mpsOptions` (schemes with norms + the work order's service-item MPS, so MPS-6 / MPS-23 are there), `paintChoicesFor(mps)` (the MPS system's paints from `PAINT_COATS`, plus Thinner, with SAP codes), `lineLitres`, `normLitres` (brush norm per coat × area + 10 % thinner), `normWarning` (more than 50 % off the norm, a warning only, §5).
+  - `DprPaintWorkLine.paints: { type, sap?, litres }[]`; `paintLitres` is kept equal to their sum, because other screens still read it.
+  - DPR form, painting line: Plant → **Location** (suggests the plant's Master Data locations from B02, or type a new spot) → Activity → Area m² → **MPS picked from a list** → **Total paint** with the norm beside it. A painting line gets a **Paint used** box: **Add paint** rows of paint type (suggested from that MPS) + litres, with Remove. New lines copy the previous line's plant and MPS.
+  - Submit checks (`src/lib/dpr-validate.ts`): location required; painting needs an MPS; area > 0 needs at least one paint with litres; each paint row needs a type and litres > 0; no paint type twice.
+  - Blasting lines don't ask for paint.
+- Verified on `npm run dev` as Super Admin, new painting DPR on MTF (V. Chauhan): plants MTF / ARMA / RRTF; MPS list MPS-1…29 incl. 6 and 23; RRTF location suggestions = its 8 locations; MPS-2 paint suggestions = Type 4, Type 5, Type 6, Thinner. A 100 m² line with 30 + 40 + 15 L showed "85 L · norm ~83.9 L"; 220 L showed "⚠ 220 L is 162% above the MPS-2 norm (~83.9 L for 100 m²)". Submit listed "the same paint type is entered twice" and, for an empty 2nd line, plant / location / paint messages. Nothing was saved (checks stop Submit first). No console errors; `tsc` + `eslint src` clean.
+- Not done here: deducting litres from the supervisor's paint stock per type (§6). That's merge plan PR 8 (paint on `PaintBatch`).
 
 ### B08: Save and Submit notify SIC and Admin
 - Ask: when a supervisor **saves** or **submits** a DPR, the **SIC and Admin** are notified. (Screenshot buttons: "Save draft" and "Save & submit to SIC".)
