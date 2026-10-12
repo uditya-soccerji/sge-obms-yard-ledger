@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { VirtualRows } from "@/components/shared/virtual-rows";
 import { Panel, SectionHeader, StatusPill } from "@/components/shared/ui-bits";
@@ -21,6 +21,7 @@ import { useStore } from "@/lib/store";
 import type { CatalogItem, MaterialItem } from "@/lib/master/types";
 import type { Labourer, RoleId, Site, UserAccount } from "@/lib/types";
 import { entrySiteId } from "@/lib/site-scope";
+import { checkSeat, checkSites, MIN_PASSWORD } from "@/lib/users";
 import { cn } from "@/lib/utils";
 
 type ScopeFilter = "site" | "company" | "all";
@@ -279,26 +280,35 @@ function UsersSheet({ showInactive }: { showInactive: boolean }) {
   const router = useRouter();
   const isSa =
     state.currentRole === "super_admin" && !state.impersonatorAccountId;
+  const canEdit = state.currentRole === "super_admin" || state.currentRole === "owner";
   const rows = state.users.filter((u) => showInactive || u.active);
   const [name, setName] = useState("");
   const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("password");
+  const [password, setPassword] = useState("");
   const [role, setRole] = useState<RoleId>("supervisor");
-  const [msg, setMsg] = useState<string | null>(null);
+  const [siteIds, setSiteIds] = useState<string[]>([entrySiteId(state)]);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  // Supervisors work on one site: picking a role trims the selection to fit
+  const pickRole = (r: RoleId) => {
+    setRole(r);
+    if (r === "supervisor" && siteIds.length > 1) setSiteIds(siteIds.slice(0, 1));
+  };
 
   return (
     <Panel>
       <div className="mb-4 grid gap-2 rounded-sm border border-[var(--sge-line)] bg-[var(--sge-linen)] p-3 sm:grid-cols-4">
         <div>
           <Label>Display name</Label>
-          <Input className="mt-1" value={name} onChange={(e) => setName(e.target.value)} />
+          <Input className="mt-1" value={name} onChange={(e) => setName(e.target.value)} placeholder="R. Mehta" />
         </div>
         <div>
           <Label>Username</Label>
           <Input
             className="mt-1"
             value={username}
-            onChange={(e) => setUsername(e.target.value)}
+            onChange={(e) => setUsername(e.target.value.toLowerCase().replace(/\s+/g, ""))}
+            placeholder="r.mehta"
           />
         </div>
         <div>
@@ -307,11 +317,12 @@ function UsersSheet({ showInactive }: { showInactive: boolean }) {
             className="mt-1"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
+            placeholder={`At least ${MIN_PASSWORD} characters`}
           />
         </div>
         <div>
           <Label>Role</Label>
-          <Select value={role} onValueChange={(v) => setRole(v as RoleId)}>
+          <Select value={role} onValueChange={(v) => pickRole(v as RoleId)}>
             <SelectTrigger className="mt-1 rounded-sm">
               <SelectValue />
             </SelectTrigger>
@@ -325,30 +336,45 @@ function UsersSheet({ showInactive }: { showInactive: boolean }) {
           </Select>
         </div>
         <div className="sm:col-span-4">
+          <Label>Sites</Label>
+          <SitePicker
+            className="mt-1"
+            value={siteIds}
+            single={role === "supervisor"}
+            onChange={setSiteIds}
+          />
+        </div>
+        <div className="sm:col-span-4">
           <Button
             size="sm"
+            disabled={!canEdit}
             onClick={() => {
-              const r = createUser({
+              const input = {
                 username: username.trim(),
                 password,
-                name: name.trim() || username.trim(),
+                name: name.trim(),
                 roles: [role],
-                siteIds: [entrySiteId(state)],
+                siteIds,
                 plantIds: [],
                 permissionOverrides: [],
                 active: true,
-              });
-              setMsg(r.ok ? `Created @${username}` : r.error ?? "Failed");
-              if (r.ok) {
-                setUsername("");
-                setName("");
-              }
+              };
+              // Check here too: the store's result isn't known until React applies the update
+              const invalid = checkSeat(input, state.users);
+              if (invalid) return setMsg({ ok: false, text: invalid });
+              createUser(input);
+              setMsg({ ok: true, text: `Created @${input.username} · ${siteCodes(state, siteIds)}` });
+              setUsername("");
+              setName("");
+              setPassword("");
             }}
           >
             Add seat
           </Button>
           {msg ? (
-            <span className="ml-3 text-xs text-[var(--sge-ink-2)]">{msg}</span>
+            <span className={cn("ml-3 text-xs", msg.ok ? "text-[var(--sge-ok)]" : "text-[var(--sge-crit)]")}>
+              {msg.text}
+            </span>
           ) : null}
         </div>
       </div>
@@ -368,7 +394,14 @@ function UsersSheet({ showInactive }: { showInactive: boolean }) {
               key={u.id}
               user={u}
               isSa={isSa}
+              canEdit={canEdit}
               onToggle={() => updateUser(u.id, { active: !u.active })}
+              onSites={(ids) => {
+                const bad = checkSites(u.roles, ids);
+                if (bad) return bad;
+                updateUser(u.id, { siteIds: ids });
+                return null;
+              }}
               onViewAs={() => {
                 const r = startImpersonation(u.id);
                 if (r.ok) router.push(r.home);
@@ -381,38 +414,141 @@ function UsersSheet({ showInactive }: { showInactive: boolean }) {
   );
 }
 
+function siteCodes(state: { sites: Site[] }, ids: string[]) {
+  return ids.map((id) => state.sites.find((s) => s.id === id)?.code ?? id).join(", ");
+}
+
+/** Toggle chips for sites; "All sites" picks every enabled site (not for supervisors). */
+function SitePicker({
+  value,
+  onChange,
+  single,
+  className,
+}: {
+  value: string[];
+  // A state setter: updates use the latest value, so quick clicks never drop a site
+  onChange: React.Dispatch<React.SetStateAction<string[]>>;
+  single?: boolean;
+  className?: string;
+}) {
+  const { fullState: state } = useStore();
+  const sites = state.sites.filter((s) => s.enabled);
+  const all = sites.length > 0 && sites.every((s) => value.includes(s.id));
+  const chip = (on: boolean) =>
+    cn(
+      "rounded-sm border px-2.5 py-1 text-xs font-semibold",
+      on
+        ? "border-[var(--sge-night)] bg-[var(--sge-night)] text-white"
+        : "border-[var(--sge-line)] bg-[var(--sge-paper)] text-[var(--sge-ink-2)] hover:border-[var(--sge-brass)]"
+    );
+  return (
+    <div className={cn("flex flex-wrap items-center gap-1.5", className)}>
+      {!single ? (
+        <button type="button" className={chip(all)} onClick={() => onChange(all ? [] : sites.map((s) => s.id))}>
+          All sites
+        </button>
+      ) : null}
+      {sites.map((s) => {
+        const on = value.includes(s.id);
+        return (
+          <button
+            key={s.id}
+            type="button"
+            className={chip(on)}
+            onClick={() => onChange((prev) => (single ? [s.id] : prev.includes(s.id) ? prev.filter((x) => x !== s.id) : [...prev, s.id]))}
+          >
+            {s.code}
+          </button>
+        );
+      })}
+      {single ? <span className="text-[11px] text-[var(--sge-ink-3)]">Supervisor: one site</span> : null}
+    </div>
+  );
+}
+
 function UserRow({
   user,
   isSa,
+  canEdit,
   onToggle,
+  onSites,
   onViewAs,
 }: {
   user: UserAccount;
   isSa: boolean;
+  canEdit: boolean;
   onToggle: () => void;
+  /** Returns an error message, or null when saved */
+  onSites: (ids: string[]) => string | null;
   onViewAs: () => void;
 }) {
   const { fullState: state } = useStore();
+  const [editing, setEditing] = useState(false);
+  const [ids, setIds] = useState(user.siteIds);
+  const [err, setErr] = useState<string | null>(null);
   return (
-    <tr className="border-t border-[var(--sge-line)]">
+    <tr className="border-t border-[var(--sge-line)] align-top">
       <td className="py-2">
-        <div className="font-medium">{user.name}</div>
+        <div className="font-medium">{user.name || <span className="text-[var(--sge-crit)]">(no name)</span>}</div>
         <div className="font-mono text-[11px] text-[var(--sge-ink-3)]">
           @{user.username}
         </div>
       </td>
-      <td className="text-xs">{user.roles.join(", ")}</td>
-      <td className="text-xs">
-        {user.siteIds
-          .map((id) => state.sites.find((s) => s.id === id)?.code ?? id)
-          .join(", ")}
+      <td className="py-2 text-xs">{user.roles.join(", ")}</td>
+      <td className="py-2 text-xs">
+        {editing ? (
+          <div className="space-y-1.5">
+            <SitePicker value={ids} single={user.roles.includes("supervisor")} onChange={setIds} />
+            <div className="flex items-center gap-2">
+              <Button
+                size="sm"
+                onClick={() => {
+                  const bad = onSites(ids);
+                  if (bad) return setErr(bad);
+                  setErr(null);
+                  setEditing(false);
+                }}
+              >
+                Save sites
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  setIds(user.siteIds);
+                  setErr(null);
+                  setEditing(false);
+                }}
+              >
+                Cancel
+              </Button>
+              {err ? <span className="text-[var(--sge-crit)]">{err}</span> : null}
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-center gap-2">
+            <span>{siteCodes(state, user.siteIds) || "—"}</span>
+            {canEdit ? (
+              <button
+                type="button"
+                className="text-[11px] text-[var(--sge-brass-ink)] underline"
+                onClick={() => {
+                  setIds(user.siteIds);
+                  setEditing(true);
+                }}
+              >
+                Edit sites
+              </button>
+            ) : null}
+          </div>
+        )}
       </td>
-      <td>
+      <td className="py-2">
         <StatusPill tone={user.active ? "ok" : "default"}>
           {user.active ? "active" : "inactive"}
         </StatusPill>
       </td>
-      <td className="text-right">
+      <td className="py-2 text-right">
         {isSa && user.username !== "uditya" ? (
           <Button size="sm" variant="outline" className="mr-1" onClick={onViewAs}>
             View as
