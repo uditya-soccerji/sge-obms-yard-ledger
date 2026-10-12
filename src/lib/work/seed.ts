@@ -22,8 +22,8 @@ import type {
   WorkState,
 } from "./types";
 
-/** v4: + activity log / notifications */
-export const WORK_STORAGE_KEY = "sge-work-v4";
+/** v5: plan months per site; Admin entries win; close-request timestamps */
+export const WORK_STORAGE_KEY = "sge-work-v5";
 /** "Today" for the work demo (DPR dates, expiry warnings). */
 export const WORK_TODAY = "2026-09-28";
 
@@ -209,8 +209,8 @@ export function createWorkSeed(): WorkState {
     expenses: [],
     events: [],
     lastSeen: {},
-    closedMonths: ["2026-08"],
-    currentMonth: "2026-09",
+    siteMonths: { [SITE]: { current: "2026-09", closed: ["2026-08"] } },
+    defaultMonth: "2026-09",
   };
 
   // September — carry forward August's unfinished balance + new lines

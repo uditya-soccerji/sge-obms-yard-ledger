@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { formatINR, Panel, StatusPill } from "@/components/shared/ui-bits";
 import { Button } from "@/components/ui/button";
-import { jobPnl, paymentRows, paymentSummary, perUnit, rollUp } from "@/lib/work/logic";
+import { paymentRows, paymentSummary, perUnit, pnlRows, rollUp } from "@/lib/work/logic";
 import { WORK_TODAY } from "@/lib/work/seed";
 import { useWorkScope } from "./common";
 
@@ -17,8 +17,9 @@ export function MoneyCard() {
     .filter((r) => (r.gap ?? 0) <= -1 || (r.waiting ?? 0) > 45)
     .sort((a, b) => (a.gap ?? -(b.waiting ?? 0)) - (b.gap ?? -(a.waiting ?? 0)))
     .slice(0, 4);
-  const pnl = rollUp(jobPnl(work, s.wageOf).filter((r) => s.inSite(r.siteId)), () => "all")[0];
-  const perM2 = pnl ? perUnit(pnl.profit, pnl.qty) : null;
+  const pnl = rollUp(pnlRows(work, s.wageOf).filter((r) => s.inSite(r.siteId)), () => "all")[0];
+  // Cash basis per m² uses the m² that has been paid for
+  const perM2 = pnl ? perUnit(pnl.profit, pnl.paidQty) : null;
 
   return (
     <Panel>

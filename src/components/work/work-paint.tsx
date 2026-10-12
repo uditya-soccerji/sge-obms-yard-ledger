@@ -30,17 +30,19 @@ export function WorkPaint() {
   for (const b of batches) totals[b.state] += b.left;
   const all = totals.expired + totals.soon + totals.ok;
 
-  const holdings = supervisorPaint(work, work.currentMonth).filter((r) =>
+  const holdings = supervisorPaint(work).filter((r) =>
     s.staff.some((x) => x.id === r.supervisorId && s.inSite(x.siteId))
   );
 
   const store = batches.filter((b) => !b.supervisorId);
-  const supervisors = s.staff.filter((x) => x.role === "supervisor" && s.inSite(x.siteId));
   const [batchId, setBatchId] = useState("");
-  const [sup, setSup] = useState(supervisors[0]?.id ?? "");
+  const [supPick, setSup] = useState("");
   const [qty, setQty] = useState("");
   const [msg, setMsg] = useState<{ ok: boolean; msg: string } | null>(null);
   const pick = store.find((b) => b.id === batchId);
+  // Paint goes only to a supervisor on the batch's own site
+  const supervisors = s.staff.filter((x) => x.role === "supervisor" && (pick ? x.siteId === pick.siteId : s.inSite(x.siteId)));
+  const sup = supervisors.some((x) => x.id === supPick) ? supPick : supervisors[0]?.id ?? "";
 
   return (
     <div className="space-y-4">
@@ -139,7 +141,7 @@ export function WorkPaint() {
         </div>
       </Panel>
 
-      {s.canPlan ? (
+      {s.canIssuePaint ? (
         <Panel>
           <h3 className="mb-3 font-heading text-sm font-bold">Issue paint from store to a supervisor</h3>
           <form

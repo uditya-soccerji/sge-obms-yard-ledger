@@ -1,10 +1,11 @@
 "use client";
 
 import { cn } from "@/lib/utils";
-import { ALL_SITES } from "@/lib/site-scope";
+import { ALL_SITES, entrySiteId } from "@/lib/site-scope";
 import { useStore } from "@/lib/store";
 import { useWork } from "@/lib/work/store";
-import { DEFAULT_WAGE } from "@/lib/work/logic";
+import { currentMonthOf, DEFAULT_WAGE } from "@/lib/work/logic";
+import { workRights } from "@/lib/work/permissions";
 import type { PlanLine, Stage } from "@/lib/work/types";
 import { STAGES } from "@/lib/work/types";
 
@@ -45,14 +46,15 @@ export function useWorkScope() {
     role,
     allSites: state.currentSiteId === ALL_SITES,
     currentSiteId: state.currentSiteId,
+    /** In All sites: the site new records go to (header "New →" pick) */
+    entrySite: entrySiteId(state),
     sites: state.sites,
     staff: state.staff,
     wageOf,
-    // Payments + P&L: Owner, Super Admin, Finance (docs §18)
-    canMoney: role === "owner" || role === "super_admin" || role === "finance",
-    canConfirm: role === "sic" || role === "owner" || role === "super_admin",
-    canPlan: role === "sic" || role === "owner" || role === "super_admin" || role === "admin",
-    canEnter: role === "supervisor" || role === "admin" || role === "sic" || role === "owner" || role === "super_admin",
+    /** The current month of a site (each site closes its own month) */
+    monthOf: (siteId: string) => currentMonthOf(work, siteId),
+    // canMoney, canConfirm, canPlan, canEnter, canIssuePaint, isBoss
+    ...workRights(role),
     enteredBy: (role === "admin" ? "admin" : "supervisor") as "admin" | "supervisor",
   };
 }

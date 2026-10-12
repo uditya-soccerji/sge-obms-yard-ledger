@@ -1,11 +1,11 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { KpiTile, Panel, StatusPill } from "@/components/shared/ui-bits";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { lineStatus, monthLabel, nextMonth, OVER_TOLERANCE, UNDER_TOLERANCE } from "@/lib/work/logic";
+import { isMonthClosed, lineStatus, monthLabel, nextMonth, OVER_TOLERANCE, UNDER_TOLERANCE } from "@/lib/work/logic";
 import { useWork } from "@/lib/work/store";
 import { STAGES } from "@/lib/work/types";
 import { fmtM2, fmtPct, Msg, selectCls, tdCls, thCls, useWorkScope } from "./common";
@@ -21,11 +21,16 @@ export function WorkPlan() {
   const { addPlanLine, closeMonth } = useWork();
   const s = useWorkScope();
   const { work } = s;
-  const months = useMemo(
-    () => [...new Set(work.planLines.filter((l) => s.inSite(l.siteId)).map((l) => l.month)), work.currentMonth].filter((m, i, a) => a.indexOf(m) === i).sort(),
-    [work.planLines, work.currentMonth, s]
-  );
-  const [month, setMonth] = useState(work.currentMonth);
+  // Each site closes its own month (docs §15). In All sites there is no single
+  // "current" month, so the view starts on the latest one and closing is per site.
+  const viewSite = s.allSites ? null : s.currentSiteId;
+  const siteIdsShown = [...new Set(work.planLines.filter((l) => s.inSite(l.siteId)).map((l) => l.siteId))];
+  const viewCurrent = viewSite ? s.monthOf(viewSite) : siteIdsShown.map(s.monthOf).sort().pop() ?? work.defaultMonth;
+  const months = [...new Set([...work.planLines.filter((l) => s.inSite(l.siteId)).map((l) => l.month), viewCurrent])].sort();
+  // The picked month belongs to the site it was picked on; switching site goes back to that site's current month
+  const [pick, setPick] = useState<{ site: string; month: string } | null>(null);
+  const month = pick && pick.site === s.currentSiteId && months.includes(pick.month) ? pick.month : viewCurrent;
+  const setMonth = (m: string) => setPick({ site: s.currentSiteId, month: m });
   const lines = work.planLines
     .filter((l) => l.month === month && s.inSite(l.siteId))
     .sort((a, b) => a.plant.localeCompare(b.plant) || a.serviceCode.localeCompare(b.serviceCode));
@@ -35,16 +40,19 @@ export function WorkPlan() {
     { plan: 0, actual: 0, remaining: 0, wip: 0 }
   );
   const flagged = rows.filter((r) => r.st.flag === "short" || r.st.flag === "over").length;
-  const isOpen = !work.closedMonths.includes(month);
-  const isCurrent = month === work.currentMonth;
+  const isOpen = viewSite ? !isMonthClosed(work, viewSite, month) : null;
+  const isCurrent = viewSite ? month === s.monthOf(viewSite) : false;
+  const viewSiteCode = viewSite ? s.siteCode(viewSite) : "";
 
-  // add-plan form
+  // add-plan form. The site follows the header; only All sites picks one here.
   const plantsFor = (siteId: string) => s.sites.find((x) => x.id === siteId)?.plants ?? [];
-  const defaultSite = s.allSites ? "site-dta" : s.currentSiteId;
-  const [f, setF] = useState({ siteId: defaultSite, plant: "", serviceCode: work.serviceItems[0]?.code ?? "", planM2: "", supervisorId: "st-sup1" });
+  const [f, setF] = useState({ siteId: "", plant: "", serviceCode: work.serviceItems[0]?.code ?? "", planM2: "", supervisorId: "" });
+  const formSite = s.allSites ? f.siteId || s.entrySite : s.currentSiteId;
   const [msg, setMsg] = useState<{ ok: boolean; msg: string } | null>(null);
-  const supervisors = s.staff.filter((x) => x.role === "supervisor" && x.siteId === f.siteId);
-  const knownPlants = [...new Set([...plantsFor(f.siteId), ...work.planLines.filter((l) => l.siteId === f.siteId).map((l) => l.plant)])].sort();
+  const supervisors = s.staff.filter((x) => x.role === "supervisor" && x.siteId === formSite);
+  // Keep the pick only while it belongs to this site, else the first supervisor shown
+  const supervisorId = supervisors.some((x) => x.id === f.supervisorId) ? f.supervisorId : supervisors[0]?.id ?? "";
+  const knownPlants = [...new Set([...plantsFor(formSite), ...work.planLines.filter((l) => l.siteId === formSite).map((l) => l.plant)])].sort();
 
   return (
     <div className="space-y-4">
@@ -55,24 +63,28 @@ export function WorkPlan() {
             <select className={selectCls + " mt-1 w-40"} value={month} onChange={(e) => setMonth(e.target.value)}>
               {months.map((m) => (
                 <option key={m} value={m}>
-                  {monthLabel(m)} {work.closedMonths.includes(m) ? "· closed" : m === work.currentMonth ? "· current" : ""}
+                  {monthLabel(m)} {viewSite ? (isMonthClosed(work, viewSite, m) ? "· closed" : m === s.monthOf(viewSite) ? "· current" : "") : ""}
                 </option>
               ))}
             </select>
           </div>
-          <StatusPill tone={isOpen ? "accent" : "default"}>{isOpen ? "Open" : "Closed & carried"}</StatusPill>
+          {isOpen === null ? (
+            <StatusPill>Each site closes its own month</StatusPill>
+          ) : (
+            <StatusPill tone={isOpen ? "accent" : "default"}>{isOpen ? "Open" : "Closed & carried"}</StatusPill>
+          )}
         </div>
-        {isCurrent && s.canConfirm ? (
+        {viewSite && isCurrent && s.canConfirm ? (
           <Button
             variant="outline"
             onClick={() => {
-              if (!window.confirm(`Close ${monthLabel(month)}? Unfinished m² and open jobs move to the next month.`)) return;
-              const r = closeMonth();
-              setMsg(r.ok ? { ok: true, msg: `${monthLabel(month)} closed — remaining work carried forward.` } : { ok: false, msg: r.error });
+              if (!window.confirm(`Close ${monthLabel(month)} for ${viewSiteCode}? Unfinished m² and open jobs on ${viewSiteCode} move to the next month. Other sites are not affected.`)) return;
+              const r = closeMonth(viewSite);
+              setMsg(r.ok ? { ok: true, msg: `${monthLabel(month)} closed for ${viewSiteCode} — remaining work carried forward.` } : { ok: false, msg: r.error });
               if (r.ok) setMonth(nextMonth(month));
             }}
           >
-            Close month &amp; carry forward
+            Close {monthLabel(month)} for {viewSiteCode}
           </Button>
         ) : null}
       </div>
@@ -161,31 +173,32 @@ export function WorkPlan() {
         </div>
       </Panel>
 
-      {isCurrent && s.canPlan ? (
+      {(isCurrent || s.allSites) && s.canPlan ? (
         <Panel>
-          <h3 className="mb-3 font-heading text-sm font-bold">Add to {monthLabel(month)} plan</h3>
+          <h3 className="mb-3 font-heading text-sm font-bold">Add to {monthLabel(s.monthOf(formSite))} plan · {s.siteCode(formSite)}</h3>
           <form
             className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6"
             onSubmit={(e) => {
               e.preventDefault();
               if (!f.plant.trim()) return setMsg({ ok: false, msg: "Plant is required" });
+              if (!supervisorId) return setMsg({ ok: false, msg: `No supervisor on ${s.siteCode(formSite)} yet — add one in Master Data first.` });
               const it = s.item(f.serviceCode);
               const r = addPlanLine({
-                siteId: f.siteId,
+                siteId: formSite,
                 plant: f.plant.trim().toUpperCase(),
                 serviceCode: f.serviceCode,
                 jobType: it?.description.replace(/^APLY\s*/i, "") ?? "",
                 planM2: Number(f.planM2),
-                supervisorId: f.supervisorId,
+                supervisorId,
               });
-              setMsg(r.ok ? { ok: true, msg: "Plan line added." } : { ok: false, msg: r.error });
+              setMsg(r.ok ? { ok: true, msg: `Plan line added for ${s.staffName(supervisorId)}.` } : { ok: false, msg: r.error });
               if (r.ok) setF((x) => ({ ...x, planM2: "" }));
             }}
           >
             {s.allSites ? (
               <div>
                 <Label>Site</Label>
-                <select className={selectCls + " mt-1"} value={f.siteId} onChange={(e) => setF({ ...f, siteId: e.target.value, plant: "" })}>
+                <select className={selectCls + " mt-1"} value={formSite} onChange={(e) => setF({ ...f, siteId: e.target.value, plant: "", supervisorId: "" })}>
                   {s.sites.filter((x) => x.enabled).map((x) => <option key={x.id} value={x.id}>{x.code}</option>)}
                 </select>
               </div>
@@ -209,7 +222,8 @@ export function WorkPlan() {
             </div>
             <div>
               <Label>Supervisor</Label>
-              <select className={selectCls + " mt-1"} value={f.supervisorId} onChange={(e) => setF({ ...f, supervisorId: e.target.value })}>
+              <select className={selectCls + " mt-1"} value={supervisorId} onChange={(e) => setF({ ...f, supervisorId: e.target.value })}>
+                {supervisors.length === 0 ? <option value="">No supervisor on this site</option> : null}
                 {supervisors.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
               </select>
             </div>

@@ -2,7 +2,7 @@
  * Test scenarios: each takes fresh seed data and prepares one situation a
  * tester wants to try, so nobody has to click through setup by hand.
  */
-import { jobStageAreas } from "./logic";
+import { currentMonthOf, jobStageAreas } from "./logic";
 import { WORK_TODAY } from "./seed";
 import type { WorkState } from "./types";
 
@@ -36,7 +36,7 @@ export function applyScenario(w: WorkState, id: ScenarioId): WorkState {
   if (id === "month_end") {
     for (const job of s.jobs) {
       const line = s.planLines.find((l) => l.id === job.planLineId);
-      if (job.status !== "open" || line?.month !== s.currentMonth) continue;
+      if (job.status !== "open" || !line || line.month !== currentMonthOf(s, line.siteId)) continue;
       const done = jobStageAreas(job, s.dprs);
       const last = [...s.dprs].reverse().find((d) => d.jobId === job.id);
       for (const stage of job.stages) {
