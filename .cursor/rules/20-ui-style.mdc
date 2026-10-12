@@ -1,0 +1,13 @@
+---
+description: UI look and component rules (Vendor Desk livery)
+globs: src/**/*.tsx,src/app/globals.css
+alwaysApply: false
+---
+
+- Keep the Vendor Desk livery: ink header (`--sge-night`), 6 px amber/ink hazard stripe (`.ledger-rule`), concrete page (`--sge-linen`), white cards (`--sge-paper`), amber for fills (`--sge-brass`) and `--sge-brass-ink` for amber text.
+- Colours only through the CSS variables in `src/app/globals.css` — no new hex values in components. Status colours: `--sge-ok`, `--sge-warn`, `--sge-crit` and their `-wash` backgrounds.
+- Typography: `font-heading` (Barlow Semi Condensed, uppercase) for headings, `tabular-nums` for figures, `font-mono` for codes / SAP / JMS numbers, Inter for body.
+- Reuse `Panel`, `KpiTile`, `StatusPill`, `SectionHeader`, `EmptyState`, `formatINR` from `components/shared/ui-bits.tsx`; table cell classes `thCls` / `tdCls` from `components/work/common.tsx`. Compose shadcn primitives in `components/ui/*`; don't restyle them.
+- Desktop-first (office laptop) but must work at 375 px: no horizontal page scroll; wide tables go in an `overflow-x-auto` wrapper.
+- Buttons are verb-first and short ("Close job", "Add DPR entry"). Show validation errors inline next to the form.
+- Avoid browser `alert`/`confirm` for new flows; prefer an inline confirmation or a Dialog.

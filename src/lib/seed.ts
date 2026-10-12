@@ -5,8 +5,9 @@ import {
   SAFETY_CHECKLIST_SEED,
 } from "./safety-dpr";
 import { seedMasterCatalog } from "./master/seed-catalog";
+import { seedOtherSites } from "./seed-sites";
 import { SEED_RATE_LINES } from "./rate-book-seed";
-import type { AppState, DprDocument, DprSafetyBody, TradeDefinition } from "./types";
+import type { AppState, AttendanceStatus, DprDocument, DprSafetyBody, TradeDefinition } from "./types";
 
 const SITE = "site-dta";
 const TODAY = "2026-10-05";
@@ -492,7 +493,7 @@ function seedDprDocuments(): DprDocument[] {
 }
 
 export function createSeedState(): AppState {
-  return {
+  const base: AppState = {
     currentRole: null,
     currentUserId: null,
     currentAccountId: null,
@@ -1391,7 +1392,57 @@ export function createSeedState(): AppState {
       },
     ],
   };
+  return withOtherSites(base);
 }
 
-export const STORAGE_KEY = "sge-obms-ops-v8-desk";
+/** v9: per-site demo data — a new key so old browsers load the new seed. */
+export const STORAGE_KEY = "sge-obms-ops-v9-sites";
 export { SAFETY_ITEMS };
+
+/**
+ * DTA's hand-written rows predate per-site tracking: stamp the ones that had
+ * no site with DTA, then add the generated rows for the other five sites.
+ */
+function withOtherSites(base: AppState): AppState {
+  const dta = <T extends { siteId?: string }>(rows: T[]) =>
+    rows.map((r) => ({ ...r, siteId: r.siteId ?? SITE }));
+  const more = seedOtherSites();
+  // DTA's 40 "Roster" labourers had no attendance: mark ~85% of them present
+  const marked = new Set(
+    base.attendance.filter((a) => a.date === TODAY).map((a) => a.labourerId)
+  );
+  const dtaRoster = base.labourers
+    .filter((l) => l.active && !marked.has(l.id))
+    .map((l, i) => ({
+      id: `att-dta-r-${i + 1}`,
+      date: TODAY,
+      labourerId: l.id,
+      status: (i % 7 === 3 ? "absent" : "present") as AttendanceStatus,
+      inTime: i % 7 === 3 ? undefined : "07:58",
+      markedBy: l.supervisorId,
+      siteId: SITE,
+    }));
+  return {
+    ...base,
+    staff: [...base.staff, ...more.staff],
+    labourers: [...base.labourers, ...more.labourers],
+    attendance: [...base.attendance, ...dtaRoster, ...more.attendance],
+    paintStock: [...base.paintStock, ...more.paintStock],
+    equipment: [...base.equipment, ...more.equipment],
+    dprs: [...base.dprs, ...more.dprs],
+    dprDocuments: [...base.dprDocuments, ...more.dprDocuments],
+    workPlans: [...dta(base.workPlans), ...more.workPlans],
+    safetyDays: [...base.safetyDays, ...more.safetyDays],
+    finance: [...base.finance, ...more.finance],
+    predictions: [...dta(base.predictions), ...more.predictions],
+    billing: [...dta(base.billing), ...more.billing],
+    compliance: [...dta(base.compliance), ...more.compliance],
+    transfers: [...dta(base.transfers), ...more.transfers],
+    acplPunches: dta(base.acplPunches),
+    acplMatches: [...dta(base.acplMatches), ...more.acplMatches],
+    jmsPackages: [...dta(base.jmsPackages), ...more.jmsPackages],
+    wageLedger: [...dta(base.wageLedger), ...more.wageLedger],
+    financeAlerts: dta(base.financeAlerts),
+    equipmentRequests: [...dta(base.equipmentRequests), ...more.equipmentRequests],
+  };
+}

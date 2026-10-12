@@ -522,6 +522,8 @@ export interface WorkPlanItem {
   task: string;
   targetM2?: number;
   status: "planned" | "in_progress" | "done";
+  /** Site this row belongs to (unset = company-wide). */
+  siteId?: string;
 }
 
 export interface SafetyChecklistDay {
@@ -566,6 +568,8 @@ export interface PredictionAlert {
   detail: string;
   value: number;
   threshold: number;
+  /** Site this row belongs to (unset = company-wide). */
+  siteId?: string;
 }
 
 export interface BillingSnapshot {
@@ -574,6 +578,8 @@ export interface BillingSnapshot {
   amount: number;
   status: "draft" | "submitted" | "approved" | "paid";
   period: string;
+  /** Site this row belongs to (unset = company-wide). */
+  siteId?: string;
 }
 
 export interface ComplianceDoc {
@@ -583,6 +589,8 @@ export interface ComplianceDoc {
   uploadedBy: string;
   uploadedAt: string;
   status: "pending" | "filed";
+  /** Site this row belongs to (unset = company-wide). */
+  siteId?: string;
 }
 
 export interface MaterialTransfer {
@@ -593,6 +601,8 @@ export interface MaterialTransfer {
   sapCode: string;
   qty: number;
   note: string;
+  /** Site this row belongs to (unset = company-wide). */
+  siteId?: string;
 }
 
 export interface AcplPunchRow {
@@ -603,6 +613,8 @@ export interface AcplPunchRow {
   inTime?: string;
   outTime?: string;
   source: "upload" | "paste" | "seed";
+  /** Site this row belongs to (unset = company-wide). */
+  siteId?: string;
 }
 
 export interface AcplMatchRow {
@@ -618,6 +630,8 @@ export interface AcplMatchRow {
   resolveStatus: AcplResolveStatus;
   resolveNote?: string;
   resolvedBy?: string;
+  /** Site this row belongs to (unset = company-wide). */
+  siteId?: string;
 }
 
 export interface JmsLine {
@@ -649,6 +663,8 @@ export interface JmsPackage {
   paymentReceived: boolean;
   paymentReceivedAt?: string;
   paymentNote?: string;
+  /** Site this row belongs to (unset = company-wide). */
+  siteId?: string;
 }
 
 export interface WorkRating {
@@ -666,6 +682,8 @@ export interface WorkRating {
   suggestedSupervisorIncentive: number;
   suggestedLabourIncentive: number;
   note?: string;
+  /** Site this row belongs to (unset = company-wide). */
+  siteId?: string;
 }
 
 export interface RateCard {
@@ -689,6 +707,8 @@ export interface WageLedgerEntry {
   amount: number;
   note: string;
   flaggedToSic?: boolean;
+  /** Site this row belongs to (unset = company-wide). */
+  siteId?: string;
 }
 
 export interface FinanceAlert {
@@ -700,6 +720,8 @@ export interface FinanceAlert {
   jmsPackageId?: string;
   acknowledged: boolean;
   flaggedToSic: boolean;
+  /** Site this row belongs to (unset = company-wide). */
+  siteId?: string;
 }
 
 export interface AppState {
@@ -719,7 +741,10 @@ export interface AppState {
     userId: string | null;
     siteId: string;
   } | null;
+  /** Active site id, or "all" (Owner / Super Admin) for every site. */
   currentSiteId: string;
+  /** In All sites: the site new records are written to. */
+  entrySiteId?: string;
   sites: Site[];
   staff: StaffMember[];
   users: UserAccount[];

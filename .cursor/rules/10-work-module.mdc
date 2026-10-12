@@ -1,0 +1,15 @@
+---
+description: Work module rules (WO → plan → job → DPR → JMS)
+globs: src/lib/work/**,src/components/work/**,src/app/(app)/work/**
+alwaysApply: false
+---
+
+- Flow: Work Order → monthly PlanLine → Job (required stages) → DprEntry (stage, measured members, litres, DFT) → supervisor closes job → SIC confirms → Jms.
+- JMS qty = area of the job's last required stage ("final shade"); amount = qty × service-item rate. Actual on a plan line = Σ JMS qty. Remaining = plan (new + carried) − actual.
+- A job can close only when every required stage has m² > 0 (`canCloseJob`). Closing a month is blocked while any job waits for SIC; it carries remaining m² and open jobs into the next month (`closeMonth`).
+- Area = NOS × SIDE × LENGTH × CF, `round3`. Max 2,000 m² per DPR entry.
+- Flags: plan band −2 % / +5 % (`UNDER_TOLERANCE`, `OVER_TOLERANCE`); WO warnings at 80 % / 95 % of m² or ₹ (`WO_WARN`); paint expiry warning 60 days (`EXPIRY_WARN_DAYS`).
+- Paint: DPR litres are deducted from the supervisor's issued stock, earliest expiry first (`batchBalances`); a negative balance is allowed and flagged; "low" = balance below remaining m² × norm.
+- Roles: supervisors see only their own jobs; SIC / Owner / Super Admin confirm JMS and close months; Admin entries are marked `enteredBy: "admin"` (double entry).
+- Put new rules in `logic.ts` as pure functions + named constants; keep `store.tsx` for state changes and validation messages.
+- Seed (`work/seed.ts`) is built from real DTA Aug-2026 documents — keep its figures, add new demo rows instead of altering them. Bump `WORK_STORAGE_KEY` when the stored shape changes.

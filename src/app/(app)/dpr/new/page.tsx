@@ -18,6 +18,7 @@ import {
   defaultDprSubmitterType,
 } from "@/lib/paint-lifecycle";
 import { useStore } from "@/lib/store";
+import { entrySiteId } from "@/lib/site-scope";
 import type { DprDocument, DprSubmitterType } from "@/lib/types";
 
 const TYPE_LABEL: Record<DprSubmitterType, string> = {
@@ -65,7 +66,7 @@ export default function NewDprPage() {
     blankDpr({
       submitterId: defaultSubmitter,
       submitterType: defaultType,
-      siteId: state.currentSiteId,
+      siteId: entrySiteId(state),
     })
   );
 
@@ -90,7 +91,7 @@ export default function NewDprPage() {
       blankDpr({
         submitterId: sid,
         submitterType: t,
-        siteId: state.currentSiteId,
+        siteId: entrySiteId(state),
       })
     );
   }

@@ -1,16 +1,16 @@
 import type { Metadata } from "next";
-import { Fraunces, JetBrains_Mono, Outfit } from "next/font/google";
+import { Barlow_Semi_Condensed, Inter, JetBrains_Mono } from "next/font/google";
 import { StoreProvider } from "@/lib/store";
 import "./globals.css";
 
-const fraunces = Fraunces({
-  variable: "--font-fraunces",
+const barlow = Barlow_Semi_Condensed({
+  variable: "--font-barlow",
   subsets: ["latin"],
-  weight: ["600", "700"],
+  weight: ["500", "600", "700"],
 });
 
-const outfit = Outfit({
-  variable: "--font-outfit",
+const inter = Inter({
+  variable: "--font-inter",
   subsets: ["latin"],
   weight: ["400", "500", "600", "700"],
 });
@@ -35,7 +35,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body
-        className={`${fraunces.variable} ${outfit.variable} ${jetbrains.variable} font-sans antialiased`}
+        className={`${barlow.variable} ${inter.variable} ${jetbrains.variable} font-sans antialiased`}
       >
         <StoreProvider>{children}</StoreProvider>
       </body>

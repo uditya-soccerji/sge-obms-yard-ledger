@@ -56,16 +56,16 @@ export default function LoginPage() {
 
   return (
     <div className="grid min-h-dvh lg:grid-cols-[minmax(280px,42%)_1fr]">
-      <aside className="relative hidden overflow-hidden bg-[var(--sge-night)] px-10 py-12 text-[#f3eee4] lg:flex lg:flex-col lg:justify-between">
+      <aside className="relative hidden overflow-hidden bg-[var(--sge-night)] px-10 py-12 text-[#ffffff] lg:flex lg:flex-col lg:justify-between">
         <div
           className="pointer-events-none absolute inset-0 opacity-40"
           style={{
             backgroundImage:
-              "radial-gradient(ellipse 80% 60% at 0% 100%, rgba(201,162,39,0.22), transparent 55%), radial-gradient(ellipse 50% 40% at 100% 0%, rgba(29,78,86,0.45), transparent 50%)",
+              "radial-gradient(ellipse 80% 60% at 0% 100%, rgba(232,133,30,0.22), transparent 55%), radial-gradient(ellipse 50% 40% at 100% 0%, rgba(105,114,123,0.35), transparent 50%)",
           }}
         />
         <div className="relative">
-          <div className="mb-8 inline-flex items-center gap-2 rounded-sm border border-[rgba(201,162,39,0.35)] bg-[rgba(20,51,44,0.7)] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.22em] text-[var(--sge-brass)]">
+          <div className="mb-8 inline-flex items-center gap-2 rounded-sm border border-[rgba(232,133,30,0.35)] bg-[rgba(35,42,49,0.7)] px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.22em] text-[var(--sge-brass)]">
             RIL Jamnagar · multi-site
           </div>
           <p className="font-heading text-5xl font-semibold leading-[1.05] tracking-tight">
@@ -73,7 +73,7 @@ export default function LoginPage() {
             <br />
             Enterprise
           </p>
-          <p className="mt-5 max-w-sm text-base leading-relaxed text-[#d8cebc]">
+          <p className="mt-5 max-w-sm text-base leading-relaxed text-[#b8c0c8]">
             Yard Ledger is the field desk for daily progress, dual paint books,
             and role-locked DPR — same operations, a new shift.
           </p>
@@ -86,7 +86,7 @@ export default function LoginPage() {
             {SITES.map((s) => (
               <span
                 key={s}
-                className="rounded-sm border border-[rgba(201,162,39,0.28)] px-2 py-1 font-mono text-[11px] uppercase tracking-wider text-[#f6edd0]"
+                className="rounded-sm border border-[rgba(232,133,30,0.28)] px-2 py-1 font-mono text-[11px] uppercase tracking-wider text-[#ffffff]"
               >
                 {s}
               </span>

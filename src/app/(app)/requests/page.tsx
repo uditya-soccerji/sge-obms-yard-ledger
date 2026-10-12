@@ -22,6 +22,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { canViewModule, effectivePermission, plantScopeFor } from "@/lib/permissions";
 import { useStore } from "@/lib/store";
+import { entrySiteId } from "@/lib/site-scope";
 import type { EquipmentRequest } from "@/lib/types";
 
 const TONE: Record<
@@ -80,7 +81,7 @@ export default function RequestsDeskPage() {
     e.preventDefault();
     if (!canCreate || !description.trim()) return;
     createEquipmentRequest({
-      siteId: state.currentSiteId,
+      siteId: entrySiteId(state),
       plant,
       kind,
       description: description.trim(),
