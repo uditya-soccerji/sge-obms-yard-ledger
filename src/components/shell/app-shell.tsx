@@ -15,6 +15,7 @@ import {
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { roleMeta, rolesForSwitcher } from "@/lib/roles";
 import { topNavFor } from "@/lib/desk";
+import { ALL_SITES, canSeeAllSites, entrySiteId } from "@/lib/site-scope";
 import { useStore } from "@/lib/store";
 import type { RoleId } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -60,7 +61,7 @@ function DeskNav({
                     "border-b-2 px-3 py-2.5",
                     active
                       ? "border-[var(--sge-brass)] text-[var(--sge-brass)]"
-                      : "border-transparent text-[#d8cebc] hover:text-[#f6edd0]"
+                      : "border-transparent text-[#b8c0c8] hover:text-[#ffffff]"
                   )
                 : cn(
                     "rounded-sm px-3 py-2",
@@ -85,7 +86,7 @@ function BrandMark() {
         S
       </span>
       <span className="min-w-0">
-        <span className="block font-heading text-base font-semibold leading-none text-[#f6edd0]">
+        <span className="block font-heading text-base font-semibold leading-none text-[#ffffff]">
           SGE Yard Ledger
         </span>
         <span className="mt-0.5 block text-[10px] uppercase tracking-[0.16em] text-[var(--sge-brass)]">
@@ -103,6 +104,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     currentAccount,
     switchRole,
     switchSite,
+    setEntrySite,
     logout,
     resetSeed,
     endImpersonation,
@@ -147,6 +149,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   const meta = roleMeta(role);
   const site = state.sites.find((s) => s.id === state.currentSiteId);
+  const allSites = state.currentSiteId === ALL_SITES;
+  const showAllOption = canSeeAllSites(role) && switchableSites.length > 1;
+  const entrySite = state.sites.find((s) => s.id === entrySiteId(state));
 
   function exitViewAs() {
     const r = endImpersonation();
@@ -155,9 +160,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex min-h-dvh flex-col">
-      <header className="sticky top-0 z-40 bg-[var(--sge-night)] text-[#f3eee4]">
+      <header className="sticky top-0 z-40 bg-[var(--sge-night)] text-[#ffffff]">
         {viewingAs ? (
-          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[rgba(201,162,39,0.35)] bg-[#3d2a08] px-4 py-2 text-[#f6edd0] md:px-6">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[rgba(232,133,30,0.35)] bg-[#5a3406] px-4 py-2 text-[#ffffff] md:px-6">
             <p className="min-w-0 flex-1 text-xs font-semibold leading-snug sm:text-sm">
               Viewing as {currentAccount.name} (@{currentAccount.username}) —
               Exit to Super Admin
@@ -176,7 +181,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <Button
             variant="ghost"
             size="icon-sm"
-            className="text-[#f6edd0] hover:bg-[var(--sge-night-2)] md:hidden"
+            className="text-[#ffffff] hover:bg-[var(--sge-night-2)] md:hidden"
             onClick={() => setMobileOpen(true)}
             aria-label="Open menu"
           >
@@ -184,11 +189,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           </Button>
           <BrandMark />
           <div className="hidden min-w-0 flex-1 md:block">
-            <div className="truncate text-right text-[11px] text-[#d8cebc]">
+            <div className="truncate text-right text-[11px] text-[#b8c0c8]">
               {currentAccount.name} · @{currentAccount.username}
             </div>
             <div className="truncate text-right text-[10px] uppercase tracking-[0.12em] text-[var(--sge-brass)]">
-              {meta.label} · {site?.name ?? "Site"}
+              {meta.label} · {allSites ? "All sites" : site?.name ?? "Site"}
             </div>
           </div>
           <div className="ml-auto flex items-center gap-2 md:ml-0">
@@ -197,10 +202,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 value={state.currentSiteId}
                 onValueChange={(v) => switchSite(v)}
               >
-                <SelectTrigger className="h-8 w-[9.5rem] rounded-sm border-[rgba(201,162,39,0.35)] bg-[var(--sge-night-2)] text-xs text-[#f6edd0]">
+                <SelectTrigger className="h-8 w-[9.5rem] rounded-sm border-[rgba(232,133,30,0.35)] bg-[var(--sge-night-2)] text-xs text-[#ffffff]">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent position="popper">
+                  {showAllOption ? (
+                    <SelectItem value={ALL_SITES}>All sites</SelectItem>
+                  ) : null}
                   {switchableSites.map((s) => (
                     <SelectItem key={s.id} value={s.id}>
                       {s.code}
@@ -210,11 +218,29 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 </SelectContent>
               </Select>
             ) : (
-              <div className="hidden rounded-sm border border-[rgba(201,162,39,0.28)] px-2 py-1.5 font-mono text-[11px] text-[#f6edd0] sm:block">
+              <div className="hidden rounded-sm border border-[rgba(232,133,30,0.28)] px-2 py-1.5 font-mono text-[11px] text-[#ffffff] sm:block">
                 {site?.code ?? "—"}
                 {site?.rpTags?.length ? ` · ${site.rpTags.join("/")}` : ""}
               </div>
             )}
+            {allSites ? (
+              <Select value={entrySite?.id} onValueChange={(v) => setEntrySite(v)}>
+                <SelectTrigger
+                  title="Site that new entries are saved to while viewing All sites"
+                  className="hidden h-8 w-[10.5rem] rounded-sm border-dashed border-[rgba(232,133,30,0.5)] bg-transparent text-xs text-[#ffffff] md:flex"
+                >
+                  <span className="mr-1 text-[#b8c0c8]">New →</span>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent position="popper">
+                  {switchableSites.map((s) => (
+                    <SelectItem key={s.id} value={s.id}>
+                      {s.code}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : null}
             {assigned.length > 1 ? (
               <Select
                 value={role}
@@ -224,10 +250,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   router.push(roleMeta(next).home);
                 }}
               >
-                <SelectTrigger className="h-8 w-[9.5rem] rounded-sm border-[rgba(201,162,39,0.35)] bg-[var(--sge-night-2)] text-xs text-[#f6edd0]">
+                <SelectTrigger className="h-8 w-[9.5rem] rounded-sm border-[rgba(232,133,30,0.35)] bg-[var(--sge-night-2)] text-xs text-[#ffffff]">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent position="popper">
                   {assigned.map((r) => (
                     <SelectItem key={r.id} value={r.id}>
                       {r.label}
@@ -243,7 +269,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <Button
               variant="ghost"
               size="sm"
-              className="hidden rounded-sm text-[#d8cebc] hover:bg-[var(--sge-night-2)] hover:text-[#f6edd0] md:inline-flex"
+              className="hidden rounded-sm text-[#b8c0c8] hover:bg-[var(--sge-night-2)] hover:text-[#ffffff] md:inline-flex"
               onClick={() => {
                 resetSeed();
                 router.push("/");
@@ -255,7 +281,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <Button
               variant="ghost"
               size="sm"
-              className="hidden rounded-sm text-[#d8cebc] hover:bg-[var(--sge-night-2)] hover:text-[#f6edd0] md:inline-flex"
+              className="hidden rounded-sm text-[#b8c0c8] hover:bg-[var(--sge-night-2)] hover:text-[#ffffff] md:inline-flex"
               onClick={() => {
                 logout();
                 router.push("/");
@@ -266,7 +292,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </Button>
           </div>
         </div>
-        <div className="hidden border-t border-[rgba(201,162,39,0.22)] px-3 md:block md:px-6">
+        <div className="hidden border-t border-[rgba(232,133,30,0.22)] px-3 md:block md:px-6">
           <DeskNav account={currentAccount} role={role} variant="bar" />
         </div>
         <div className="ledger-rule" />
@@ -308,7 +334,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <SelectTrigger className="w-full rounded-sm">
                   <SelectValue placeholder="Site" />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent position="popper">
+                  {showAllOption ? (
+                    <SelectItem value={ALL_SITES}>All sites</SelectItem>
+                  ) : null}
                   {switchableSites.map((s) => (
                     <SelectItem key={s.id} value={s.id}>
                       {s.code} — {s.name}
@@ -316,6 +345,25 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   ))}
                 </SelectContent>
               </Select>
+            ) : null}
+            {allSites ? (
+              <div>
+                <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-[var(--sge-ink-3)]">
+                  New entries go to
+                </div>
+                <Select value={entrySite?.id} onValueChange={(v) => setEntrySite(v)}>
+                  <SelectTrigger className="w-full rounded-sm">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent position="popper">
+                    {switchableSites.map((s) => (
+                      <SelectItem key={s.id} value={s.id}>
+                        {s.code} — {s.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             ) : null}
             {assigned.length > 1 ? (
               <Select
@@ -330,7 +378,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 <SelectTrigger className="w-full rounded-sm">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent>
+                <SelectContent position="popper">
                   {assigned.map((r) => (
                     <SelectItem key={r.id} value={r.id}>
                       {r.label}

@@ -21,6 +21,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { ALL_SITES, entrySiteId } from "@/lib/site-scope";
 import { useStore } from "@/lib/store";
 import type { WageLedgerEntry } from "@/lib/types";
 
@@ -43,7 +44,13 @@ export default function FinancePage() {
     useState<WageLedgerEntry["kind"]>("advance");
   const [wageAmount, setWageAmount] = useState("");
   const [wageNote, setWageNote] = useState("");
-  const [wageLabourer, setWageLabourer] = useState("lb-01");
+  const [wageLabourerPick, setWageLabourer] = useState("");
+  const wageLabourer = wageLabourerPick || state.labourers[0]?.id || "";
+  const allSites = state.currentSiteId === ALL_SITES;
+  // In All sites the form asks which site; it starts on the header pick
+  const [entrySitePick, setEntrySitePick] = useState("");
+  const entrySite = entrySitePick || entrySiteId(state);
+  const siteCode = (id: string) => state.sites.find((s) => s.id === id)?.code ?? "";
   const [flagSic, setFlagSic] = useState(false);
 
   const today = "2026-10-05";
@@ -70,6 +77,7 @@ export default function FinancePage() {
       category,
       amount: n,
       description,
+      siteId: entrySite,
     });
     setAmount("");
     setDescription("");
@@ -327,6 +335,25 @@ export default function FinancePage() {
         <Panel>
           <h3 className="mb-3 font-heading text-sm font-bold">Add ledger entry</h3>
           <form onSubmit={submit} className="space-y-3">
+            {allSites ? (
+              <div>
+                <Label>Site</Label>
+                <Select value={entrySite} onValueChange={setEntrySitePick}>
+                  <SelectTrigger className="mt-1">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {state.sites
+                      .filter((s) => s.enabled)
+                      .map((s) => (
+                        <SelectItem key={s.id} value={s.id}>
+                          {s.code} — {s.name}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : null}
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label>Kind</Label>
@@ -390,6 +417,11 @@ export default function FinancePage() {
                   <StatusPill tone={f.kind === "income" ? "ok" : "warn"}>
                     {f.kind}
                   </StatusPill>{" "}
+                  {allSites ? (
+                    <span className="mr-1 font-heading text-xs tracking-wide text-[var(--sge-brass-ink)]">
+                      {siteCode(f.siteId)}
+                    </span>
+                  ) : null}
                   {f.category}
                 </span>
                 <span className="font-mono">{formatINR(f.amount)}</span>

@@ -1,0 +1,13 @@
+---
+description: SGE OBMS Yard Ledger — project basics, always on
+alwaysApply: true
+---
+
+- Read `AGENTS.md` (repo root) before any task; it is the single source of truth shared with Claude Code. Business rules are in `docs/rules-decisions.md`, the plan in `docs/build-plan.md`.
+- Stack: Next.js 15 App Router, React 19, TypeScript strict, Tailwind v4 + shadcn/ui, lucide-react. Prototype data is in `localStorage` (no backend yet).
+- Run: `npm run dev` (port 43127). Before finishing: `npx tsc --noEmit -p .`, `npx eslint src`, and click through the changed flow in the browser.
+- Keep business calculations in pure functions under `src/lib/` (Work module: `src/lib/work/logic.ts`); components only display.
+- Sites: screens read `useStore().state` (already site-filtered by `scopeState`). "All sites" (`ALL_SITES`) is Owner / Super Admin only; new records there go to `entrySiteId(state)`.
+- If you change seed data or a stored shape, bump the storage key or add a migration.
+- Don't edit files another tool is editing; commit before switching tools. Work on a branch, not `main`.
+- If you change a rule or the structure, update `docs/rules-decisions.md` / `AGENTS.md` in the same change.

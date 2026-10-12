@@ -112,7 +112,12 @@ export function opsPillsFor(
   );
 }
 
-export type TopNavId = "home" | "operations" | "master";
+export type TopNavId = "home" | "work" | "operations" | "master";
+
+/** Work order → plan → job → DPR → JMS tracking (src/app/(app)/work). */
+export function canAccessWork(role: RoleId | null | undefined): boolean {
+  return role === "super_admin" || role === "owner" || role === "sic" || role === "admin" || role === "supervisor";
+}
 
 export function topNavFor(
   account: UserAccount | null | undefined,
@@ -121,6 +126,9 @@ export function topNavFor(
   const items: { id: TopNavId; href: string; label: string }[] = [
     { id: "home", href: "/home", label: "Home" },
   ];
+  if (canAccessWork(role)) {
+    items.push({ id: "work", href: "/work", label: "Work" });
+  }
   if (opsPillsFor(account, role).length > 0) {
     items.push({ id: "operations", href: "/operations", label: "Operations" });
   }

@@ -11,11 +11,16 @@ import {
 } from "@/components/shared/ui-bits";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { SiteComparison } from "@/components/owner/site-comparison";
+import { ALL_SITES } from "@/lib/site-scope";
 import { useStore } from "@/lib/store";
 
 export default function OwnerHomePage() {
   const { state } = useStore();
   const today = "2026-10-05";
+  const allSites = state.currentSiteId === ALL_SITES;
+  const siteName = state.sites.find((s) => s.id === state.currentSiteId)?.name;
+  const siteCode = (id: string) => state.sites.find((s) => s.id === id)?.code ?? "";
   const attendToday = state.attendance.filter((a) => a.date === today);
   const present = attendToday.filter((a) => a.status === "present" || a.status === "half").length;
   const totalActive = state.labourers.filter((l) => l.active).length;
@@ -49,7 +54,7 @@ export default function OwnerHomePage() {
   return (
     <div className="sge-enter space-y-6">
       <SectionHeader
-        title="Owner dashboard"
+        title={allSites ? "Owner dashboard · All sites" : `Owner dashboard · ${siteName ?? "Site"}`}
         subtitle="Daily performance gist — SIC pending, ACPL flags, JMS ratings, finance alerts. Paint variance owner-only."
         action={
           <div className="flex flex-wrap gap-2">
@@ -75,6 +80,8 @@ export default function OwnerHomePage() {
         <KpiTile label="Avg JMS rating" value={String(avgRating)} hint={`${state.workRatings.length} scores`} tone="accent" />
         <KpiTile label="JMS expected" value={formatINR(state.jmsPackages.reduce((s, p) => s + p.expectedIncome, 0))} />
       </div>
+
+      {allSites ? <SiteComparison /> : null}
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Panel>
@@ -124,7 +131,14 @@ export default function OwnerHomePage() {
                     className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-[var(--sge-line)] px-3 py-2"
                   >
                     <div>
-                      <div className="text-sm font-medium">{line.description}</div>
+                      <div className="text-sm font-medium">
+                        {allSites ? (
+                          <span className="mr-1.5 font-heading text-xs tracking-wide text-[var(--sge-brass-ink)]">
+                            {siteCode(line.siteId)}
+                          </span>
+                        ) : null}
+                        {line.description}
+                      </div>
                       <div className="font-mono text-[11px] text-[var(--sge-ink-3)]">
                         SAP {line.sapCode} · RIL {line.rilPosted}L · SGE {line.sgeUsed}L
                         {line.movement942 ? ` · 942 ${line.movement942}` : ""}
@@ -152,7 +166,14 @@ export default function OwnerHomePage() {
                 className="rounded-md border border-[var(--sge-line)] px-3 py-2"
               >
                 <div className="flex items-center justify-between gap-2">
-                  <div className="text-sm font-semibold">{p.title}</div>
+                  <div className="text-sm font-semibold">
+                    {allSites && p.siteId ? (
+                      <span className="mr-1.5 font-heading text-xs tracking-wide text-[var(--sge-brass-ink)]">
+                        {siteCode(p.siteId)}
+                      </span>
+                    ) : null}
+                    {p.title}
+                  </div>
                   <StatusPill tone={p.severity === "crit" ? "crit" : "warn"}>
                     {p.kind.replace("_", " ")}
                   </StatusPill>
@@ -218,7 +239,13 @@ export default function OwnerHomePage() {
             ACPL flags {acplFlags}.
           </TabsContent>
           <TabsContent value="monthly" className="mt-3 text-sm text-[var(--sge-ink-2)]">
-            September RA submitted {formatINR(485000)}; JMS payment tracking live on Finance.
+            September RA bills{" "}
+            {formatINR(
+              state.billing
+                .filter((b) => b.period === "Sep 2026")
+                .reduce((s, b) => s + b.amount, 0)
+            )}
+            ; JMS payment tracking live on Finance.
           </TabsContent>
         </Tabs>
       </Panel>

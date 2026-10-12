@@ -20,6 +20,7 @@ import { ROLES } from "@/lib/roles";
 import { useStore } from "@/lib/store";
 import type { CatalogItem, MaterialItem } from "@/lib/master/types";
 import type { Labourer, RoleId, Site, UserAccount } from "@/lib/types";
+import { entrySiteId } from "@/lib/site-scope";
 import { cn } from "@/lib/utils";
 
 type ScopeFilter = "site" | "company" | "all";
@@ -31,7 +32,7 @@ function uid(prefix: string) {
 export function MasterDesk() {
   const params = useSearchParams();
   const router = useRouter();
-  const { state, currentAccount } = useStore();
+  const { fullState: state, currentAccount } = useStore();
   const sheet = (params.get("sheet") as MasterSheetId) || "sites";
   const [scope, setScope] = useState<ScopeFilter>("all");
   const [showInactive, setShowInactive] = useState(true);
@@ -88,7 +89,7 @@ export function MasterDesk() {
           Show inactive
         </label>
         <div className="text-xs text-[var(--sge-ink-3)]">
-          Active site {state.sites.find((s) => s.id === state.currentSiteId)?.code} ·{" "}
+          Active site {state.sites.find((s) => s.id === entrySiteId(state))?.code} ·{" "}
           {currentAccount?.name}
         </div>
       </div>
@@ -137,7 +138,7 @@ function SheetBody({
 }
 
 function SitesSheet({ showInactive }: { showInactive: boolean }) {
-  const { state, upsertSite } = useStore();
+  const { fullState: state, upsertSite } = useStore();
   const rows = state.sites.filter((s) => showInactive || s.enabled);
   const [draft, setDraft] = useState<Site | null>(null);
 
@@ -274,7 +275,7 @@ function SiteForm({
 }
 
 function UsersSheet({ showInactive }: { showInactive: boolean }) {
-  const { state, createUser, updateUser, startImpersonation } = useStore();
+  const { fullState: state, createUser, updateUser, startImpersonation } = useStore();
   const router = useRouter();
   const isSa =
     state.currentRole === "super_admin" && !state.impersonatorAccountId;
@@ -332,7 +333,7 @@ function UsersSheet({ showInactive }: { showInactive: boolean }) {
                 password,
                 name: name.trim() || username.trim(),
                 roles: [role],
-                siteIds: [state.currentSiteId],
+                siteIds: [entrySiteId(state)],
                 plantIds: [],
                 permissionOverrides: [],
                 active: true,
@@ -391,7 +392,7 @@ function UserRow({
   onToggle: () => void;
   onViewAs: () => void;
 }) {
-  const { state } = useStore();
+  const { fullState: state } = useStore();
   return (
     <tr className="border-t border-[var(--sge-line)]">
       <td className="py-2">
@@ -432,19 +433,20 @@ function LabourSheet({
   scope: ScopeFilter;
   showInactive: boolean;
 }) {
-  const { state, updateLabourer, addLabourer } = useStore();
+  const { fullState: state, updateLabourer, addLabourer } = useStore();
   const [q, setQ] = useState("");
   const contractors = state.masterCatalog.contractors.filter((c) => c.active);
   const trades = state.tradeCatalogue.filter((t) => t.active);
+  const activeSite = entrySiteId(state);
   const rows = useMemo(() => {
     return state.labourers.filter((l) => {
       if (!showInactive && !l.active) return false;
-      if (!matchScope(l.siteId, state.currentSiteId, scope)) return false;
+      if (!matchScope(l.siteId, activeSite, scope)) return false;
       if (!q.trim()) return true;
       const hay = `${l.name} ${l.epNumber} ${l.trade} ${l.gatePass}`.toLowerCase();
       return hay.includes(q.trim().toLowerCase());
     });
-  }, [state.labourers, state.currentSiteId, scope, showInactive, q]);
+  }, [state.labourers, activeSite, scope, showInactive, q]);
 
   function addBlank() {
     addLabourer({
@@ -452,7 +454,7 @@ function LabourSheet({
       trade: trades[0]?.id ?? "helper",
       epNumber: "EP-",
       gatePass: "GP-",
-      siteId: state.currentSiteId,
+      siteId: entrySiteId(state),
       supervisorId: state.staff[0]?.id ?? "",
       contractorId: contractors[0]?.id ?? "con-sge",
       wageDaily: 0,
@@ -553,10 +555,10 @@ function ContractorsSheet({
   scope: ScopeFilter;
   showInactive: boolean;
 }) {
-  const { state, upsertContractor, setContractorActive } = useStore();
+  const { fullState: state, upsertContractor, setContractorActive } = useStore();
   const rows = state.masterCatalog.contractors.filter((c) => {
     if (!showInactive && !c.active) return false;
-    return matchScope(c.siteId, state.currentSiteId, scope);
+    return matchScope(c.siteId, entrySiteId(state), scope);
   });
   return (
     <Panel>
@@ -566,7 +568,7 @@ function ContractorsSheet({
           onClick={() =>
             upsertContractor({
               id: uid("con"),
-              siteId: state.currentSiteId,
+              siteId: entrySiteId(state),
               code: "NEW",
               name: "New contractor",
               active: true,
@@ -632,10 +634,10 @@ function TradesSheet({
   scope: ScopeFilter;
   showInactive: boolean;
 }) {
-  const { state, updateTrade, addTrade } = useStore();
+  const { fullState: state, updateTrade, addTrade } = useStore();
   const rows = state.tradeCatalogue.filter((t) => {
     if (!showInactive && !t.active) return false;
-    return matchScope(t.siteId ?? null, state.currentSiteId, scope);
+    return matchScope(t.siteId ?? null, entrySiteId(state), scope);
   });
   return (
     <Panel>
@@ -700,12 +702,12 @@ function RatesSheet({
   scope: ScopeFilter;
   showInactive: boolean;
 }) {
-  const { state, upsertRateLine } = useStore();
+  const { fullState: state, upsertRateLine } = useStore();
   const rows = state.rateLines.filter((r) => {
     if (!showInactive && r.superseded) return false;
     if (scope === "company") return r.siteIds.length === 0;
-    if (scope === "site") return r.siteIds.includes(state.currentSiteId);
-    return r.siteIds.length === 0 || r.siteIds.includes(state.currentSiteId);
+    if (scope === "site") return r.siteIds.includes(entrySiteId(state));
+    return r.siteIds.length === 0 || r.siteIds.includes(entrySiteId(state));
   });
   return (
     <Panel>
@@ -772,10 +774,10 @@ function MaterialsSheet({
   scope: ScopeFilter;
   showInactive: boolean;
 }) {
-  const { state, upsertMaterial, setCatalogActive } = useStore();
+  const { fullState: state, upsertMaterial, setCatalogActive } = useStore();
   const rows = state.masterCatalog.materials.filter((m) => {
     if (!showInactive && !m.active) return false;
-    return matchScope(m.siteId, state.currentSiteId, scope);
+    return matchScope(m.siteId, entrySiteId(state), scope);
   });
   return (
     <Panel>
@@ -870,14 +872,14 @@ function CatalogSheet({
   scope: ScopeFilter;
   showInactive: boolean;
 }) {
-  const { state, upsertCatalogItem, setCatalogActive } = useStore();
+  const { fullState: state, upsertCatalogItem, setCatalogActive } = useStore();
   if (!CATALOG_SHEETS.includes(sheet as (typeof CATALOG_SHEETS)[number])) {
     return null;
   }
   const key = sheet as (typeof CATALOG_SHEETS)[number];
   const rows = (state.masterCatalog[key] as CatalogItem[]).filter((r) => {
     if (!showInactive && !r.active) return false;
-    return matchScope(r.siteId, state.currentSiteId, scope);
+    return matchScope(r.siteId, entrySiteId(state), scope);
   });
   return (
     <Panel>
