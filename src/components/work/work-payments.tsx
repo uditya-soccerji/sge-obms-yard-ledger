@@ -5,7 +5,7 @@ import { formatINR, KpiTile, Panel, StatusPill } from "@/components/shared/ui-bi
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { monthLabel, paymentRows, paymentSummary, type PaymentRow } from "@/lib/work/logic";
-import { WORK_TODAY } from "@/lib/work/seed";
+import { today } from "@/lib/today";
 import { useWork } from "@/lib/work/store";
 import type { JmsPayment } from "@/lib/work/types";
 import { cn } from "@/lib/utils";
@@ -29,7 +29,7 @@ export function WorkPayments() {
   const [filter, setFilter] = useState<Filter>("all");
   const [editing, setEditing] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ ok: boolean; msg: string } | null>(null);
-  const all = paymentRows(work.jms.filter((j) => s.lineIds.has(j.planLineId)), WORK_TODAY);
+  const all = paymentRows(work.jms.filter((j) => s.lineIds.has(j.planLineId)), today());
   const sum = paymentSummary(all);
   const rows = all
     .filter((r) =>
@@ -114,7 +114,7 @@ function PayRow({
   const s = useWorkScope();
   const line = s.line(r.jms.planLineId);
   const it = s.item(r.jms.serviceCode);
-  const [on, setOn] = useState(r.jms.payment?.receivedOn ?? WORK_TODAY);
+  const [on, setOn] = useState(r.jms.payment?.receivedOn ?? today());
   const [amt, setAmt] = useState(String(r.jms.payment?.amount ?? r.jms.amount));
   const [reason, setReason] = useState<JmsPayment["reason"] | "">(r.jms.payment?.reason ?? "");
   const [note, setNote] = useState(r.jms.payment?.note ?? "");

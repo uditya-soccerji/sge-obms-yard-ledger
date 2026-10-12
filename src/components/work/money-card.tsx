@@ -4,14 +4,14 @@ import Link from "next/link";
 import { formatINR, Panel, StatusPill } from "@/components/shared/ui-bits";
 import { Button } from "@/components/ui/button";
 import { paymentRows, paymentSummary, perUnit, pnlRows, rollUp } from "@/lib/work/logic";
-import { WORK_TODAY } from "@/lib/work/seed";
+import { today } from "@/lib/today";
 import { useWorkScope } from "./common";
 
 /** Dashboard card: SIC-approved vs received in bank, plus the P&L headline. */
 export function MoneyCard() {
   const s = useWorkScope();
   const { work } = s;
-  const rows = paymentRows(work.jms.filter((j) => s.lineIds.has(j.planLineId)), WORK_TODAY);
+  const rows = paymentRows(work.jms.filter((j) => s.lineIds.has(j.planLineId)), today());
   const sum = paymentSummary(rows);
   const worst = rows
     .filter((r) => (r.gap ?? 0) <= -1 || (r.waiting ?? 0) > 45)

@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { EXPENSE_CATEGORIES, monthLabel, PAYMENT_MODES, perUnit, pnlRows, rollUp, type JobPnl, type PnlTotals } from "@/lib/work/logic";
 import { useStore } from "@/lib/store";
-import { WORK_TODAY } from "@/lib/work/seed";
+import { today } from "@/lib/today";
 import { useWork } from "@/lib/work/store";
 import type { ExpenseKind, PaymentMode } from "@/lib/work/types";
 import { cn } from "@/lib/utils";
@@ -203,7 +203,7 @@ function Expenses() {
   const { fullState } = useStore();
   const vendors = fullState.vendors.filter((v) => v.status === "active").map((v) => v.name);
   const nowTime = () => new Date().toTimeString().slice(0, 5);
-  const blank = { kind: "fixed" as ExpenseKind, siteId: "", month: "", date: WORK_TODAY, time: nowTime(), category: "", amount: "", jobId: "", vendor: "", paymentMode: "" as PaymentMode | "", note: "", billFile: "", billPending: false };
+  const blank = { kind: "fixed" as ExpenseKind, siteId: "", month: "", date: today(), time: nowTime(), category: "", amount: "", jobId: "", vendor: "", paymentMode: "" as PaymentMode | "", note: "", billFile: "", billPending: false };
   const [f, setF] = useState(blank);
   // A new file input after each save, so the last bill's name doesn't carry over
   const [fileKey, setFileKey] = useState(0);
@@ -278,7 +278,7 @@ function Expenses() {
           )}
           <div>
             <Label>Date</Label>
-            <Input type="date" className="mt-1" max={WORK_TODAY} value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} />
+            <Input type="date" className="mt-1" max={today()} value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} />
           </div>
           <div>
             <Label>Time</Label>

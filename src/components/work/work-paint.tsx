@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { batchBalances, daysBetween, EXPIRY_WARN_DAYS, expiryState, supervisorPaint } from "@/lib/work/logic";
-import { WORK_TODAY } from "@/lib/work/seed";
+import { today } from "@/lib/today";
 import { useWork } from "@/lib/work/store";
 import { fmtM2, Msg, selectCls, tdCls, thCls, useWorkScope } from "./common";
 
@@ -23,7 +23,7 @@ export function WorkPaint() {
   const left = batchBalances(work);
   const batches = work.paint
     .filter((b) => s.inSite(b.siteId))
-    .map((b) => ({ ...b, left: left.get(b.id) ?? b.qtyL, state: expiryState(b.expiry, WORK_TODAY) }))
+    .map((b) => ({ ...b, left: left.get(b.id) ?? b.qtyL, state: expiryState(b.expiry, today()) }))
     .filter((b) => b.left > 0)
     .sort((a, b) => a.expiry.localeCompare(b.expiry));
   const totals = { expired: 0, soon: 0, ok: 0 } as Record<"expired" | "soon" | "ok", number>;
@@ -49,7 +49,7 @@ export function WorkPaint() {
       <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
         <Panel>
           <h3 className="font-heading text-sm font-bold">Stock by expiry</h3>
-          <p className="text-[11px] text-[var(--sge-ink-3)]">All batches on hand (store + supervisors) as of {WORK_TODAY}</p>
+          <p className="text-[11px] text-[var(--sge-ink-3)]">All batches on hand (store + supervisors) as of {today()}</p>
           <Pie totals={totals} />
           <ul className="mt-2 space-y-1 text-sm">
             {SLICES.map((x) => (
@@ -120,7 +120,7 @@ export function WorkPaint() {
             </thead>
             <tbody>
               {batches.map((b) => {
-                const d = daysBetween(WORK_TODAY, b.expiry);
+                const d = daysBetween(today(), b.expiry);
                 return (
                   <tr key={b.id} className="border-b border-[var(--sge-line)]">
                     <td className={tdCls + " text-xs"}>{b.name}<div className="font-mono text-[10px] text-[var(--sge-ink-3)]">{b.sap}</div></td>

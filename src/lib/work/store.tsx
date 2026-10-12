@@ -2,7 +2,8 @@
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { canCloseJob, currentMonthOf, EXPENSE_CATEGORIES, entryDiffs, isMonthClosed, jobJmsQty, lineStatus, nextMonth, round3 } from "./logic";
-import { createWorkSeed, WORK_STORAGE_KEY, WORK_TODAY } from "./seed";
+import { createWorkSeed, WORK_STORAGE_KEY } from "./seed";
+import { today } from "../today";
 import { applyScenario, type ScenarioId } from "./scenarios";
 import { useStore } from "../store";
 import type { RoleId } from "../types";
@@ -66,7 +67,7 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
   const log = useCallback((e: Omit<WorkEvent, "id" | "seq" | "at" | "day" | "actorName" | "actorRole">) => {
     setWork((s) => {
       const seq = (s.events[s.events.length - 1]?.seq ?? 0) + 1;
-      const ev: WorkEvent = { ...e, id: `ev-${seq}`, seq, at: new Date().toISOString(), day: WORK_TODAY, actorName: actor.current.name, actorRole: actor.current.role };
+      const ev: WorkEvent = { ...e, id: `ev-${seq}`, seq, at: new Date().toISOString(), day: today(), actorName: actor.current.name, actorRole: actor.current.role };
       return { ...s, events: [...s.events, ev] };
     });
   }, []);
@@ -233,15 +234,15 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
       rate: item.rate,
       amount: Math.round(qty * item.rate * 100) / 100,
       periodFrom: job.startDate,
-      periodTo: dates[dates.length - 1] ?? WORK_TODAY,
+      periodTo: dates[dates.length - 1] ?? today(),
       status: "JMS SUBMITTED",
       woId: wo?.id ?? "",
-      confirmedOn: WORK_TODAY,
+      confirmedOn: today(),
     };
     setWork((s) => ({
       ...s,
       jms: [...s.jms, row],
-      jobs: s.jobs.map((j) => (j.id === jobId ? { ...j, status: "closed", closedAt: WORK_TODAY, jmsId: id } : j)),
+      jobs: s.jobs.map((j) => (j.id === jobId ? { ...j, status: "closed", closedAt: today(), jmsId: id } : j)),
     }));
     log({ kind: "jms_confirmed", siteId: line.siteId, subjectStaffId: job.supervisorId, title: `JMS ${row.jmsNo} confirmed · ${job.jobNo}`, detail: `${qty} m² × ₹${item.rate} = ₹${row.amount.toLocaleString("en-IN")}`, tab: "jms", refId: id });
     return { ok: true, id };
@@ -295,12 +296,12 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
     const sup = staffRef.current.find((x) => x.id === supervisorId);
     if (!sup || sup.role !== "supervisor") return { ok: false, error: "Pick a supervisor" };
     if (sup.siteId !== b.siteId) return { ok: false, error: `${sup.name} doesn't work on this batch's site` };
-    const issued = { ...b, id: uid("pb"), qtyL, supervisorId, issuedOn: WORK_TODAY };
+    const issued = { ...b, id: uid("pb"), qtyL, supervisorId, issuedOn: today() };
     setWork((s) => ({
       ...s,
       paint: [...s.paint.map((x) => (x.id === batchId ? { ...x, qtyL: round3(x.qtyL - qtyL) } : x)), issued],
     }));
-    log({ kind: "paint_issued", siteId: b.siteId, subjectStaffId: supervisorId, problem: b.expiry < WORK_TODAY, title: `${qtyL} L ${b.name} issued`, detail: `Batch ${b.batch} · exp ${b.expiry}${b.expiry < WORK_TODAY ? " (EXPIRED)" : ""}`, tab: "paint", refId: issued.id });
+    log({ kind: "paint_issued", siteId: b.siteId, subjectStaffId: supervisorId, problem: b.expiry < today(), title: `${qtyL} L ${b.name} issued`, detail: `Batch ${b.batch} · exp ${b.expiry}${b.expiry < today() ? " (EXPIRED)" : ""}`, tab: "paint", refId: issued.id });
     return { ok: true, id: issued.id };
   }, [log]);
 

@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useStore } from "@/lib/store";
 import { canCloseJob, effectiveEntries, entryArea, entryDiffs, finalStage, jobStageAreas, memberArea, monthLabel, round3 } from "@/lib/work/logic";
-import { WORK_TODAY } from "@/lib/work/seed";
+import { today } from "@/lib/today";
 import { useWork } from "@/lib/work/store";
 import type { Job, Member, Stage } from "@/lib/work/types";
 import { STAGES } from "@/lib/work/types";
@@ -61,7 +61,7 @@ export function WorkJobs() {
           </button>
         ))}
         <span className="ml-auto text-xs text-[var(--sge-ink-3)]">
-          {s.allSites ? "Each site has its own plan month" : <>Current plan month: <b>{monthLabel(s.monthOf(s.currentSiteId))}</b></>} · as of {WORK_TODAY}
+          {s.allSites ? "Each site has its own plan month" : <>Current plan month: <b>{monthLabel(s.monthOf(s.currentSiteId))}</b></>} · as of {today()}
         </span>
       </div>
       <Msg text={msg} />
@@ -236,7 +236,7 @@ function DprForm({ job, onDone }: { job: Job; onDone: (m: { ok: boolean; msg: st
   const line = s.line(job.planLineId)!;
   const it = s.item(line.serviceCode);
   const fin = finalStage(job);
-  const [date, setDate] = useState(WORK_TODAY);
+  const [date, setDate] = useState(today());
   const done = jobStageAreas(job, s.work.dprs);
   const [stage, setStage] = useState<Stage>(job.stages.find((x) => done[x] <= 0) ?? job.stages[0]);
   const [members, setMembers] = useState<Member[]>([blankMember()]);
@@ -407,7 +407,7 @@ function StartJob({ onDone }: { onDone: (m: { ok: boolean; msg: string }) => voi
           className="space-y-3"
           onSubmit={(e) => {
             e.preventDefault();
-            const r = startJob({ planLineId: lineId, location, stages: chosen, startDate: WORK_TODAY });
+            const r = startJob({ planLineId: lineId, location, stages: chosen, startDate: today() });
             onDone(r.ok ? { ok: true, msg: "Job started — add DPR entries as work progresses." } : { ok: false, msg: r.error });
             if (r.ok) { setLocation(""); setStages(null); }
           }}
