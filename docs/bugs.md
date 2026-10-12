@@ -70,6 +70,7 @@ Screenshots, when saved as files, go in `docs/bugs/` as `B<nn>-<n>.png`. Never i
   2. Master Data → Sites: per site, a plant table (name, RP from the site's RP list) with locations under each (name, RP; default = the plant's RP).
   3. Work jobs and DPR lines pick plant → location from Master Data (fits merge plan PR 2 "one plant list per site").
 - Answers (2026-10-13): MTF is a **site**, not a plant. RRTF and ARMA are **plants**. The LPG/RIL cell is **five separate locations**. ARMA stays under **both** DTA and MTF (each site has its own ARMA plant, which §3 allows).
-- Still open: (a) the five locations marked "MTF" in the sheet: do they sit directly under the MTF site (no plant), or under a plant? Should the "MTF" entry in MTF's plant list be removed? (b) RP for RRTF, for ARMA at MTF and for ARMA at DTA (and for any location that differs from its plant).
+- Answer (2026-10-13): **MTF is both the site and a plant** in it. Plant MTF has the 5 "MTF" locations; plant RRTF has 8. The live MTF plant list (MTF, ARMA, RRTF) is correct as it stands. ARMA has no locations listed yet.
+- Still open: RP for each plant (MTF, RRTF, ARMA at MTF, ARMA at DTA), and any location whose RP differs from its plant's.
 - Fix: _pending (app folder busy; needs answers)_
 
