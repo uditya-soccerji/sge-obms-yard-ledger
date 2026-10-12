@@ -22,6 +22,7 @@ import { seedMasterCatalog } from "./master/seed-catalog";
 import type { CatalogItem, Contractor, MasterCatalog, MaterialItem } from "./master/types";
 import { createSeedState, STORAGE_KEY } from "./seed";
 import { ALL_SITES, canSeeAllSites, entrySiteId, scopeState } from "./site-scope";
+import { checkSeat, checkSites } from "./users";
 import type {
   AcplPunchRow,
   AcplResolveStatus,
@@ -1644,8 +1645,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         result = { ok: false, error: "Only Owner or Super Admin can create users" };
         return s;
       }
-      if (s.users.some((u) => u.username.toLowerCase() === input.username.toLowerCase())) {
-        result = { ok: false, error: "Username already exists" };
+      const invalid = checkSeat(input, s.users);
+      if (invalid) {
+        result = { ok: false, error: invalid };
         return s;
       }
       if (!input.roles.length) {
@@ -1683,6 +1685,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       if (!existing) {
         result = { ok: false, error: "User not found" };
         return s;
+      }
+      if (patch.siteIds || patch.roles) {
+        const bad = checkSites(patch.roles ?? existing.roles, patch.siteIds ?? existing.siteIds);
+        if (bad) {
+          result = { ok: false, error: bad };
+          return s;
+        }
       }
       if (
         patch.username &&
