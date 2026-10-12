@@ -59,6 +59,7 @@ Answers from the module-by-module review. Not built yet; implemented together at
 - **Low stock (as understood):** when the supervisor's paint left is less than the job's remaining scope needs (remaining m² × MPS litres per m²). Then new stock is issued and a new job can start.
 - **Overdraw:** a DPR may use more than the supervisor holds; the stock goes negative and is flagged.
 - **Month end:** unused paint carries forward in the supervisor's name.
+- **941 / 942 / 261 (decided 2026-10-12):** these are RIL's consumption steps. SGE follows the same three steps internally and tracks them itself: 941 = issue to the supervisor, 942 = month's consumption reconciled (litres from our DPRs), 261 = consumption posted. We don't generate RIL's numbers; when RIL gives them they are typed against our step **for reference only**. Consumption itself is always internal (from DPRs).
 
 ## 7. Equipment
 - **Kinds:** blasting & painting kit (hopper, compressor, airless, dehumidifier), height safety (harness, lanyard, lifeline), scaffold material, vehicles & lifting, spare parts, vehicle service records.
@@ -90,6 +91,7 @@ Answers from the module-by-module review. Not built yet; implemented together at
 
 - **Job stages:** each DPR line picks its stage — Blasting, 1st coat, 2nd coat, Final coat. A job can be closed only after all four are entered.
 - **Closing:** supervisor closes, SIC confirms; on confirm it becomes a JMS.
+- **Internal vs submitted JMS (decided 2026-10-12):** the SIC closes a cycle of work, and that becomes the **internal JMS**. The JMS we submit to RIL is **uploaded** separately and **compared** with the internal one (qty, amount, items, period, WO); differences are flagged. Neither overwrites the other. Every step (close, upload, link, status change, payment) is kept in the **audit log**.
 
 ## 11. Safety
 - **Daily Safety DPR (RIL Exhibit-D):** signed by the Safety Supervisor and the SIC.
@@ -208,6 +210,7 @@ Read from `eSSL.xls` (Sep 2026, printed 10-Oct-2026). Two sheets = two eSSL "com
 - **Database:** new Supabase project (Mumbai), separate from the Operations Hub.
 - **Hosting:** Vercel, Shree Gayatri Ent team.
 - **Release 1 scope:** all four areas — logins/sites/labourers, DPR + WO/plan/JMS tracking, attendance + ACPL/eSSL upload, paint stock + JMS book upload.
+- **Fresh start (decided 2026-10-12):** the merged app starts empty from **October 2026**. Old DPRs, JMS, paint and finance entries are not carried over. Once the system works as expected, past data is uploaded, and a change in past P&L from that is accepted.
 - **Use:** online only. First used on the office laptop; phones later. DPR is entered only in the app; an Excel DPR can be uploaded to cross-check. Labels in English + Gujarati + Hindi.
 
 ## 18. Accounting / P&L in Finance (decided 2026-10-11)
