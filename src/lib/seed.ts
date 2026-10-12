@@ -508,7 +508,12 @@ export function createSeedState(): AppState {
         client: "Reliance Industries Limited",
         enabled: true,
         rpTags: ["RP2"],
-        plants: ["CPP", "CPP-flare", "ARMA"],
+        plants: [
+          "CPP", "CPP-flare", "ARMA",
+          // Real DTA plants from the Aug-26 job plan (same list as live Master Data, 2026-10-13)
+          "AROMATIC", "CES", "COKER", "CRUDE", "FCCU", "HYDROGEN", "HYDROTREATER",
+          "PP", "PRU & HPIB", "RTF", "SULPHUR", "UTILITY & ETP",
+        ],
       },
       {
         id: "site-mtf",
