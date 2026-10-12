@@ -17,6 +17,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useStore } from "@/lib/store";
+import { WORKING } from "@/lib/attendance";
 import { useMemo, useState } from "react";
 
 function LabourerHomePage() {
@@ -42,11 +43,11 @@ function LabourerHomePage() {
   );
 
   const presentDays = history.filter(
-    (a) => a.status === "present" || a.status === "half"
+    (a) => WORKING.includes(a.status)
   ).length;
   const wageGist = labourer
     ? labourer.wageDaily *
-        history.filter((a) => a.status === "present").length +
+        history.filter((a) => a.status === "present" || a.status === "overtime").length +
       labourer.wageDaily *
         0.5 *
         history.filter((a) => a.status === "half").length

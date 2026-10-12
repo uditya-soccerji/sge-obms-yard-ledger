@@ -24,6 +24,7 @@ import {
 } from "@/lib/paint-lifecycle";
 import { effectivePermission, plantScopeFor } from "@/lib/permissions";
 import { useStore } from "@/lib/store";
+import { WORKING } from "@/lib/attendance";
 import type { DprStatus, DprSubmitterType } from "@/lib/types";
 
 const STATUS_TONE: Record<
@@ -90,12 +91,15 @@ function DprDeskPage() {
     lockedType,
   ]);
 
-  const pending = state.dprDocuments.filter(
-    (d) => d.status === "submitted"
-  ).length;
-  const approved = state.dprDocuments.filter(
-    (d) => d.status === "sic_approved"
-  ).length;
+  // Counts follow what this seat may see (role, type and plant), not every DPR on the site
+  const mine = state.dprDocuments.filter((d) => {
+    if ((role === "supervisor" || role === "store" || role === "safety") && d.submitterId !== userId) return false;
+    if (lockedType && (role === "supervisor" || role === "store" || role === "safety") && d.submitterType !== lockedType) return false;
+    if (scope !== "all" && !scope.includes(d.plant)) return false;
+    return true;
+  });
+  const pending = mine.filter((d) => d.status === "submitted").length;
+  const approved = mine.filter((d) => d.status === "sic_approved").length;
 
   const canCreate = effectivePermission(currentAccount, role, "dpr", "create");
 
@@ -174,7 +178,7 @@ function DprDeskPage() {
             {visible.map((d) => {
               const submitter = state.staff.find((s) => s.id === d.submitterId);
               const labourPresent = d.labourMarks.filter(
-                (m) => m.status === "present" || m.status === "half"
+                (m) => WORKING.includes(m.status)
               ).length;
               return (
                 <Link

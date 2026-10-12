@@ -1,7 +1,6 @@
 "use client";
 
 import { guarded } from "@/components/shared/require-module";
-import { today as todayDate } from "@/lib/today";
 import Link from "next/link";
 import { useMemo } from "react";
 import {
@@ -12,19 +11,10 @@ import {
   StatusPill,
 } from "@/components/shared/ui-bits";
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { useStore } from "@/lib/store";
-import type { AttendanceStatus } from "@/lib/types";
 
 function SupervisorHomePage() {
-  const { state, markAttendance } = useStore();
-  const today = todayDate();
+  const { state } = useStore();
 
   const supervisorId =
     state.currentUserId &&
@@ -145,55 +135,17 @@ function SupervisorHomePage() {
       </Panel>
 
       <Panel>
-        <h3 className="mb-3 font-heading text-sm font-bold uppercase tracking-wide text-[var(--sge-ink-3)]">
-          Quick attendance — my crew
+        <h3 className="mb-2 font-heading text-sm font-bold uppercase tracking-wide text-[var(--sge-ink-3)]">
+          My crew ({myCrew.length})
         </h3>
         <p className="mb-2 text-xs text-[var(--sge-ink-3)]">
-          Prefer marking attendance inside the DPR form — SIC approval derives the official record.
+          Mark attendance on today&apos;s DPR — SIC approval makes it the official record.
         </p>
-        {myCrew.length === 0 ? (
-          <EmptyState title="No crew assigned" detail="Labourers linked to this supervisor will show here." />
-        ) : (
-          <div className="space-y-2">
-            {myCrew.map((l) => {
-              const att = state.attendance.find(
-                (a) => a.labourerId === l.id && a.date === today
-              );
-              return (
-                <div
-                  key={l.id}
-                  className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-[var(--sge-line)] px-3 py-2"
-                >
-                  <div>
-                    <div className="text-sm font-semibold">{l.name}</div>
-                    <div className="text-xs text-[var(--sge-ink-3)]">
-                      {l.trade} · {l.epNumber}
-                    </div>
-                  </div>
-                  <Select
-                    value={att?.status ?? ""}
-                    onValueChange={(v) =>
-                      markAttendance(l.id, v as AttendanceStatus)
-                    }
-                  >
-                    <SelectTrigger className="h-8 w-[130px] text-xs">
-                      <SelectValue placeholder="Mark" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {(["present", "absent", "half", "leave"] as const).map(
-                        (s) => (
-                          <SelectItem key={s} value={s}>
-                            {s}
-                          </SelectItem>
-                        )
-                      )}
-                    </SelectContent>
-                  </Select>
-                </div>
-              );
-            })}
-          </div>
-        )}
+        <div className="flex flex-wrap gap-1.5 text-xs">
+          {myCrew.map((l) => (
+            <span key={l.id} className="rounded-sm border border-[var(--sge-line)] px-2 py-1">{l.name}</span>
+          ))}
+        </div>
       </Panel>
 
       <div className="grid gap-4 lg:grid-cols-2">

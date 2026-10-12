@@ -41,8 +41,10 @@ function AcplMatchPage() {
   const [msg, setMsg] = useState<string | null>(null);
 
   const role = state.currentRole;
+  // docs §12: Admin (data operator) resolves, HR too; SIC can override with a reason
   const canHrResolve =
-    role === "hr" || role === "super_admin";
+    role === "admin" || role === "hr" || role === "super_admin";
+  const [reasons, setReasons] = useState<Record<string, string>>({});
   const canSicOverride =
     role === "sic" || role === "super_admin" || role === "owner";
 
@@ -76,7 +78,8 @@ function AcplMatchPage() {
     status: AcplResolveStatus,
     opts?: { sicOverride?: boolean }
   ) {
-    const r = resolveAcplFlag(id, status, `Resolved as ${status}`, opts);
+    const typed = reasons[id]?.trim();
+    const r = resolveAcplFlag(id, status, typed || (opts?.sicOverride || status === "dismissed" ? "" : `Resolved as ${status}`), opts);
     if (!r.ok) {
       setMsg(r.error ?? "Resolve blocked");
       return;
@@ -233,7 +236,13 @@ function AcplMatchPage() {
                     </div>
                   </div>
                   {m.resolveStatus === "open" && m.flag !== "match" ? (
-                    <div className="flex flex-wrap gap-1">
+                    <div className="flex flex-wrap items-center gap-1">
+                      <Input
+                        className="h-8 w-56 text-xs"
+                        placeholder="Reason (needed to dismiss or override)"
+                        value={reasons[m.id] ?? ""}
+                        onChange={(e) => setReasons((x) => ({ ...x, [m.id]: e.target.value }))}
+                      />
                       {canHrResolve ? (
                         <>
                           <Button
@@ -285,7 +294,7 @@ function AcplMatchPage() {
                       ) : null}
                       {!canHrResolve && !canSicOverride ? (
                         <span className="text-xs text-[var(--sge-ink-3)]">
-                          HR resolves; SIC can override
+                          Admin or HR resolves; SIC can override
                         </span>
                       ) : null}
                     </div>

@@ -16,7 +16,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sh
 import { roleMeta, rolesForSwitcher } from "@/lib/roles";
 import { NotificationBell } from "@/components/work/notifications";
 import { canAccessWork, topNavFor } from "@/lib/desk";
-import { ALL_SITES, canSeeAllSites, entrySiteId } from "@/lib/site-scope";
+import { ALL_SITES, canSeeAllSites, canSwitchSites, entrySiteId } from "@/lib/site-scope";
 import { useStore } from "@/lib/store";
 import type { RoleId } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -119,12 +119,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     : null;
   const viewingAs = !!impersonator && !!currentAccount;
 
-  const canSwitchSite =
-    role === "super_admin" ||
-    role === "owner" ||
-    role === "sic" ||
-    role === "admin" ||
-    role === "finance";
+  const canSwitchSite = canSwitchSites(role);
   const switchableSites = state.sites.filter(
     (s) =>
       s.enabled &&

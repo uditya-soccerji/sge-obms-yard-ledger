@@ -3,6 +3,7 @@
 import { formatINR, Panel, StatusPill } from "@/components/shared/ui-bits";
 import { today as todayDate } from "@/lib/today";
 import { useStore } from "@/lib/store";
+import { workedCount } from "@/lib/attendance";
 import type { AppState } from "@/lib/types";
 
 
@@ -34,12 +35,7 @@ export function siteRows(s: AppState): SiteRow[] {
         code: site.code,
         name: site.name,
         crew: s.labourers.filter((l) => l.siteId === id && l.active).length,
-        present: s.attendance.filter(
-          (a) =>
-            a.siteId === id &&
-            a.date === todayDate() &&
-            (a.status === "present" || a.status === "half")
-        ).length,
+        present: workedCount(s.attendance.filter((a) => a.siteId === id), todayDate()),
         paintedM2: today
           .filter((d) => d.type === "painting")
           .reduce((n, d) => n + (d.areaM2 ?? 0), 0),

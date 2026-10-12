@@ -1,4 +1,5 @@
 import type { DprDocument, Labourer } from "./types";
+import { timeProblem, WORKING } from "./attendance";
 
 /** Max area on one painting / blasting line (docs §5). */
 export const MAX_LINE_M2 = 2000;
@@ -29,6 +30,12 @@ export function validateDprForSubmit(
     if (!doc.permitOk) out.push("Confirm the work permit");
     if (!doc.tbtDone) out.push("Confirm the toolbox talk (TBT)");
     const unmarked = crew.filter((l) => !doc.labourMarks.some((m) => m.labourerId === l.id));
+    for (const m of doc.labourMarks) {
+      if (!WORKING.includes(m.status)) continue;
+      const t = timeProblem(m.inTime, m.outTime);
+      const who = crew.find((l) => l.id === m.labourerId)?.name ?? m.labourerId;
+      if (t) out.push(`${who}: ${t.toLowerCase()}`);
+    }
     if (unmarked.length) {
       const names = unmarked.slice(0, 5).map((l) => l.name).join(", ");
       out.push(`Mark attendance for every crew member — ${unmarked.length} not marked (${names}${unmarked.length > 5 ? ", …" : ""})`);
@@ -39,6 +46,7 @@ export function validateDprForSubmit(
     const lines = doc.paintWork ?? [];
     const total = lines.reduce((s, l) => s + (l.areaM2 || 0), 0);
     lines.forEach((l, i) => {
+      if (!l.plant) out.push(`Painting line ${i + 1}: pick the plant`);
       if (l.areaM2 < 0) out.push(`Painting line ${i + 1}: area can't be negative`);
       if (l.areaM2 > MAX_LINE_M2) out.push(`Painting line ${i + 1}: ${l.areaM2} m² is over the ${MAX_LINE_M2.toLocaleString("en-IN")} m² per line limit`);
     });
@@ -47,9 +55,21 @@ export function validateDprForSubmit(
 
   if (doc.submitterType === "scaffolding") {
     const lines = doc.scaffoldWork ?? [];
-    const any = lines.some((l) => l.erectM3 > 0 || l.dismantleM3 > 0 || l.standingM3 > 0);
+    const any = lines.some((l) => l.erectM3 > 0 || l.dismantleM3 > 0 || l.standingM3 > 0 || (l.liftingTrips ?? 0) > 0);
     if (lines.some((l) => l.erectM3 < 0 || l.dismantleM3 < 0 || l.standingM3 < 0)) out.push("Scaffold volumes can't be negative");
-    if (!any && !doc.zeroReason?.trim()) out.push("Enter the m³ erected, dismantled or standing, or give a reason for zero");
+    if (!any && !doc.zeroReason?.trim()) out.push("Enter the m³ erected, dismantled or standing (or lifting trips), or give a reason for zero");
+    lines.forEach((l, i) => {
+      if (!l.plant) out.push(`Scaffold line ${i + 1}: pick the plant`);
+    });
+  }
+
+  if (doc.submitterType === "safety") {
+    // docs §11: every unsafe act / condition needs an owner and a fix-by date
+    (doc.safetyBody?.observations ?? []).forEach((o, i) => {
+      if (o.type === "SAFE") return;
+      if (!o.whoWillFix?.trim()) out.push(`Observation ${i + 1}: who will fix it?`);
+      if (!o.fixByDate) out.push(`Observation ${i + 1}: fix-by date`);
+    });
   }
 
   doc.requests.forEach((r, i) => {
