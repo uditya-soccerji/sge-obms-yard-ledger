@@ -20,7 +20,7 @@ import { ROLES } from "@/lib/roles";
 import { useStore } from "@/lib/store";
 import type { CatalogItem, MaterialItem } from "@/lib/master/types";
 import type { Labourer, RoleId, Site, UserAccount } from "@/lib/types";
-import { entrySiteId } from "@/lib/site-scope";
+import { checkSiteCode, entrySiteId, parsePlants } from "@/lib/site-scope";
 import { checkSeat, checkSites, MIN_PASSWORD } from "@/lib/users";
 import type { StaffMember } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -143,14 +143,50 @@ function SitesSheet({ showInactive }: { showInactive: boolean }) {
   const { fullState: state, upsertSite } = useStore();
   const rows = state.sites.filter((s) => showInactive || s.enabled);
   const [draft, setDraft] = useState<Site | null>(null);
+  // Plants are edited as free text and split only on save (B01)
+  const [plantsText, setPlantsText] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  function open(site: Site) {
+    setDraft(site);
+    setPlantsText(site.plants.join(", "));
+    setMsg(null);
+  }
+
+  async function save() {
+    if (!draft) return;
+    const site = {
+      ...draft,
+      code: draft.code.trim().toUpperCase(),
+      name: draft.name.trim() || draft.code.trim().toUpperCase(),
+      plants: parsePlants(plantsText),
+    };
+    const bad = checkSiteCode(site.code, site.id, state.sites);
+    if (bad) return setMsg({ ok: false, text: bad });
+    setSaving(true);
+    const err = await upsertSite(site);
+    setSaving(false);
+    if (err) return setMsg({ ok: false, text: err });
+    setDraft(null);
+    setMsg({ ok: true, text: `Saved ${site.code} · ${site.plants.length} plant${site.plants.length === 1 ? "" : "s"}` });
+  }
+
+  async function toggle(site: Site) {
+    const err = await upsertSite({ ...site, enabled: !site.enabled });
+    setMsg(err ? { ok: false, text: err } : null);
+  }
 
   return (
     <Panel>
-      <div className="mb-3 flex justify-end">
+      <div className="mb-3 flex items-center justify-end gap-3">
+        {msg && !draft ? (
+          <span className={cn("text-xs", msg.ok ? "text-[var(--sge-ok)]" : "text-[var(--sge-crit)]")}>{msg.text}</span>
+        ) : null}
         <Button
           size="sm"
           onClick={() =>
-            setDraft({
+            open({
               id: uid("site"),
               code: "",
               name: "",
@@ -167,13 +203,16 @@ function SitesSheet({ showInactive }: { showInactive: boolean }) {
       {draft ? (
         <SiteForm
           value={draft}
+          plantsText={plantsText}
+          saving={saving}
+          error={msg && !msg.ok ? msg.text : null}
           onChange={setDraft}
-          onSave={() => {
-            if (!draft.code.trim()) return;
-            upsertSite({ ...draft, code: draft.code.toUpperCase() });
+          onPlantsText={setPlantsText}
+          onSave={() => void save()}
+          onCancel={() => {
             setDraft(null);
+            setMsg(null);
           }}
-          onCancel={() => setDraft(null)}
         />
       ) : null}
       <table className="w-full text-sm">
@@ -200,13 +239,13 @@ function SitesSheet({ showInactive }: { showInactive: boolean }) {
                 </StatusPill>
               </td>
               <td className="text-right">
-                <Button size="sm" variant="outline" onClick={() => setDraft(s)}>
+                <Button size="sm" variant="outline" onClick={() => open(s)}>
                   Edit
                 </Button>{" "}
                 <Button
                   size="sm"
                   variant="ghost"
-                  onClick={() => upsertSite({ ...s, enabled: !s.enabled })}
+                  onClick={() => void toggle(s)}
                 >
                   {s.enabled ? "Deactivate" : "Activate"}
                 </Button>
@@ -221,12 +260,20 @@ function SitesSheet({ showInactive }: { showInactive: boolean }) {
 
 function SiteForm({
   value,
+  plantsText,
+  saving,
+  error,
   onChange,
+  onPlantsText,
   onSave,
   onCancel,
 }: {
   value: Site;
+  plantsText: string;
+  saving: boolean;
+  error: string | null;
   onChange: (s: Site) => void;
+  onPlantsText: (text: string) => void;
   onSave: () => void;
   onCancel: () => void;
 }) {
@@ -252,25 +299,22 @@ function SiteForm({
         <Label>Plants (comma)</Label>
         <Input
           className="mt-1"
-          value={value.plants.join(", ")}
-          onChange={(e) =>
-            onChange({
-              ...value,
-              plants: e.target.value
-                .split(",")
-                .map((x) => x.trim())
-                .filter(Boolean),
-            })
-          }
+          value={plantsText}
+          placeholder="e.g. COKER, CRUDE, PRU & HPIB"
+          onChange={(e) => onPlantsText(e.target.value)}
         />
+        <p className="mt-1 text-[11px] text-[var(--sge-ink-3)]">
+          {parsePlants(plantsText).length} plant{parsePlants(plantsText).length === 1 ? "" : "s"} · separate with commas
+        </p>
       </div>
-      <div className="flex gap-2 sm:col-span-2">
-        <Button size="sm" onClick={onSave}>
-          Save
+      <div className="flex items-center gap-2 sm:col-span-2">
+        <Button size="sm" onClick={onSave} disabled={saving}>
+          {saving ? "Saving…" : "Save"}
         </Button>
         <Button size="sm" variant="outline" onClick={onCancel}>
           Cancel
         </Button>
+        {error ? <span className="text-xs text-[var(--sge-crit)]">{error}</span> : null}
       </div>
     </div>
   );

@@ -1,4 +1,4 @@
-import type { AppState, RoleId } from "./types";
+import type { AppState, RoleId, Site } from "./types";
 
 /** `currentSiteId` value meaning "every site" — Owner / Super Admin only. */
 export const ALL_SITES = "all";
@@ -13,6 +13,33 @@ export function canSeeAllSites(role: RoleId | null | undefined): boolean {
  */
 export function canSwitchSites(role: RoleId | null | undefined): boolean {
   return role === "super_admin" || role === "owner" || role === "sic" || role === "admin" || role === "finance" || role === "hr";
+}
+
+/**
+ * Plant names from the comma-separated Master Data field. Parsed only on save:
+ * splitting on every keystroke deleted a just-typed comma or space (B01).
+ * Names are trimmed, inner spaces collapsed, blanks dropped and duplicates
+ * (ignoring case) kept once — §15: plant names trimmed + matched.
+ */
+export function parsePlants(text: string): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const raw of text.split(",")) {
+    const name = raw.trim().replace(/\s+/g, " ");
+    const key = name.toLowerCase();
+    if (!name || seen.has(key)) continue;
+    seen.add(key);
+    out.push(name);
+  }
+  return out;
+}
+
+/** Site code rule (§3): 2–6 capital letters, unique. Returns a message, or null when fine. */
+export function checkSiteCode(code: string, siteId: string, sites: Pick<Site, "id" | "code">[]): string | null {
+  if (!code) return "Site code is required";
+  if (!/^[A-Z]{2,6}$/.test(code)) return "Site code must be 2–6 capital letters (e.g. DTA, MARINE)";
+  if (sites.some((s) => s.id !== siteId && s.code === code)) return `Site code ${code} is already used`;
+  return null;
 }
 
 export function isAllSites(s: Pick<AppState, "currentSiteId">): boolean {

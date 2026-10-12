@@ -9,7 +9,7 @@ Screenshots, when saved as files, go in `docs/bugs/` as `B<nn>-<n>.png`. Never i
 ## Summary
 | # | Reported | Role · site · page | Bug | Status |
 |---|---|---|---|---|
-| B01 | 2026-10-13 | Super Admin · all sites · Master Data → Sites | Can't type a comma (or a space after a word) in "Plants (comma)", so plants can't be added on Add site or Edit | confirmed |
+| B01 | 2026-10-13 | Super Admin · all sites · Master Data → Sites | Can't type a comma (or a space after a word) in "Plants (comma)", so plants can't be added on Add site or Edit | fixed |
 | B02 | 2026-10-13 | Super Admin · MTF · Master Data → Sites | Feature: plants need locations under them, and each plant/location needs an RP (MTF runs RP2 and RP5) | open (ready to build) |
 | B03 | 2026-10-13 | Supervisor (Prasan Da, viewed as) · MTF · DPR → New | New supervisor's DPR shows an empty Labour attendance, and there's no way to give them labourers | open (rules agreed, §20) |
 | B04 | 2026-10-13 | Admin · DPR approvals | Admin approves DPR work quantities on SIC's behalf; both logged | open (rule agreed) |
@@ -46,7 +46,12 @@ Screenshots, when saved as files, go in `docs/bugs/` as `B<nn>-<n>.png`. Never i
   - (b) `remoteSaveSite` (`src/lib/supabase/remote.ts`) only logs a failed Supabase save to the console. The screen shows the change, but it's gone after a reload. Show the error instead.
   - (c) Work plan lines upper-case plant names while Master Data keeps `CPP-flare` mixed case. Match plants ignoring case (merge plan, "Before PR 2").
 - Data done 2026-10-13 (user's request): the 12 DTA plants were added to live Master Data by pasting the full list (the workaround), keeping CPP, CPP-flare and ARMA. Checked in Supabase: `sites` DTA now has 15 plants (updated 21:38 UTC). Then, at the user's request, CPP and CPP-flare were removed: DTA now has 13 plants (ARMA + the 12), updated 21:41 UTC. The same list is in `src/lib/seed.ts` for local runs without Supabase. `STORAGE_KEY` was deliberately not bumped, since that would wipe testers' browser data; on production, sites come from Supabase at sign-in.
-- Fix: _pending (app folder busy)_
+- Fix (2026-10-13, branch `fix/bugs-2026-10-13`):
+  - `SiteForm` keeps the plants as typed text; `parsePlants()` (new, `src/lib/site-scope.ts`) splits on Save: trims, collapses spaces, drops blanks, keeps duplicates (ignoring case) once. A live "N plants" counter shows under the field.
+  - (a) `checkSiteCode()` (new): code required, 2–6 capital letters, unique (§3). Messages: "Site code is required", "…must be 2–6 capital letters", "Site code DTA is already used".
+  - (b) `remoteSaveSite` returns the Supabase error; `upsertSite` is now async, saves to Supabase **first** and only then updates the screen, so a refused save shows "Not saved: …" instead of looking saved. Deactivate / Activate uses the same path.
+  - (c) is left for B02 / merge plan PR 2 (plant matching ignoring case).
+- Verified on `npm run dev` (Super Admin, local data only, no Supabase): typed `, RT, X` one character at a time into DTA and got commas and spaces kept, counter 15; typed into MTF and got "MTF, ARMA, RRTF, NEW · 4 plants" (screenshot), then Cancel left it unchanged. Saving messy text `ARMA,  AROMATIC ,coker, COKER, PRU   &  HPIB, , ` gave "Saved DTA · 4 plants" = ARMA, AROMATIC, coker, PRU & HPIB, after which DTA's 13 plants were restored. Empty / bad / duplicate code messages shown. No console errors. `tsc` + `eslint src` clean; `npm run build` runs at deploy (it can't run beside the dev server).
 
 ### B02: Plant → location level, with RP on each (feature)
 - Reported: 2026-10-13 · Role: Super Admin · Site: MTF · Page: Master Data → Sites

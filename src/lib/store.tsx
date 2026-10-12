@@ -187,7 +187,8 @@ interface StoreApi {
     id: string,
     active: boolean
   ) => void;
-  upsertSite: (site: AppState["sites"][number]) => void;
+  /** Resolves to an error message, or null when saved */
+  upsertSite: (site: AppState["sites"][number]) => Promise<string | null>;
   /** New staff record (to link a login to); returns its id, or "" if not allowed */
   addStaff: (input: Omit<StaffMember, "id">) => string;
   addLabourer: (row: Omit<Labourer, "id"> & { id?: string }) => string;
@@ -1868,9 +1869,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     []
   );
 
-  const upsertSite = useCallback((site: AppState["sites"][number]) => {
-    if (!can(stateRef.current, "master", "update")) return;
-    void remoteSaveSite(site);
+  const upsertSite = useCallback(async (site: AppState["sites"][number]) => {
+    if (!can(stateRef.current, "master", "update")) return "You can't change sites";
+    // Save to the shared database first, so a refused save never looks saved here (B01)
+    const error = await remoteSaveSite(site);
+    if (error) return error;
     setState((s) => {
       const exists = s.sites.some((x) => x.id === site.id);
       return {
@@ -1884,6 +1887,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         ],
       };
     });
+    return null;
   }, []);
 
   const addStaff = useCallback((input: Omit<StaffMember, "id">) => {

@@ -253,8 +253,9 @@ export async function remoteSaveMaster(
   if (error) console.error("master save failed", sheet, item.code, error.message);
 }
 
-export async function remoteSaveSite(site: Site) {
-  if (!supabase) return;
+/** Saves a site; resolves to an error message, or null when saved (or no backend). */
+export async function remoteSaveSite(site: Site): Promise<string | null> {
+  if (!supabase) return null;
   const { error } = await supabase.from("sites").upsert({
     id: site.id,
     code: site.code,
@@ -264,7 +265,11 @@ export async function remoteSaveSite(site: Site) {
     rp_tags: site.rpTags,
     plants: site.plants,
   });
-  if (error) console.error("site save failed", site.code, error.message);
+  if (error) {
+    console.error("site save failed", site.code, error.message);
+    return `Not saved: ${error.message}`;
+  }
+  return null;
 }
 
 export async function remoteLogout() {
