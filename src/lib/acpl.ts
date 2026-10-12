@@ -7,6 +7,7 @@ import type {
   AttendanceStatus,
   Labourer,
 } from "./types";
+import { normalizeEp, sameName } from "./ep";
 
 function uid(prefix: string) {
   return `${prefix}-${Math.random().toString(36).slice(2, 9)}`;
@@ -19,18 +20,31 @@ function minutes(t?: string): number | null {
   return Number(m[1]) * 60 + Number(m[2]);
 }
 
-/** Diff > 15 min between DPR in-time and ACPL in-time → time_mismatch */
+/** Statuses that mean the labourer worked that day. */
+const WORKING: AttendanceStatus[] = ["present", "half"];
+
+/**
+ * One labourer-day, DPR vs gate (docs §12):
+ * - worked on the DPR, no punch -> dpr_only
+ * - absent / leave / off on the DPR, but punched in -> punched_but_absent
+ * - absent / leave / off on the DPR and no punch -> match (they agree)
+ * - punch with no DPR mark -> acpl_only
+ * - both say worked: in- or out-time more than 15 min apart -> time_mismatch
+ */
 export function classifyAcplFlag(
-  dprIn?: string,
-  acplIn?: string,
-  hasDpr?: boolean,
-  hasAcpl?: boolean
+  mark: { status: AttendanceStatus; inTime?: string; outTime?: string } | undefined,
+  punch: { inTime?: string; outTime?: string } | undefined
 ): AcplMatchFlag {
-  if (hasDpr && !hasAcpl) return "dpr_only";
-  if (!hasDpr && hasAcpl) return "acpl_only";
-  const d = minutes(dprIn);
-  const a = minutes(acplIn);
-  if (d != null && a != null && Math.abs(d - a) > 15) return "time_mismatch";
+  if (!mark) return punch ? "acpl_only" : "match";
+  const worked = WORKING.includes(mark.status);
+  if (!worked) return punch ? "punched_but_absent" : "match";
+  if (!punch) return "dpr_only";
+  const off = (a?: string, b?: string) => {
+    const x = minutes(a);
+    const y = minutes(b);
+    return x != null && y != null && Math.abs(x - y) > 15;
+  };
+  if (off(mark.inTime, punch.inTime) || off(mark.outTime, punch.outTime)) return "time_mismatch";
   return "match";
 }
 
@@ -49,10 +63,13 @@ export function matchAcplAgainstApproved(
   >();
   for (const dpr of approved) {
     for (const mark of dpr.labourMarks) {
+      // Split day across two DPRs: a working mark wins over an absent one
+      const prev = dprByLabourer.get(mark.labourerId);
+      if (prev && WORKING.includes(prev.status) && !WORKING.includes(mark.status)) continue;
       dprByLabourer.set(mark.labourerId, {
         status: mark.status,
-        inTime: mark.inTime,
-        outTime: mark.outTime,
+        inTime: prev?.inTime ?? mark.inTime,
+        outTime: mark.outTime ?? prev?.outTime,
       });
     }
   }
@@ -64,29 +81,32 @@ export function matchAcplAgainstApproved(
   for (const p of punches.filter((x) => x.date === date)) {
     punchByEp.set(p.epNumber, p);
   }
+  // Punches whose EP isn't in our register can still match by name (docs §12 fallback)
+  const unknownPunches = [...punchByEp.values()].filter((p) => !epToLabourer.has(p.epNumber));
 
   const rows: AcplMatchRow[] = [];
-  const seen = new Set<string>();
+  const usedEps = new Set<string>();
 
   for (const [labourerId, mark] of dprByLabourer) {
     const labourer = state.labourers.find((l) => l.id === labourerId);
     if (!labourer) continue;
-    const punch = punchByEp.get(labourer.epNumber);
-    seen.add(labourer.epNumber);
-    const flag = classifyAcplFlag(
-      mark.inTime,
-      punch?.inTime,
-      true,
-      !!punch
-    );
+    let punch = punchByEp.get(labourer.epNumber);
+    let matchedBy: AcplMatchRow["matchedBy"] = punch ? "ep" : undefined;
+    if (!punch) {
+      punch = unknownPunches.find((p) => !usedEps.has(p.epNumber) && sameName(p.labourerName, labourer.name));
+      if (punch) matchedBy = "name";
+    }
+    if (punch) usedEps.add(punch.epNumber);
     rows.push({
       id: uid("am"),
       date,
       labourerId,
       epNumber: labourer.epNumber,
-      flag,
+      flag: classifyAcplFlag(mark, punch),
+      matchedBy,
       dprStatus: mark.status,
       dprInTime: mark.inTime,
+      dprOutTime: mark.outTime,
       acplInTime: punch?.inTime,
       acplOutTime: punch?.outTime,
       resolveStatus: "open",
@@ -94,8 +114,9 @@ export function matchAcplAgainstApproved(
   }
 
   for (const [ep, punch] of punchByEp) {
-    if (seen.has(ep)) continue;
+    if (usedEps.has(ep)) continue;
     const labourer = epToLabourer.get(ep);
+    if (labourer && dprByLabourer.has(labourer.id)) continue;
     rows.push({
       id: uid("am"),
       date,
@@ -111,6 +132,14 @@ export function matchAcplAgainstApproved(
   return rows;
 }
 
+/** Does the first line look like column names rather than a punch? */
+function isHeaderLine(line: string): boolean {
+  const first = line.split(/[,\t|;]/)[0]?.trim() ?? "";
+  // A real EP or a date in the first cell means it's data, whatever words follow
+  if (normalizeEp(first) || /^EP-?\d/i.test(first) || /^\d{4}-\d{2}-\d{2}$/.test(first)) return false;
+  return /\b(ep|emp(loyee)?|code|name|date|punch|in|out)\b/i.test(line);
+}
+
 export function parseAcplCsv(
   text: string,
   defaultDate: string
@@ -123,7 +152,7 @@ export function parseAcplCsv(
   if (lines.length === 0) return [];
 
   const rows: Omit<AcplPunchRow, "id" | "source">[] = [];
-  const start = /ep|employee|punch/i.test(lines[0]) ? 1 : 0;
+  const start = isHeaderLine(lines[0]) ? 1 : 0;
 
   for (let i = start; i < lines.length; i++) {
     const parts = lines[i].split(/[,\t|;]/).map((p) => p.trim());
@@ -162,7 +191,9 @@ export function parseAcplCsv(
     if (!ep) continue;
     rows.push({
       date,
-      epNumber: ep.toUpperCase().startsWith("EP") ? ep : `EP-${ep}`,
+      // PP + 10 digits; a bare 10-digit code gets its PP. Anything else is kept
+      // as typed so it shows up as an unknown EP for Admin to sort out.
+      epNumber: normalizeEp(ep) ?? ep.trim().toUpperCase(),
       labourerName: name || undefined,
       inTime: inTime || undefined,
       outTime: outTime || undefined,

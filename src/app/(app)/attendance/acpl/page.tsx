@@ -1,5 +1,6 @@
 "use client";
 
+import { guarded } from "@/components/shared/require-module";
 import { useState } from "react";
 import {
   EmptyState,
@@ -23,14 +24,15 @@ const FLAG_TONE: Record<
   time_mismatch: "warn",
   dpr_only: "accent",
   acpl_only: "crit",
+  punched_but_absent: "crit",
 };
 
-const SAMPLE_CSV = `EP-88440,Mahesh Rathod,07:52,18:02
-EP-88441,Anil Prajapati,08:20,18:10
-EP-88499,Unknown punch,09:00,17:00
-EP-88421,Ramesh Kumar,07:58,18:05`;
+const SAMPLE_CSV = `PP5920188440,Mahesh Rathod,07:52,18:02
+5920188441,Anil Prajapati,08:20,18:10
+PP5920188499,Unknown punch,09:00,17:00
+PP5920188421,Ramesh Kumar,07:58,18:05`;
 
-export default function AcplMatchPage() {
+function AcplMatchPage() {
   const { state, uploadAcplText, runAcplMatch, resolveAcplFlag } = useStore();
   const [date, setDate] = useState("2026-10-04");
   const [paste, setPaste] = useState(SAMPLE_CSV);
@@ -161,16 +163,22 @@ export default function AcplMatchPage() {
           </h3>
           <ul className="list-inside list-disc space-y-1 text-sm text-[var(--sge-ink-2)]">
             <li>
-              <strong>match</strong> — EP in both DPR & ACPL, times within 15 min
+              <strong>match</strong> — DPR and gate agree: worked with in/out within 15 min, or absent with no punch
             </li>
             <li>
-              <strong>time_mismatch</strong> — both present, in-time differs &gt;15 min
+              <strong>time_mismatch</strong> — both say worked, but in- or out-time differs &gt;15 min
             </li>
             <li>
               <strong>dpr_only</strong> — on approved DPR, missing in ACPL
             </li>
             <li>
               <strong>acpl_only</strong> — punched in ACPL, not on any approved DPR
+            </li>
+            <li>
+              <strong>punched_but_absent</strong> — marked absent / leave / off on the DPR, but punched in at the gate
+            </li>
+            <li>
+              EPs are matched as <code>PP</code> + 10 digits (a bare 10-digit code gets its PP); an unknown EP falls back to the labourer&apos;s name, shown as &quot;matched by name&quot;.
             </li>
           </ul>
           <p className="mt-3 text-sm text-[var(--sge-ink-2)]">
@@ -210,12 +218,15 @@ export default function AcplMatchPage() {
                       <span className="font-mono text-xs text-[var(--sge-ink-3)]">
                         {m.epNumber}
                       </span>
+                      {m.matchedBy === "name" ? (
+                        <StatusPill tone="warn">matched by name — check EP</StatusPill>
+                      ) : null}
                       {m.resolveStatus !== "open" ? (
                         <StatusPill tone="ok">{m.resolveStatus}</StatusPill>
                       ) : null}
                     </div>
                     <div className="mt-1 font-mono text-[11px] text-[var(--sge-ink-3)]">
-                      DPR {m.dprStatus ?? "—"} in {m.dprInTime ?? "—"} · ACPL in{" "}
+                      DPR {m.dprStatus ?? "—"} in {m.dprInTime ?? "—"} out {m.dprOutTime ?? "—"} · ACPL in{" "}
                       {m.acplInTime ?? "—"} out {m.acplOutTime ?? "—"}
                     </div>
                   </div>
@@ -286,3 +297,6 @@ export default function AcplMatchPage() {
     </div>
   );
 }
+
+// Route guard: only roles that may use this page get past the URL
+export default guarded("acpl", AcplMatchPage);
