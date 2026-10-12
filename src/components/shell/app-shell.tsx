@@ -14,7 +14,8 @@ import {
 } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { roleMeta, rolesForSwitcher } from "@/lib/roles";
-import { topNavFor } from "@/lib/desk";
+import { NotificationBell } from "@/components/work/notifications";
+import { canAccessWork, topNavFor } from "@/lib/desk";
 import { ALL_SITES, canSeeAllSites, entrySiteId } from "@/lib/site-scope";
 import { useStore } from "@/lib/store";
 import type { RoleId } from "@/lib/types";
@@ -241,6 +242,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 </SelectContent>
               </Select>
             ) : null}
+            {canAccessWork(role) ? <NotificationBell /> : null}
             {assigned.length > 1 ? (
               <Select
                 value={role}

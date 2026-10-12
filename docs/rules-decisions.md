@@ -220,6 +220,14 @@ Management accounting (costing + P&L), not statutory books — Tally stays for G
 - **Access:** Owner, Super Admin, Finance (Finance can now enter expenses — updates §8, which had Owner/SA only).
 - **Approved vs received check:** for every JMS compare the value when SIC confirmed it (qty × rate) with what actually reached the bank — amount difference (₹ and %) with a reason (deduction, recovery, short-paid, rate change), and days from SIC approval to payment. Dashboard shows total approved, received, gap, average days to payment, and the JMS with a difference or still unpaid.
 
+## 19. Notifications, approvals and activity log (decided 2026-10-12)
+- **Channel:** in-app bell + "Waiting for me" list first. WhatsApp / email / SMS later, after the shared database.
+- **Who is told:** the approver (e.g. SIC for a closed job); the **submitter** when their item is approved or sent back; **Owner** gets everything, with problems (send-backs, short payments, overdrawn paint, edits after approval) marked and a "Problems only" filter; **Super Admin** gets everything.
+- **Activity log:** Owner and Super Admin see every change — who, role, when, what, on which record.
+- **Timing:** approvals (and their outcomes) are instant; everything else goes into a daily summary.
+- **Escalation:** an approval waiting more than **24 hours** is escalated to Owner and Super Admin.
+- Every record keeps its trail: submitted by / when, approved or sent back by / when.
+
 ## Still open
 - **OT source:** neither ACPL nor eSSL monthly reports carry in/out times. Need an eSSL report with punch times (e.g. "Daily Attendance / In-Out" export) or in/out typed on the DPR.
 - **eSSL:** what are the two companies (Default vs SGE) and the 217 short codes (`2`, `3`…)?

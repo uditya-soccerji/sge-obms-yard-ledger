@@ -116,7 +116,7 @@ export type TopNavId = "home" | "work" | "operations" | "master";
 
 /** Work order → plan → job → DPR → JMS tracking (src/app/(app)/work). */
 export function canAccessWork(role: RoleId | null | undefined): boolean {
-  return role === "super_admin" || role === "owner" || role === "sic" || role === "admin" || role === "supervisor";
+  return role === "super_admin" || role === "owner" || role === "sic" || role === "admin" || role === "supervisor" || role === "finance";
 }
 
 export function topNavFor(

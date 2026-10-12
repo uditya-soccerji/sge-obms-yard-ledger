@@ -6,7 +6,10 @@
  * August is closed; its unfinished balance is carried into September (open),
  * which has live jobs and DPRs to show the flow.
  */
-import { lineStatus, round3 } from "./logic";
+import type { RoleId } from "../types";
+import { reasonText, type WorkEvent } from "./events";
+import { entryArea, lineStatus, round3 } from "./logic";
+import { STAGES } from "./types";
 import type {
   DprEntry,
   Jms,
@@ -19,7 +22,8 @@ import type {
   WorkState,
 } from "./types";
 
-export const WORK_STORAGE_KEY = "sge-work-v1";
+/** v4: + activity log / notifications */
+export const WORK_STORAGE_KEY = "sge-work-v4";
 /** "Today" for the work demo (DPR dates, expiry warnings). */
 export const WORK_TODAY = "2026-09-28";
 
@@ -121,6 +125,18 @@ function rack(target: number): Member[] {
   return [{ name: "PIPE RACK ISMB 300 X 140", nos: 10, side: 1, length: len, cf: 1.16 }];
 }
 
+/** Demo productivity: labour-days per m² by MPS (August history has no crews). */
+const LABOUR_PER_M2: Record<string, number> = {
+  "MPS-1": 0.11, "MPS-3": 0.16, "MPS-4": 0.17, "MPS-6": 0.07, "MPS-8": 0.16,
+  "MPS-13": 0.09, "MPS-23": 0.08, BLASTING: 0.1,
+};
+const AUG_WAGE = 820;
+
+// DTA crews (labourer ids from the main seed, by supervisor)
+const CREW_A = ["lb-01", "lb-02", "lb-08", "lb-09", "lb-x-2", "lb-x-4"];
+const CREW_A2 = ["lb-x-6", "lb-x-8", "lb-x-10", "lb-x-12"];
+const CREW_B = ["lb-03", "lb-04", "lb-07"];
+
 const JMS_STATUS_AUG: JmsStatus[] = ["INVOICE UPLOADED", "A3 APR", "A2 APR", "INVOICE UPLOADED", "A1 APR"];
 
 export function createWorkSeed(): WorkState {
@@ -129,14 +145,16 @@ export function createWorkSeed(): WorkState {
   const jms: Jms[] = [];
   const dprs: DprEntry[] = [];
   const rateOf = (code: string) => SERVICE_ITEMS.find((s) => s.code === code)!.rate;
-  let jmsSeq = 2741380;
+  // Generated JMS numbers start after the real one (2741381) so they never collide
+  let jmsSeq = 2741381;
   let jobSeq = 100;
 
-  const addJms = (job: Job, line: PlanLine, qty: number, from: string, to: string, status: JmsStatus, no?: string) => {
+  const addJms = (job: Job, line: PlanLine, qty: number, from: string, to: string, status: JmsStatus, no?: string, confirmedOn = to) => {
     const rate = rateOf(line.serviceCode);
     const id = `jms-${no ?? ++jmsSeq}`;
-    jms.push({ id, jmsNo: no ?? String(jmsSeq), jobId: job.id, planLineId: line.id, serviceCode: line.serviceCode, qty, rate, amount: Math.round(qty * rate * 100) / 100, periodFrom: from, periodTo: to, status, woId: WO_ID });
+    jms.push({ id, jmsNo: no ?? String(jmsSeq), jobId: job.id, planLineId: line.id, serviceCode: line.serviceCode, qty, rate, amount: Math.round(qty * rate * 100) / 100, periodFrom: from, periodTo: to, status, woId: WO_ID, confirmedOn });
     job.jmsId = id;
+    return jms[jms.length - 1];
   };
 
   // August — closed month: one closed job + JMS per line (Coker MPS-1 has two)
@@ -148,7 +166,20 @@ export function createWorkSeed(): WorkState {
       const job: Job = { id: `job-2608-${i + 1}-${k + 1}`, jobNo: `J-DTA-${String(++jobSeq).padStart(4, "0")}`, planLineId: line.id, location: k === 0 && parts.length > 1 ? "SILO COKE LOADING / TT3 / C-53 & TT4 / TT5" : `${plant} area`, startDate: "2026-08-01", stages: SERVICE_ITEMS.find((s) => s.code === code)!.defaultStages, status: "closed", closedAt: "2026-08-31", supervisorId: line.supervisorId };
       jobs.push(job);
       const real = plant === "COKER" && code === "3378150" && k === 0;
-      addJms(job, line, qty, "2026-08-01", "2026-08-31", real ? "INVOICE UPLOADED" : JMS_STATUS_AUG[i % JMS_STATUS_AUG.length], real ? "2741381" : undefined);
+      // History has no DPR crews: estimated labour-days from typical output per MPS (demo)
+      const days = Math.round(qty * (LABOUR_PER_M2[SERVICE_ITEMS.find((s) => s.code === code)!.mps] ?? 0.1));
+      job.importedLabour = { days, cost: days * AUG_WAGE };
+      const row = addJms(job, line, qty, "2026-08-01", "2026-08-31", real ? "INVOICE UPLOADED" : JMS_STATUS_AUG[i % JMS_STATUS_AUG.length], real ? "2741381" : undefined, "2026-09-03");
+      // Payments: a mix of full, short and unpaid so the approved-vs-received check has something to show
+      const pattern = real ? "recovery" : (["full", "deduction", "unpaid", "full", "late", "short", "full"] as const)[(i + k) % 7];
+      const pay = (factor: number, on: string, reason?: NonNullable<Jms["payment"]>["reason"], note?: string) =>
+        (row.payment = { receivedOn: on, amount: Math.round(row.amount * factor * 100) / 100, reason, note });
+      if (pattern === "full") pay(1, "2026-09-22");
+      else if (pattern === "deduction") pay(0.98, "2026-09-22", "deduction", "2% deducted by RIL");
+      else if (pattern === "short") pay(0.95, "2026-09-25", "short_paid", "Qty cut at A2 approval");
+      else if (pattern === "late") pay(1, "2026-09-27");
+      else if (pattern === "recovery") row.payment = { receivedOn: "2026-09-22", amount: Math.round((row.amount - 3450) * 100) / 100, reason: "recovery", note: "Paint excess recovery ₹3,450" };
+      if (row.payment) row.status = "PAID";
     });
   });
 
@@ -175,6 +206,9 @@ export function createWorkSeed(): WorkState {
     dprs,
     jms,
     paint: [],
+    expenses: [],
+    events: [],
+    lastSeen: {},
     closedMonths: ["2026-08"],
     currentMonth: "2026-09",
   };
@@ -214,25 +248,30 @@ export function createWorkSeed(): WorkState {
   };
   let dprSeq = 0;
   const dpr = (j: Job, date: string, stage: DprEntry["stage"], members: Member[], litres: number, paintSap?: string, dft?: number, enteredBy: DprEntry["enteredBy"] = "supervisor") =>
-    dprs.push({ id: `wd-${++dprSeq}`, date, jobId: j.id, stage, members, litres, paintSap, dft, supervisorId: j.supervisorId, enteredBy });
+    dprs.push({ id: `wd-${++dprSeq}`, date, jobId: j.id, stage, members, litres, paintSap, dft, supervisorId: j.supervisorId, enteredBy, crew: crewOf.get(j.id) });
+  const crewOf = new Map<string, string[]>();
 
   // 1. Coker silo — all four stages, closed → JMS (193.911 m²)
   const j1 = job("COKER|3378150", "SILO COKE LOADING (NEW WEIGHT BRIDGE)", "2026-09-02", "closed");
+  crewOf.set(j1.id, CREW_A);
   dpr(j1, "2026-09-03", "prep", COKER_PAGE1, 0);
   dpr(j1, "2026-09-06", "coat1", COKER_PAGE1, 34, T17.sap);
   dpr(j1, "2026-09-09", "coat2", COKER_PAGE1, 33, T17.sap);
   dpr(j1, "2026-09-12", "final", COKER_PAGE1, 29, T6.sap, 105);
   j1.closedAt = "2026-09-13";
-  addJms(j1, sep["COKER|3378150"], round3(COKER_PAGE1.reduce((s, m) => s + m.nos * m.side * m.length * m.cf, 0)), "2026-09-02", "2026-09-13", "JMS SUBMITTED");
+  addJms(j1, sep["COKER|3378150"], round3(COKER_PAGE1.reduce((s, m) => s + m.nos * m.side * m.length * m.cf, 0)), "2026-09-02", "2026-09-13", "JMS SUBMITTED", undefined, "2026-09-13");
 
   // 2. Coker TT3 — prep + 1st coat done, 2nd coat started
   const j2 = job("COKER|3378150", "TT3 AREA", "2026-09-15");
+  crewOf.set(j2.id, CREW_A.slice(0, 4));
   dpr(j2, "2026-09-16", "prep", COKER_TT3, 0);
   dpr(j2, "2026-09-19", "coat1", COKER_TT3, 4, T17.sap);
   dpr(j2, "2026-09-24", "coat2", COKER_TT3.slice(0, 3), 2, T17.sap, undefined, "admin");
 
   // 3. Coker A-rack — all stages done, ready for the supervisor to close
   const j3 = job("COKER|3378180", "A-RACK PC NO. 505 TO 509 (LOOP LINE)", "2026-09-05");
+  // lb-x-2 is also on the Coker silo crew on 6-Sep → split day, cost shared by the two jobs
+  crewOf.set(j3.id, [...CREW_A2, "lb-x-2"]);
   const ar = rack(204.48);
   dpr(j3, "2026-09-06", "prep", ar, 0);
   dpr(j3, "2026-09-10", "coat1", ar, 84, "2002462154");
@@ -241,6 +280,7 @@ export function createWorkSeed(): WorkState {
 
   // 4. Crude MPS-13 — closed by the supervisor, waiting for SIC to confirm
   const j4 = job("CRUDE|PEND-MPS13", "PIPE RACK 311/312", "2026-09-04", "awaiting_sic");
+  crewOf.set(j4.id, CREW_B);
   const cr = rack(128.929);
   dpr(j4, "2026-09-05", "prep", cr, 0);
   dpr(j4, "2026-09-09", "coat1", cr, 36, T17.sap);
@@ -250,6 +290,7 @@ export function createWorkSeed(): WorkState {
 
   // 5. RTF tank — blasting under way
   const j5 = job("RTF|3378180", "TANK 101 SHELL", "2026-09-20");
+  crewOf.set(j5.id, CREW_B);
   dpr(j5, "2026-09-21", "prep", rack(640), 0);
   dpr(j5, "2026-09-26", "coat1", rack(310), 128, "2002462154");
 
@@ -268,5 +309,73 @@ export function createWorkSeed(): WorkState {
     { id: "pb-11", sap: "2002462154", name: "TYPE 24 PAINT", batch: "12053789", qtyL: 1200, supervisorId: null, mfg: "2026-04-15", expiry: "2027-04-15", siteId: SITE },
   ];
   state.paint = paint;
+
+  state.events = seedEvents(state);
+
+  // Costs (demo figures, shaped like the monthly expense split in the JMS book):
+  // DTA fixed overhead for August, shared over August jobs by labour-days.
+  // September fixed costs are entered at month end, so they aren't seeded.
+  const fx = (category: string, amount: number) =>
+    ({ id: `ex-2608-${category.toLowerCase().replace(/\W+/g, "-")}`, date: "2026-08-31", month: "2026-08", siteId: SITE, kind: "fixed" as const, category, amount });
+  state.expenses = [
+    fx("Staff salaries", 3000000),
+    fx("Compressor rent", 900000),
+    fx("Bus rent", 240000),
+    fx("Car rent", 180000),
+    fx("Diesel", 1600000),
+    fx("Machinery", 300000),
+    fx("PPE items", 250000),
+    { id: "ex-d-1", date: "2026-09-04", month: "2026-09", siteId: SITE, kind: "direct", category: "Thinner + rollers", amount: 6500, jobId: j1.id },
+    { id: "ex-d-2", date: "2026-09-06", month: "2026-09", siteId: SITE, kind: "direct", category: "Copper slag abrasive", amount: 18400, jobId: j3.id },
+    { id: "ex-d-3", date: "2026-09-21", month: "2026-09", siteId: SITE, kind: "direct", category: "Copper slag abrasive", amount: 42000, jobId: j5.id },
+  ];
   return state;
+}
+
+/** Demo staff names for seeded history (the live app uses the signed-in account). */
+const DEMO_NAMES: Record<string, { name: string; role: RoleId }> = {
+  "st-sup1": { name: "V. Chauhan", role: "supervisor" },
+  "st-sup2": { name: "K. Solanki", role: "supervisor" },
+  sic: { name: "R. Mehta", role: "sic" },
+  finance: { name: "D. Trivedi", role: "finance" },
+  owner: { name: "K. Sisodia", role: "owner" },
+};
+
+/** Activity history matching the seed: September DPRs, closes, JMS and short payments. */
+function seedEvents(w: WorkState): WorkEvent[] {
+  const out: Omit<WorkEvent, "id" | "seq">[] = [];
+  const jobOf = (id: string) => w.jobs.find((j) => j.id === id)!;
+  const add = (day: string, time: string, who: keyof typeof DEMO_NAMES, e: Omit<WorkEvent, "id" | "seq" | "at" | "day" | "actorName" | "actorRole" | "siteId">) =>
+    out.push({ ...e, siteId: SITE, day, at: `${day}T${time}:00+05:30`, actorName: DEMO_NAMES[who].name, actorRole: DEMO_NAMES[who].role });
+
+  add("2026-08-31", "18:00", "owner", { kind: "month_closed", title: "2026-08 closed", detail: "Unfinished plan lines carried into 2026-09", tab: "plan" });
+  for (const d of w.dprs) {
+    const job = jobOf(d.jobId);
+    add(d.date, "17:30", d.supervisorId as keyof typeof DEMO_NAMES, {
+      kind: "dpr_added",
+      subjectStaffId: job.supervisorId,
+      title: `${job.jobNo} · ${STAGES.find((s) => s.id === d.stage)?.label} ${round3(entryArea(d))} m²`,
+      detail: `${job.location}${d.enteredBy === "admin" ? " · entered by Admin" : ""}${d.crew?.length ? ` · crew ${d.crew.length}` : ""}`,
+      tab: "jobs",
+      refId: job.id,
+    });
+  }
+  for (const job of w.jobs) {
+    if (job.closeRequestedAt) {
+      add(job.closeRequestedAt, "18:10", job.supervisorId as keyof typeof DEMO_NAMES, { kind: "job_closed", subjectStaffId: job.supervisorId, title: `${job.jobNo} closed — confirm JMS`, detail: job.location, tab: "jobs", refId: job.id });
+    }
+  }
+  for (const j of w.jms) {
+    const job = jobOf(j.jobId);
+    if (j.confirmedOn >= "2026-09-10") {
+      add(j.confirmedOn, "09:30", "sic", { kind: "jms_confirmed", subjectStaffId: job.supervisorId, title: `JMS ${j.jmsNo} confirmed · ${job.jobNo}`, detail: `${j.qty} m² × ₹${j.rate}`, tab: "jms", refId: j.id });
+    }
+    const gap = j.payment ? Math.round((j.payment.amount - j.amount) * 100) / 100 : 0;
+    if (j.payment && gap <= -1) {
+      add(j.payment.receivedOn, "11:00", "finance", { kind: "payment_recorded", problem: true, subjectStaffId: job.supervisorId, title: `JMS ${j.jmsNo} paid ₹${j.payment.amount.toLocaleString("en-IN")}`, detail: `Short by ₹${(-gap).toLocaleString("en-IN")} (${reasonText(j.payment.reason)})`, tab: "payments", refId: j.id });
+    }
+  }
+  return out
+    .sort((a, b) => a.at.localeCompare(b.at))
+    .map((e, i) => ({ ...e, id: `ev-${i + 1}`, seq: i + 1 }));
 }

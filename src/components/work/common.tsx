@@ -4,6 +4,7 @@ import { cn } from "@/lib/utils";
 import { ALL_SITES } from "@/lib/site-scope";
 import { useStore } from "@/lib/store";
 import { useWork } from "@/lib/work/store";
+import { DEFAULT_WAGE } from "@/lib/work/logic";
 import type { PlanLine, Stage } from "@/lib/work/types";
 import { STAGES } from "@/lib/work/types";
 
@@ -21,8 +22,10 @@ export const tdCls = "px-2.5 py-2 align-top";
 
 /** Work rows the viewer may see: the active site, or every site in All sites. */
 export function useWorkScope() {
-  const { state } = useStore();
+  const { state, fullState } = useStore();
   const { work } = useWork();
+  const wages = new Map(fullState.labourers.map((l) => [l.id, l.wageDaily]));
+  const wageOf = (id: string) => wages.get(id) ?? DEFAULT_WAGE;
   const inSite = (siteId: string) =>
     state.currentSiteId === ALL_SITES || state.currentSiteId === siteId;
   const lineIds = new Set(work.planLines.filter((l) => inSite(l.siteId)).map((l) => l.id));
@@ -44,6 +47,9 @@ export function useWorkScope() {
     currentSiteId: state.currentSiteId,
     sites: state.sites,
     staff: state.staff,
+    wageOf,
+    // Payments + P&L: Owner, Super Admin, Finance (docs §18)
+    canMoney: role === "owner" || role === "super_admin" || role === "finance",
     canConfirm: role === "sic" || role === "owner" || role === "super_admin",
     canPlan: role === "sic" || role === "owner" || role === "super_admin" || role === "admin",
     canEnter: role === "supervisor" || role === "admin" || role === "sic" || role === "owner" || role === "super_admin",

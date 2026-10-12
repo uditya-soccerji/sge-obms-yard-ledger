@@ -12,6 +12,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { SiteComparison } from "@/components/owner/site-comparison";
+import { MoneyCard } from "@/components/work/money-card";
 import { ALL_SITES } from "@/lib/site-scope";
 import { useStore } from "@/lib/store";
 
@@ -80,6 +81,8 @@ export default function OwnerHomePage() {
         <KpiTile label="Avg JMS rating" value={String(avgRating)} hint={`${state.workRatings.length} scores`} tone="accent" />
         <KpiTile label="JMS expected" value={formatINR(state.jmsPackages.reduce((s, p) => s + p.expectedIncome, 0))} />
       </div>
+
+      <MoneyCard />
 
       {allSites ? <SiteComparison /> : null}
 

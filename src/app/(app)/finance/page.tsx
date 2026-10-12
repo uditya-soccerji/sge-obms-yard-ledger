@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { ALL_SITES, entrySiteId } from "@/lib/site-scope";
+import { MoneyCard } from "@/components/work/money-card";
 import { useStore } from "@/lib/store";
 import type { WageLedgerEntry } from "@/lib/types";
 
@@ -109,6 +110,9 @@ export default function FinancePage() {
             : "JMS income expected vs received, wage / bonus / advance / OT ledger, alerts to SIC."
         }
       />
+
+      {/* Accounting lives with the JMS data in Work: approved vs received + P&L */}
+      <MoneyCard />
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <KpiTile

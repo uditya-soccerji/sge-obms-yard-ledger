@@ -92,6 +92,7 @@ export function WorkJobs() {
                   {job.location} · {s.staffName(job.supervisorId)} · started {job.startDate}
                   {s.allSites ? ` · ${s.siteCode(line.siteId)}` : ""}
                 </div>
+                <Trail jobId={job.id} jmsId={job.jmsId} />
               </div>
               <div className="flex flex-wrap gap-2">
                 {job.status === "open" && s.canEnter ? (
@@ -154,6 +155,7 @@ export function WorkJobs() {
                       <th className="px-2 py-1.5 text-right">m²</th>
                       <th className="px-2 py-1.5 text-right">Litres</th>
                       <th className="px-2 py-1.5 text-right">DFT</th>
+                      <th className="px-2 py-1.5 text-right">Crew</th>
                       <th className="px-2 py-1.5 text-left">Entered by</th>
                     </tr>
                   </thead>
@@ -166,6 +168,7 @@ export function WorkJobs() {
                         <td className="px-2 py-1.5 text-right font-mono">{fmtM2(entryArea(e))}</td>
                         <td className="px-2 py-1.5 text-right font-mono">{e.litres || "—"}</td>
                         <td className="px-2 py-1.5 text-right font-mono">{e.dft ?? "—"}</td>
+                        <td className="px-2 py-1.5 text-right font-mono">{e.crew?.length ?? "—"}</td>
                         <td className="px-2 py-1.5">{e.enteredBy === "admin" ? "Admin (data operator)" : "Supervisor"}</td>
                       </tr>
                     ))}
@@ -187,6 +190,7 @@ export function WorkJobs() {
 const blankMember = (): Member => ({ name: "", nos: 1, side: 1, length: 0, cf: 0 });
 
 function DprForm({ job, onDone }: { job: Job; onDone: (m: { ok: boolean; msg: string }) => void }) {
+  const { state: appState } = useStore();
   const { addDpr } = useWork();
   const s = useWorkScope();
   const line = s.line(job.planLineId)!;
@@ -200,6 +204,10 @@ function DprForm({ job, onDone }: { job: Job; onDone: (m: { ok: boolean; msg: st
   const [litres, setLitres] = useState("");
   const [dft, setDft] = useState("");
   const [err, setErr] = useState<string | null>(null);
+  // Crew: the supervisor's active labourers; ticked ones carry this day's labour cost (docs §18)
+  const roster = appState.labourers.filter((l) => l.active && l.supervisorId === job.supervisorId);
+  const lastCrew = [...s.work.dprs].reverse().find((d) => d.jobId === job.id && d.crew?.length)?.crew ?? [];
+  const [crew, setCrew] = useState<string[]>(lastCrew.filter((id) => roster.some((l) => l.id === id)));
   const area = round3(members.reduce((t, m) => t + memberArea(m), 0));
   const norm = it?.paints.find((p) => p.sap === paintSap)?.normL ?? 0;
   const expected = round3(area * norm);
@@ -214,7 +222,7 @@ function DprForm({ job, onDone }: { job: Job; onDone: (m: { ok: boolean; msg: st
       onSubmit={(e) => {
         e.preventDefault();
         if (stage === fin && it?.paints.length && !(Number(dft) > 0)) return setErr("Actual DFT is required at final shade");
-        const r = addDpr({ date, jobId: job.id, stage, members, paintSap: lit > 0 ? paintSap : undefined, litres: lit, dft: Number(dft) || undefined, enteredBy: s.enteredBy });
+        const r = addDpr({ date, jobId: job.id, stage, members, paintSap: lit > 0 ? paintSap : undefined, litres: lit, dft: Number(dft) || undefined, enteredBy: s.enteredBy, crew });
         if (!r.ok) return setErr(r.error);
         onDone({ ok: true, msg: `DPR entry saved: ${fmtM2(area)} m² ${STAGES.find((x) => x.id === stage)?.label} on ${job.jobNo}.` });
       }}
@@ -277,6 +285,29 @@ function DprForm({ job, onDone }: { job: Job; onDone: (m: { ok: boolean; msg: st
             <Plus className="mr-1 h-3.5 w-3.5" /> Add member
           </Button>
           <span className="text-sm">Total <b className="tabular-nums">{fmtM2(area)} m²</b></span>
+        </div>
+      </div>
+
+      <div>
+        <Label>Crew on this job today ({crew.length} of {roster.length})</Label>
+        <div className="mt-1 flex max-h-32 flex-wrap gap-1.5 overflow-y-auto">
+          {roster.map((l) => {
+            const on = crew.includes(l.id);
+            return (
+              <button
+                key={l.id}
+                type="button"
+                onClick={() => setCrew((c) => (on ? c.filter((x) => x !== l.id) : [...c, l.id]))}
+                className={cn(
+                  "rounded-sm border px-2 py-1 text-[11px]",
+                  on ? "border-[var(--sge-night)] bg-[var(--sge-night)] text-white" : "border-[var(--sge-line)] bg-[var(--sge-paper)] text-[var(--sge-ink-2)]"
+                )}
+              >
+                {l.name}
+              </button>
+            );
+          })}
+          {roster.length === 0 ? <span className="text-xs text-[var(--sge-ink-3)]">No labourers under this supervisor.</span> : null}
         </div>
       </div>
 
@@ -370,5 +401,24 @@ function StartJob({ onDone }: { onDone: (m: { ok: boolean; msg: string }) => voi
         </form>
       )}
     </Panel>
+  );
+}
+
+/** Approval trail for a job: closed by whom / when, confirmed or sent back by whom (docs §19). */
+function Trail({ jobId, jmsId }: { jobId: string; jmsId?: string }) {
+  const { work } = useWork();
+  const steps = work.events.filter(
+    (e) => (e.refId === jobId || (jmsId && e.refId === jmsId)) && (e.kind === "job_closed" || e.kind === "jms_confirmed" || e.kind === "job_sent_back")
+  );
+  if (steps.length === 0) return null;
+  const verb = { job_closed: "Closed", jms_confirmed: "Confirmed", job_sent_back: "Sent back" } as const;
+  return (
+    <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px]">
+      {steps.map((e) => (
+        <span key={e.id} className={e.kind === "job_sent_back" ? "text-[var(--sge-crit)]" : "text-[var(--sge-ink-2)]"}>
+          {verb[e.kind as keyof typeof verb]} by <b>{e.actorName}</b> ({e.actorRole?.replace("_", " ")}) · {e.day}
+        </span>
+      ))}
+    </div>
   );
 }

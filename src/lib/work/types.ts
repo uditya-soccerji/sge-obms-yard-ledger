@@ -1,3 +1,4 @@
+import type { WorkEvent } from "./events";
 /**
  * Work tracking: Work Order → monthly Plan → Jobs → DPR entries → JMS.
  * See docs/rules-decisions.md §5, §10, §15, §17.
@@ -77,6 +78,8 @@ export interface Job {
   closeRequestedAt?: string;
   jmsId?: string;
   supervisorId: string;
+  /** Jobs imported as history (no DPR crew): labour-days and cost brought in */
+  importedLabour?: { days: number; cost: number };
 }
 
 /** One measured member: NOS × SIDE × LENGTH × CF = area (m²). */
@@ -101,6 +104,8 @@ export interface DprEntry {
   supervisorId: string;
   enteredBy: "supervisor" | "admin";
   note?: string;
+  /** Labourer ids who worked on this job this day (labour cost, docs §18) */
+  crew?: string[];
 }
 
 export type JmsStatus =
@@ -125,6 +130,9 @@ export interface Jms {
   periodTo: string;
   status: JmsStatus;
   woId: string;
+  /** When SIC confirmed it (approved value fixed here) */
+  confirmedOn: string;
+  payment?: JmsPayment;
 }
 
 /** Paint batch: in the SGE store (supervisorId null) or issued to a supervisor. */
@@ -149,8 +157,41 @@ export interface WorkState {
   dprs: DprEntry[];
   jms: Jms[];
   paint: PaintBatch[];
+  expenses: Expense[];
+  /** Activity log + notifications (docs §19), newest last */
+  events: WorkEvent[];
+  /** Last event seq each account has seen (keyed by account id) */
+  lastSeen: Record<string, number>;
   /** Months whose plan is closed and carried forward (YYYY-MM) */
   closedMonths: string[];
   /** The month new plan lines and jobs go into */
   currentMonth: string;
+}
+
+/** Money actually received against a JMS (docs §18: income counts when paid). */
+export interface JmsPayment {
+  receivedOn: string;
+  amount: number;
+  /** Why the received amount differs from the approved value, if it does */
+  reason?: "deduction" | "recovery" | "short_paid" | "rate_change" | "other";
+  note?: string;
+}
+
+export type ExpenseKind = "direct" | "fixed";
+
+/**
+ * A cost line. Direct = tagged to one job. Fixed = site overhead for a month,
+ * shared over that site's jobs by labour-days (docs §18).
+ */
+export interface Expense {
+  id: string;
+  date: string;
+  /** YYYY-MM the cost belongs to */
+  month: string;
+  siteId: string;
+  kind: ExpenseKind;
+  category: string;
+  amount: number;
+  jobId?: string;
+  note?: string;
 }

@@ -23,9 +23,9 @@ Actual = Σ JMS on the plan line · Remaining = Plan − Actual · unfinished wo
 ## 2. Status (2026-10-11)
 - **Prototype only.** All data lives in the browser (`localStorage`); no backend yet.
 - Demo logins are in `README.md` (e.g. `uditya` / `password` = Super Admin). They are demo seed values, not secrets.
-- The **Work** module (`/work`) implements the flow above with real DTA Aug-2026 figures.
+- The **Work** module (`/work`) implements the flow above with real DTA Aug-2026 figures, plus **Payments** (SIC-approved vs received per JMS), **P&L** (cash basis; labour from DPR crews, fixed costs shared by labour-days) and **Test tools** (View as, scenarios, reset — Owner/Super Admin), a header **notification bell** ("Waiting for me", instant approvals/problems, daily summary, 24 h escalation) and an **Activity log** tab (Owner/Super Admin). Every Work action writes an event via `log()` in `work/store.tsx`; who sees it is decided in `work/events.ts` (`isFor`). The Owner home and Finance show the same "Approved vs received" card.
 - Older demo screens (Operations, DPR desk, attendance, finance) use a separate store and are not yet joined to the Work module.
-- Decided next (not built): Supabase backend (new project, Mumbai), Vercel (team "Shree Gayatri Ent"), Accounting / P&L, ACPL/eSSL/JMS-book uploads, Gujarati + Hindi labels, a simplified navigation (options A/B/C — **owner hasn't picked yet**, B "four fixed tabs" recommended).
+- Decided next (not built): Supabase backend (new project, Mumbai), Vercel (team "Shree Gayatri Ent"), ACPL/eSSL/JMS-book uploads, Gujarati + Hindi labels, a simplified navigation (options A/B/C — **owner hasn't picked yet**, B "four fixed tabs" recommended).
 - Full business rules: **`docs/rules-decisions.md`** (§1–§18). Build order + data model: **`docs/build-plan.md`**. Read the relevant section before changing behaviour.
 
 ## 3. Stack
@@ -69,7 +69,8 @@ src/
     work/types.ts            Work data model
     work/logic.ts            ALL Work calculations (pure functions)
     work/seed.ts             Work demo data from real DTA documents
-    work/store.tsx           WorkProvider: actions + localStorage (key sge-work-v1)
+    work/store.tsx           WorkProvider: actions + localStorage (key sge-work-v3)
+    work/scenarios.ts        test scenarios (pure WorkState transforms)
 docs/
   rules-decisions.md         agreed business rules (owner's answers)
   build-plan.md              Release-1 plan, data model, deploy checklist
