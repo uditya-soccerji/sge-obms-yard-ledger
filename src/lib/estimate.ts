@@ -46,7 +46,8 @@ export function estimateCost(
       input.rateLines,
       input.siteId,
       input.kind,
-      card.unit
+      card.unit,
+      true // an estimate may use the nearest painting rate; JMS billing never does
     );
     if (book) {
       rate = book.rateInr;

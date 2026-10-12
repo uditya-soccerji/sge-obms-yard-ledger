@@ -102,12 +102,17 @@ export const ACTIVITY_ITEM_HINTS: Record<
   ],
 };
 
-/** Resolve best matching rate book line for an activity at a site. */
+/**
+ * Resolve the rate book line for an activity at a site, through the item
+ * hints above. With `guess` (estimates only), fall back to the first current
+ * painting-like line at the site; never guess for money that gets billed.
+ */
 export function resolveActivityRate(
   lines: RateLine[],
   siteId: string,
   activity: string,
-  uom?: string
+  uom?: string,
+  guess = false
 ): RateLine | null {
   const hints = ACTIVITY_ITEM_HINTS[activity] ?? [];
   for (const h of hints) {
@@ -115,7 +120,8 @@ export function resolveActivityRate(
     const hit = latestRate(lines, siteId, h.itemKey, h.uom);
     if (hit) return hit;
   }
-  // Fallback: first current m2 painting-ish line at site
+  if (!guess) return null;
+  // Estimate-only fallback: first current m2 painting-ish line at site
   const current = currentRatesForSite(lines, siteId);
   const unit = (uom ?? "m2").toLowerCase();
   return (

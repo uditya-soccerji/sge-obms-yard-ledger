@@ -121,6 +121,9 @@ function SafetyHomePage() {
           <h3 className="mb-3 font-heading text-sm font-bold uppercase tracking-wide text-[var(--sge-ink-3)]">
             Daily checklist (register-style)
           </h3>
+          {day.signed ? (
+            <p className="mb-2 text-xs text-[var(--sge-ink-3)]">Signed off — the checklist can no longer be changed.</p>
+          ) : null}
           <div className="max-h-[420px] space-y-2 overflow-y-auto">
             {day.items.map((item) => (
               <label
@@ -129,6 +132,8 @@ function SafetyHomePage() {
               >
                 <Checkbox
                   checked={item.checked}
+                  // Signed off = final (the store ignores changes too)
+                  disabled={day.signed}
                   onCheckedChange={() => toggleSafetyItem(day.id, item.id)}
                   className="mt-0.5"
                 />

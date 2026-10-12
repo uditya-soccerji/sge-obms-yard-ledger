@@ -140,7 +140,7 @@ FS-01 scaffold,CPP,scaffolding,840,m3,85`
               />
             </div>
           </div>
-          <Label>Lines: desc, plant, activity, qty, unit, rate (rate 0 → rate book)</Label>
+          <Label>Lines: desc, plant, activity, qty, unit, rate (rate 0 → this site&apos;s rate book; no match is flagged, never guessed)</Label>
           <Textarea
             className="mt-1 mb-3 font-mono text-xs"
             rows={5}
@@ -291,7 +291,7 @@ FS-01 scaffold,CPP,scaffolding,840,m3,85`
                   <div className="flex flex-wrap justify-between gap-2">
                     <span className="font-medium">{line.description}</span>
                     <span className="font-mono">
-                      {line.qty} {line.unit} · {formatINR(line.amountInr)}
+                      {line.qty} {line.unit} · {line.rateMissing ? <span className="text-[var(--sge-crit)]">rate missing — add it to the rate book</span> : formatINR(line.amountInr)}
                     </span>
                   </div>
                   <div className="mt-1 font-mono text-[11px] text-[var(--sge-ink-3)]">

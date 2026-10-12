@@ -659,6 +659,8 @@ export interface JmsLine {
   matchedWorkLineId?: string;
   /** Every DPR work line summed into dprClaimedQty */
   matchedWorkLineIds?: string[];
+  /** No rate given and none in the site's rate book: amount left at 0 until a rate is added */
+  rateMissing?: boolean;
   dprClaimedQty?: number;
   matchRatio?: number;
 }

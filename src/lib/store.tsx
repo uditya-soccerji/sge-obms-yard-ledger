@@ -1103,17 +1103,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const id = uid("jms");
       if (!can(stateRef.current, "jms", "upload")) return "";
       setState((s) => {
+        // Rates come from the package's own site, not whichever site the header shows
+        const site = pkg.siteId ?? entrySiteId(s);
         const lines = pkg.lines.map((line) => {
           if (line.rateInr > 0) {
-            return { ...line, amountInr: Math.round(line.qty * line.rateInr * 100) / 100 };
+            return { ...line, rateMissing: undefined, amountInr: Math.round(line.qty * line.rateInr * 100) / 100 };
           }
-          const book = resolveActivityRate(
-            s.rateLines,
-            entrySiteId(s),
-            line.activity,
-            line.unit
-          );
-          if (!book) return line;
+          const book = resolveActivityRate(s.rateLines, site, line.activity, line.unit);
+          // No guessing for billed money: flag it and leave the amount at 0
+          if (!book) return { ...line, amountInr: 0, rateMissing: true };
           const rateInr = book.rateInr;
           return {
             ...line,
@@ -1127,14 +1125,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           createdAt: new Date().toISOString(),
           kind: "jms_uploaded",
           title: "JMS package uploaded",
-          detail: `${pkg.label} · expected ₹${expectedIncome.toLocaleString("en-IN")}`,
+          detail: `${pkg.label} · expected ₹${expectedIncome.toLocaleString("en-IN")}${lines.some((l) => l.rateMissing) ? ` · ${lines.filter((l) => l.rateMissing).length} line(s) have no rate yet` : ""}`,
           jmsPackageId: id,
           acknowledged: false,
           flaggedToSic: false,
         };
         const full: JmsPackage = {
           ...pkg,
-          siteId: pkg.siteId ?? entrySiteId(s),
+          siteId: site,
           id,
           lines,
           status: "uploaded",

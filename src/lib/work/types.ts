@@ -79,6 +79,8 @@ export interface Job {
   closeRequestedAt?: string;
   /** Account that asked to close, so they can't confirm their own JMS */
   closeRequestedBy?: string;
+  /** Latest send-back by SIC, shown to the supervisor until they close the job again */
+  sentBack?: { by: string; at: string; reason: string };
   jmsId?: string;
   supervisorId: string;
   /** Jobs imported as history (no DPR crew): labour-days and cost brought in */
@@ -206,5 +208,22 @@ export interface Expense {
   category: string;
   amount: number;
   jobId?: string;
+  /** Remark (docs §8: required on new entries) */
   note?: string;
+  /** HH:MM the money went out (docs §8) */
+  time?: string;
+  /** Who was paid, from the vendor list (docs §8) */
+  vendor?: string;
+  paymentMode?: PaymentMode;
+  /**
+   * Bill / receipt (docs §8). Only the file name is kept until bills are stored
+   * in Supabase Storage; `billPending` marks an entry whose bill is still to come.
+   */
+  billFile?: string;
+  billPending?: boolean;
+  enteredBy?: string;
+  enteredByName?: string;
+  enteredAt?: string;
 }
+
+export type PaymentMode = "cash" | "upi" | "bank" | "credit";
