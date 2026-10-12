@@ -1,8 +1,16 @@
 # Merge plan: one data model per business object (X1)
 
-Written 2026-10-12 against `main` @ `fbab583`. **Plan only. No code has changed yet.**
+Written 2026-10-12 against `main` @ `fbab583`; revised the same day with the Owner's answers (below).
+**Plan only. No code has changed yet.**
 Rules referenced: `docs/rules-decisions.md` §5 DPR, §6 Paint stock, §8 Finance, §10 JMS & billing,
-§18 Accounting / P&L (and §19 notifications where it applies).
+§17 Build decisions, §18 Accounting / P&L (and §19 notifications where it applies).
+
+## Owner decisions (2026-10-12) that shape this plan
+1. **Fresh start from October 2026.** No old data is carried into the merged model. The old DPRs, JMS packages, paint board and finance entries are left aside. Once the system works the way the Owner expects, past data is uploaded through the upload paths (JMS book, etc.), and if that changes P&L, that's fine.
+2. **SIC closes a cycle of work → that becomes the internal JMS.** We also upload the JMS we submit to RIL. The two are **compared**, not merged, and every step keeps an **audit log**.
+3. **Paint 941 / 942 / 261 are RIL's consumption steps.** SGE follows the same steps internally and tracks them, but doesn't generate those numbers. RIL's numbers are typed in **for reference** when RIL gives them. Consumption itself is internal (from our DPRs).
+
+These are also recorded in `docs/rules-decisions.md` (§6, §10, §17).
 
 ## 0. The problem in one paragraph
 The app keeps two stores that never talk to each other:
@@ -11,7 +19,7 @@ The app keeps two stores that never talk to each other:
 
 So a supervisor's DPR on `/dpr` never moves a job forward. A JMS uploaded on `/jms` never appears in Payments or P&L. Paint on the store board is never deducted by DPR litres. Money typed into Finance never reaches P&L. Per AGENTS.md §1 the **Work model is the target**. Each pair below moves into it, and then the legacy copy is deleted.
 
-Good news that keeps this small: **the IDs are already shared.** Sites (`site-dta`…), staff (`st-sup1`, `st-sic`…) and labourers (`lb-…`) mean the same thing in both stores, so migrated records need no ID remapping.
+The IDs are already shared: sites (`site-dta`…), staff (`st-sup1`, `st-sic`…) and labourers (`lb-…`) mean the same thing in both stores. So the screens can switch stores without any ID mapping, and a later upload of past data can use the same IDs.
 
 ---
 
@@ -68,7 +76,6 @@ New `DprReport` (one per submitter · site · plant · date · type; any number 
 | `scaffold: { id, location, erectM3, dismantleM3, standingM3, liftingTrips, jobId? }[]` | §5 scaffolding line, lifting in trips |
 | `safetyBody?`, `storeBody?` | moved as-is from `DprSafetyBody` / `DprStoreBody` |
 | `nextDayPlan`, `note` | carried over |
-| `legacyLines?: { plant, bay, activity, areaM2, mps?, litres? }[]` | old painting lines with no job; read-only, not counted (see migration) |
 
 Changes to the existing Work `DprEntry`:
 - add `reportId: string`. `addDpr` attaches the line to the day's draft report and creates one if none exists.
@@ -79,12 +86,10 @@ New Work actions in `src/lib/work/store.tsx`: `saveReport`, `submitReport`, `rev
 
 Approval writes attendance. `reviewReport` calls a new main-store action `applyDprAttendance(reportId, date, siteId, crew)`, which reuses `attendanceFromApprovedDpr`. This is the same thing `reviewDpr` does today, so attendance stays in the main store (HR/ACPL own it).
 
-### Data migration
-- **Work data (key `sge-work-v4`).** Each existing entry gets a report, grouped by supervisor + date + the job's plant. Seeded history is DTA Aug–Sep, so these reports are `approved` with `review.by = "migration"`. `permitOk`/`tbtDone` are `true` and the crew is the union of the entries' `crew`.
-- **Legacy `dprDocuments`.** Each document becomes one `DprReport`. Status map: `draft→draft`, `submitted→submitted`, `sic_approved→approved`, `sic_rejected→sent_back`, `locked→approved`. `labourMarks` becomes `crew`, `sicNote/By/At` becomes `review`, and `scaffoldWork`, `safetyBody` and `storeBody` copy straight across. `telegramDraftLines` are appended to `note`.
-  - **Painting lines** (`paintWork`) have an area but no members or job. If exactly one open Work job matches site + plant + date, the line becomes an entry with a single member `{ name: "From old DPR", nos 1, side 1, length area, cf 1 }`. Otherwise it goes into `legacyLines`, shown as "Needs a job" for Admin with a **Link to job** button. Guessing a job would corrupt JMS quantities.
-- **Thin `state.dprs`** (paint-gist lines and Telegram notes): `permitOk/tbtDone` copy onto the matching report when one exists. Otherwise drop them: they only fed the owner's paint gist, which Work's `supervisorPaint` replaces.
-- See §5 for the storage-key mechanics.
+### Data (fresh start)
+- **Legacy `dprDocuments` and thin `state.dprs` are not converted** (Owner decision 1). They disappear from the screens when each screen moves to Work.
+- **Demo data:** the Work demo seed (DTA Aug–Sep) gets reports built around its entries (`approved`, `permitOk`/`tbtDone` true, crew = union of the entries' `crew`). It is only loaded from Test tools (see §5), never as the starting state.
+- **Past DPRs later:** when the Owner is ready, past DPRs come in through the Excel-DPR upload (§17 "an Excel DPR can be uploaded to cross-check"). That upload is a separate task, not part of this plan.
 
 ---
 
@@ -106,35 +111,41 @@ Approval writes attendance. `reviewReport` calls a new main-store action `applyD
 | `src/lib/work/scenarios.ts`, `src/lib/work/seed.ts`, `src/lib/seed.ts`, `src/lib/seed-sites.ts`, `src/lib/site-scope.ts` | both | seed / scope | — |
 
 ### What survives
-**Work `Jms`.** It already holds the business rule "a closed job *is* the JMS" (§10), feeds plan-vs-actual and the WO balance, and is what P&L counts. The legacy package's useful parts are the **upload**, the **DPR comparison** and the **ratings**. They become an upload path into `Jms` plus pure functions.
+Owner decision 2 gives JMS **two records that are compared, never merged**:
+- **Internal JMS = Work `Jms`** (survives as it is). It is created when the **SIC closes a cycle of work** (today: supervisor requests close → SIC confirms). Its qty is the final-shade m² from the cycle's DPRs and its value is qty × WO rate. It feeds plan-vs-actual, the WO balance, approved-vs-received and P&L (§10, §15, §18).
+- **Submitted JMS = new `JmsSubmission`**: the JMS pack we submit to RIL, uploaded by Admin (Excel figures, PDF proof). It replaces the legacy `JmsPackage` upload. It carries RIL's JMS no. and RIL's status flow (§14).
 
-### Fields to add to `Jms`
+Pure `compareJms(internal, submission)` in `logic.ts` flags any difference in qty, amount, service items, period or WO (§10 "flag any difference"). It also lists internal JMS with no submission yet, and submissions with no internal JMS. The legacy package's DPR line-matching and ratings become pure functions over these two records.
+
+### Fields
+`Jms` (internal) changes:
 | Field | Why / rule |
 |---|---|
-| `source: "job" \| "upload"` | JMS from SIC confirm vs uploaded by Admin (§10, §14) |
-| `jobId?`, `planLineId?` → **optional** | uploaded / historic JMS may not have a job yet. Shown in "Not linked to a job" for Admin (§10 each JMS maps to a job). `lineStatus` already sums by `planLineId`, so unlinked JMS simply don't count toward actual. |
-| `siteId`, `plant?` | needed once `jobId` can be empty |
-| `items?: { serviceCode?, description, qty, uom: "M2" \| "M3", rate, amount }[]` | JMS abstract has several service items (§15 C1); the single `serviceCode/qty/rate` stay as the first/primary item |
-| `rilQty?` | RIL-certified qty from the uploaded Excel. Pure `jmsDifference(jms, work)` compares it with the job's DPR total between `periodFrom` and `periodTo` and flags any gap (§10). |
-| `confirmedOn?` → **optional** | unset = not SIC-confirmed yet (uploaded and not reviewed). Payments still require it (§18). |
-| `sicNote?` | SIC reject reason |
-| `upload?: { by, at, excelName?, pdfName? }` | Excel for figures, PDF as proof (§10, §17). File names only until Supabase Storage. |
-| `statusLog: { status, at, by }[]` | re-upload of the same JMS no. = status update, never a new record (§10, §14) |
-| `invoiceNo?`, `foNo?`, `scrollNo?`, `label?` | §14 captured fields |
-| `JmsStatus` += `"A1 REJECT"` | §14 reject branch |
+| `submissionId?` | link to the matching `JmsSubmission`, set by Admin or auto-matched on site + plant + period + service item |
+| `status` → **derived** from the linked submission (`jmsStatus(jms, submissions)`); `"JMS SUBMITTED"` while unlinked | §10 "bill status comes from the JMS upload"; one source for RIL's status |
+| `review: { closedBy, closedAt, note? }` | SIC who closed the cycle (audit) |
+| `confirmedOn`, `payment`, `qty`, `rate`, `amount` | unchanged. Payment stays here so §18 approved-vs-received and P&L don't move. |
 
-New actions: `uploadJms(rows)` matches on `jmsNo` and either updates the status or creates `source: "upload"`. Also `linkJmsToJob(jmsId, jobId)` and `reviewUploadedJms(approve | reject, note)`.
-**Ratings** stop being stored. `supervisorRatings(work, month)` in `logic.ts` derives them from `jmsDifference`, sent-back reports, equipment faults on reports, and open ACPL flags passed in. The old automatic incentive write into `wageLedger` (`computeRatings`) becomes an explicit Owner button, **Post incentive**, which calls the existing main-store `addWageEntry`.
-**Finance alerts** for JMS (`jms_uploaded`, `jms_approved`, `payment_due`) are replaced by Work events `jms_uploaded`, `jms_status`, `jms_unpaid` (§19; unpaid > N days escalates like the 24 h rule).
+New `JmsSubmission`:
+| Field | Why / rule |
+|---|---|
+| `id, rilJmsNo` (7 digits, unique) | §14; re-upload of the same no. = update, never a new record |
+| `siteId, plant, woNo, foNo?, periodFrom, periodTo` | §14 mandatory fields |
+| `items: { serviceCode, description, qty, uom: "M2" \| "M3", rate, amount }[]`, `qty`, `amount` | JMS abstract (§15 C1) |
+| `status` (RIL flow incl. `"A1 REJECT"`), `statusLog: { status, at, by }[]` | §14 status flow; every change kept |
+| `invoiceNo?, scrollNo?, a3Date?` and the §14 dates | §14 captured fields |
+| `files: { excelName?, pdfName? }`, `uploadedBy, uploadedAt` | §10 Excel figures + PDF proof (file names until Supabase Storage) |
+| `jmsId?` | back-link to the internal JMS |
 
-### Data migration
-- Each legacy `JmsPackage` becomes one `Jms` with `source: "upload"`, `jobId` unset, `items` from `lines` (`activity` and `plant` go into `description`), `amount = expectedIncome`, `label`, `siteId`.
-  - Status: `sic_approved` → `confirmedOn = uploadedAt` date, status `JMS SUBMITTED`. `uploaded`/`sic_review`/`draft` → unconfirmed. `sic_rejected` → unconfirmed with `sicNote`.
-  - `paymentReceived` → `payment = { receivedOn: paymentReceivedAt, amount: expectedIncome, note: paymentNote }`, status `PAID`.
-  - `jmsNo`: legacy packages have none, so use `LEGACY-<id>` and mark them for Admin to correct.
-  - The old line matching (`matchedDprId`, `matchRatio`) is dropped. `jmsDifference` recomputes once linked.
-- `workRatings` dropped (derived now). Each package's `jms_*` `financeAlerts` are dropped; unacknowledged `payment_due` alerts are re-created as `jms_unpaid` events.
-- `billing` snapshots (owner page, site comparison) are dropped. `paymentSummary` replaces them.
+**Audit log (Owner decision 2).** Every JMS step writes a Work event with who, role, when and before → after: cycle closed, cycle sent back, internal JMS created, submission uploaded/re-uploaded, linked/unlinked, RIL status change, payment recorded/cleared, difference found. Today `setJmsStatus` writes no event; that is fixed. Events are append-only: no action edits or deletes one (only the Test-tools reset clears the demo). This becomes the trigger-written `audit_log` once on Supabase.
+
+New actions: `uploadSubmission(rows)` (match on `rilJmsNo`: update or create), `linkSubmission(jmsId, submissionId)` / `unlinkSubmission`. New events: `jms_submitted`, `jms_status`, `jms_linked`, `jms_difference` (problem), `jms_unpaid` (§19).
+**Ratings** stop being stored. `supervisorRatings(work, month)` in `logic.ts` derives them from `compareJms`, sent-back cycles/reports, equipment faults on reports, and open ACPL flags passed in. The old automatic incentive write into `wageLedger` (`computeRatings`) becomes an explicit Owner button, **Post incentive**, which calls the existing main-store `addWageEntry`.
+**Finance alerts** for JMS (`jms_uploaded`, `jms_approved`, `payment_due`) are replaced by the Work events above.
+
+### Data (fresh start)
+- Legacy `jmsPackages`, `workRatings`, the JMS `financeAlerts` and the `billing` snapshots are **not converted** (Owner decision 1). `paymentSummary` replaces `billing`.
+- **Past JMS later:** the JMS detail book upload (§14, 1,030 rows) creates `JmsSubmission` rows with no internal JMS. `compareJms` simply shows them as "no internal JMS". That upload is a separate task.
 
 ---
 
@@ -154,28 +165,43 @@ New actions: `uploadJms(rows)` matches on `jmsNo` and either updates the status 
 | `src/lib/work/scenarios.ts` (`expired_paint`, `paint_overdraw`), `src/lib/work/seed.ts`, `src/lib/seed.ts`, `src/lib/seed-sites.ts`, `src/lib/site-scope.ts` | both | — | — |
 
 ### What survives
-**Work `PaintBatch`.** It already does what §6 asks: issue to a supervisor, deduct DPR litres automatically, allow and flag overdraw, flag low stock against remaining scope, carry forward, and warn on expiry (§17). The legacy board contributes the **8 lifecycle stages and RIL movement numbers**, which become fields on the batch.
+**Work `PaintBatch`.** It already does what §6 asks: issue to a supervisor, deduct DPR litres automatically, allow and flag overdraw, flag low stock against remaining scope, carry forward, and warn on expiry (§17). The legacy board contributes the **stages before stock arrives** and the **RIL consumption steps**.
 
-### Fields to add to `PaintBatch`
+**How 941 / 942 / 261 work (Owner decision 3).** They are RIL's consumption steps. SGE runs **the same three steps internally** and tracks them itself. We never generate RIL's numbers; when RIL gives one, it is typed against our step **for reference only**.
+| Step | What it means internally | Our record | RIL reference |
+|---|---|---|---|
+| **941** | paint issued to a supervisor (reservation) | created automatically by `issuePaint`: batch, supervisor, litres, date, by | RIL's 941 no., typed when received |
+| **942** | consumption reconciled for the month | created at month-end reco: litres = **our DPR-derived use** for that supervisor + paint, confirmed by Store/Admin | RIL's 942 no. (+ RIL's litres if they give them) |
+| **261** | consumption posted / closed | created after 942: same litres, marks the month's consumption closed | RIL's 261 no. |
+
+So the 8 board stages map like this: **PR → PO → RIL receive → SGE receive** are stored on the batch; **issued** = a 941 step exists; **consumed** = DPR litres against it (always derived, never typed); **reco** = 942 step done; **posted** = 261 step done.
+
+### Fields
+`PaintBatch` additions:
 | Field | Why / rule |
 |---|---|
-| `lifecycle: "pr" \| "po" \| "ril_receive" \| "sge_receive" \| "reco" \| "posted"` | §6 all 8 stages. **`issued` and `consumed` are derived, not stored**: issued = `supervisorId` set; consumed = `batchBalances` ≤ 0. One source of truth. |
-| `mps?` (e.g. `"MPS-1"`) | legacy `mpsScheme`; variance tolerance per MPS (§6) |
-| `movement941?`, `movement942?`, `movement261?` | §6, §15 D. Edit rules reuse `canEditMovement941/942261`. |
-| `rilPostedL?` | RIL posted litres for the reco variance (SGE used is **derived** from DPR litres, not typed) |
-| `mfg?`, `expiry?` → **optional** | legacy lines and FIM "NEW - LOC" rows have no dates; `expiryState` returns `"unknown"`, shown as its own pie slice |
+| `lifecycle: "pr" \| "po" \| "ril_receive" \| "sge_receive"` | §6 stages before the paint is ours to issue. Later stages come from steps (below), not from this field. |
+| `mps?` (e.g. `"MPS-1"`) | variance tolerance per MPS (§6) |
 | `prNo?`, `poNo?`, `updatedAt` | board columns |
+| `mfg?`, `expiry?` → **optional** | FIM "NEW - LOC" rows have no dates; `expiryState` returns `"unknown"`, shown as its own pie slice |
 
-Rules that change in code: **store stock** = batches with no supervisor and `lifecycle === "sge_receive"`, and `issuePaint` only issues from those. Batches in `pr`/`po`/`ril_receive` are on order, not in stock.
-New actions: `receivePaint` (add batch; also used by Telegram `stock_receipt`), `advancePaintLifecycle`, `updatePaintBatch` (941/942/261, `rilPostedL`). Every action logs a `paint_*` event.
-Variance alert to Owner (§6): pure `paintVariance(w, tolerancePerMps)` = DPR-derived used vs `rilPostedL`. The tolerance comes from Master Data (`masterCatalog`) through `useStore`. This replaces the hand-seeded `predictions` cards.
+New `PaintStep` (in `WorkState.paintSteps`):
+| Field | Why / rule |
+|---|---|
+| `id, step: "941" \| "942" \| "261"` | §6, §15 D |
+| `batchId?`, `supervisorId`, `sap`, `month` | 941 is per issued batch; 942/261 per supervisor + paint + month (that's how the FIM reco is laid out, §15 D) |
+| `litres` | **ours**: issued litres for 941, DPR-derived use for 942/261 |
+| `date`, `by` | audit |
+| `rilRef?`, `rilRefBy?`, `rilRefAt?` | RIL's number, reference only; empty until RIL gives it |
+| `rilLitres?` | optional, only if RIL's figure differs. Feeds the variance alert. |
 
-### Data migration
-Each `PaintStockLine` becomes one `PaintBatch`: `sap = sapCode`, `name = description`, `batch`, `qtyL = qtyLitres`, `siteId`, `mps = "MPS-" + mpsScheme`, `movement*`, `rilPostedL = rilPosted`, `updatedAt`.
-- Stage `issued`/`consumed` with `issuedTo` → `supervisorId = issuedTo`, `issuedOn = updatedAt`, `lifecycle = "sge_receive"`.
-- `reco`/`posted` → same lifecycle; `pr`…`sge_receive` copy across.
-- `sgeUsed` is dropped. DPR litres recompute it, and the value can differ, so the first load logs a one-off `paint_migrated` event listing batches whose typed `sgeUsed` ≠ derived use, so nobody is surprised.
-- The `predictions` array is dropped (now derived).
+Rules that change in code: **store stock** = batches with no supervisor and `lifecycle === "sge_receive"`, and `issuePaint` only issues from those. Batches in `pr`/`po`/`ril_receive` are on order, not in stock. `canEditMovement941/942261` in `paint-lifecycle.ts` becomes "a RIL ref can be typed once our step exists".
+New actions: `receivePaint` (add batch; also used by Telegram `stock_receipt`), `advancePaintLifecycle`, `recoMonth(supervisorId, sap, month)` (creates the 942 from DPR use), `postMonth` (261), `setRilRef(stepId, ref, litres?)`. Every action logs a `paint_*` event.
+Lists that fall out of this: "steps waiting for RIL ref" (ours done, RIL number not in yet), and "reco not done" for a closed month.
+Variance alert to Owner (§6): pure `paintVariance(w, tolerancePerMps)` compares our DPR-derived use with `rilLitres` where RIL gave one, and with the MPS norm (area × L/m²) otherwise. The tolerance comes from Master Data (`masterCatalog`) through `useStore`. This replaces the hand-seeded `predictions` cards.
+
+### Data (fresh start)
+Legacy `paintStock` and `predictions` are **not converted** (Owner decision 1). October stock is entered fresh: batches received into the store, then issued (941). Past FIM recos can be uploaded later (§15 D).
 
 ---
 
@@ -209,112 +235,106 @@ Each `PaintStockLine` becomes one `PaintBatch`: `sap = sapCode`, `name = descrip
 | `edits: { by, at, changes }[]` | §8 all edits logged |
 
 Edit rule as a pure `canEditExpense(expense, viewer, today)`: the person who entered it can edit on the same day, and after that only the Owner. Add/edit access goes to Owner, Super Admin and Finance (§18, which updates §8). `removeExpense` becomes Owner-only and is logged.
-New `receipts: { id, date, siteId, amount, note, jmsIds: string[] }[]` in `WorkState` for money received that isn't matched to a JMS yet (see migration). Finance matches a receipt to JMS, which writes `Jms.payment`.
+Income stays JMS-only (§18): there is no free-form "income" entry any more.
 
-### Data migration
-- Legacy **expense** entries become `Expense` with `kind: "fixed"` (site overhead for the entry's month, shared by labour-days, §18), `month = date.slice(0, 7)`, `note = description`, `enteredBy`. Unknown categories map to `"Other"`, and `paymentMode` is `"cash"` and flagged "check mode".
-  - ⚠ This **changes P&L numbers**: these costs were never in P&L before. The Owner needs to know.
-- Legacy **income** entries with category `"JMS payment"` are **dropped**. They duplicate the package payment carried in §2, and keeping both would count income twice.
-- Other legacy **income** (e.g. `"RA bill"`) becomes `receipts`, shown in Finance as "Received, not matched to a JMS". P&L shows them on a separate line so cash totals don't silently drop.
+### Data (fresh start)
+- Legacy finance **expenses and income** (incl. `"RA bill"` and the auto `"JMS payment"` rows) are **not converted** (Owner decisions 1 and 3). Money is entered fresh from October 2026.
+- **Past money later:** once the steps are clear, old expenses come in as `fixed` site overheads for their month, and old receipts against their JMS (via the JMS book). The Owner has accepted that this will change past P&L.
 - `financeAlerts` of kind `wage_anomaly` stay in the main store (payroll). JMS kinds are covered in §2.
-- `billing` snapshots are dropped (§2).
 
 ---
 
-## 5. Storage migration: how existing browser data moves
-Today the Work store has **no migration at all**: `JSON.parse` straight into `WorkState`. The main store has `migrateState`, which merges onto the seed. Bumping keys alone would wipe everyone's test data, so we use **versioned migration functions** and bump keys only so an old copy is always left to migrate from.
+## 5. Storage: fresh start, no conversion of old data
+Owner decision 1 removes the need to convert old browser data. That drops the legacy converters, the `imported` flags and the key-chaining from the first draft of this plan.
 
-1. **`src/lib/work/migrate.ts`** (new, pure). `WorkState` gets `schemaVersion: number`. `migrateWork(raw, legacy)` runs steps v4 → v5 → … in order. Each step is a pure `(WorkState, LegacySnapshot) => WorkState`.
-2. **`src/lib/work/legacy.ts`** (new, pure). One converter per pair: `reportsFromDprDocuments`, `jmsFromPackages`, `batchesFromPaintStock`, `expensesFromFinance`. These same functions will feed the **Supabase import** later, so the effort is reused.
-3. **Never read the legacy data through `StoreProvider`.** The two providers hydrate separately, and `StoreProvider` re-saves straight after loading. Instead:
-   - every PR that removes an array from the main store bumps `STORAGE_KEY` (v9 → v10 → …),
-   - `StoreProvider` loads the newest key that exists from a `LEGACY_STORAGE_KEYS` list (in `src/lib/seed.ts`) and its `migrateState` simply omits the moved arrays,
-   - the **old key is left untouched**, and `WorkProvider` reads the moved arrays raw from it,
-   - `WorkState.imported: { dpr?: true; jms?: true; paint?: true; money?: true }` records what has been pulled, so it happens exactly once even if someone reloads mid-way or skips versions.
-4. **Fresh browsers / Reset.** `createWorkSeed()` = today's real DTA data **plus** the converters run over `createSeedState()` for the other five sites and for the safety/store/scaffold DPRs. Legacy DTA painting DPRs are skipped because Work already has the real DTA figures. This keeps the six-site demo populated. `Reset` in the header and `Reset work demo` both reset both stores.
-5. Old keys are deleted only in the last PR, after one release in use.
+1. **Starting state = empty October 2026.** New `createEmptyWork(month)` in `src/lib/work/seed.ts` keeps the masters (service items, work orders) and nothing else: no plan lines, jobs, DPRs, JMS, paint or expenses. `currentMonth = "2026-10"`. This is what a new browser, and **Reset**, give you.
+2. **Real dates.** In the fresh state, actions stamp the real date. The fixed `WORK_TODAY = "2026-09-28"` is used only by the demo. A `workToday(work)` helper replaces direct `WORK_TODAY` use in `src/lib/work/store.tsx`, `src/lib/work/scenarios.ts`, `src/components/work/money-card.tsx`, `notifications.tsx`, `work-jobs.tsx`, `work-paint.tsx`, `work-payments.tsx` and `work-pnl.tsx`.
+3. **Demo data only on request.** The DTA Aug–Sep demo and the test scenarios load from **Test tools → Load demo** (Owner / Super Admin). It is never the starting state.
+4. **Keys.** Each PR that changes a stored Work shape bumps `WORK_STORAGE_KEY`. Each PR that removes an array from the main store bumps `STORAGE_KEY`, and `migrateState` simply stops reading that array. Nothing is converted. Anything typed into a browser between PRs is test data and starts again empty. That's acceptable under the fresh start, but **before PR 1 ships to production, check that nobody has typed real October data into the live app**; if they have, export it first.
+5. **Masters are untouched.** Users, sites, staff, labourers, trades, rate book and Master Data live in the main store (and partly in Supabase already). Key bumps keep them through `migrateState`, as today.
+6. **Past data later** comes through upload paths (Excel DPR, JMS book, FIM reco, expenses), once the Owner is happy with the steps. That is a separate task. The shared IDs mean those uploads land in the same model.
 
-| PR | Main `STORAGE_KEY` | Work `WORK_STORAGE_KEY` | `imported` flag set |
-|---|---|---|---|
-| 1 | v9 (unchanged) | `sge-work-v5` (adds `schemaVersion`, `imported`) | — |
-| 2 | v9 | v6 (reports) | — (Work's own entries only) |
-| 4 | **v10** (no `dprDocuments`, no thin `dprs`) | v7 | `dpr` |
-| 6 | **v11** (no `jmsPackages`, `workRatings`, `billing`, JMS `financeAlerts`) | v8 | `jms` |
-| 8 | **v12** (no `paintStock`, `predictions`) | v9 | `paint` |
-| 9 | **v13** (no `finance`) | v10 | `money` |
-| 10 | cleanup: drop old keys v9–v12 | — | — |
+| PR | Main `STORAGE_KEY` | Work `WORK_STORAGE_KEY` |
+|---|---|---|
+| 1 | v9 (unchanged) | `sge-work-v5` (fresh start) |
+| 2 | v9 | v6 (reports) |
+| 4 | **v10** (no `dprDocuments`, no thin `dprs`) | v7 |
+| 6 | v10 | v8 (`JmsSubmission`) |
+| 7 | **v11** (no `jmsPackages`, `workRatings`, `billing`, JMS `financeAlerts`) | v8 |
+| 8 | **v12** (no `paintStock`, `predictions`) | v9 (`PaintStep`) |
+| 9 | **v13** (no `finance`) | v10 |
+| 10 | cleanup: remove old keys left in browsers | — |
 
 ---
 
 ## 6. PR-by-PR order
-Each PR is a draft PR off `main`, leaves every screen working, passes `npx tsc --noEmit -p .`, `npx eslint src` and `npm run build`, and is clicked through on `npm run dev` as **Owner, Supervisor, SIC, Finance** (logins in `README.md`). Rules not touched by a PR keep working as they do today.
+Each PR is a draft PR off `main`, leaves every screen working, passes `npx tsc --noEmit -p .`, `npx eslint src` and `npm run build`, and is clicked through on `npm run dev` as **Owner, Supervisor, SIC, Finance** (logins in `README.md`). Rules not touched by a PR keep working as they do today. Every new action writes a Work event (activity log, §19).
 
-### PR 1: Work storage migration framework (no visible change)
-- Files: `src/lib/work/types.ts` (`schemaVersion`, `imported`), new `src/lib/work/migrate.ts`, `src/lib/work/store.tsx` (hydrate through `migrateWork`; also guards against a corrupt or old shape), `src/lib/work/seed.ts` (key → v5), `src/lib/seed.ts` (`LEGACY_STORAGE_KEYS`), `src/lib/store.tsx` (load newest key from the list).
-- Rules: none changed. It protects §18 P&L history from being lost on later key bumps.
-- Check: all four roles see exactly the same Work/Finance numbers as before the PR. An old `sge-work-v4` in the browser is carried forward, not reset.
+### PR 1: Fresh start from October 2026; demo behind Test tools
+- Files: `src/lib/work/seed.ts` (`createEmptyWork`, key → v5), `src/lib/work/store.tsx` (empty default; `resetWork` → empty; `loadDemo`; `workToday`), `src/lib/work/scenarios.ts` (scenarios start from the demo), `src/components/work/test-tools.tsx` (Load demo / Start fresh), `src/components/work/money-card.tsx`, `notifications.tsx`, `work-jobs.tsx`, `work-paint.tsx`, `work-payments.tsx`, `work-pnl.tsx` (`workToday`).
+- Rules: §17 fresh start (Owner decision 1); §18 P&L starts from October.
+- Check: **Owner** opens Work and sees October with empty plan/jobs/P&L, then adds a plan line. **Supervisor** starts a job on it. **SIC** and **Finance** see the same empty-then-new data. Owner → Test tools → Load demo brings back the Aug–Sep sample, and Start fresh empties it again.
 
 ### PR 2: DPR report header inside Work
-- Files: `src/lib/work/types.ts` (`DprReport`, `DprEntry.reportId`), `src/lib/work/store.tsx` (`addDpr` attaches to the day's report; `saveReport`), `src/lib/work/logic.ts` (`reportOf`, `reportsForDay`), `src/lib/work/migrate.ts` (v5→v6 groups entries into approved reports), `src/lib/work/seed.ts`, `src/lib/work/scenarios.ts`, `src/components/work/work-jobs.tsx` (entries grouped under "Report · date · plant"), `src/app/(app)/work/page.tsx`.
+- Files: `src/lib/work/types.ts` (`DprReport`, `DprEntry.reportId`), `src/lib/work/store.tsx` (`addDpr` attaches to the day's report; `saveReport`), `src/lib/work/logic.ts` (`reportOf`, `reportsForDay`), `src/lib/work/seed.ts` (demo entries grouped into approved reports; key → v6), `src/lib/work/scenarios.ts`, `src/components/work/work-jobs.tsx` (entries grouped under "Report · date · plant"), `src/app/(app)/work/page.tsx`.
 - Rules: §5 *how many per day* (any number), *painting line* (plant, location, MPS, start/end, 2,000 m² max: existing checks keep running), *job register* (every line picks a job); §10 *job stages*.
-- Check: **Supervisor** adds a DPR line on a job and sees it under today's report. **SIC/Owner** see job progress unchanged. **Finance** P&L labour unchanged.
+- Check: **Supervisor** adds a DPR line on a job and sees it under today's report. **SIC/Owner** see job progress move. **Finance** P&L labour picks up the crew.
 
-### PR 3: Submit gates, SIC review and lock on Work reports
-- Files: `src/lib/work/logic.ts` (`canSubmitReport`, `isLate`, `canConfirmJob` now also needs every report touching the job approved), `src/lib/work/store.tsx` (`submitReport`, `reviewReport`, `unlockReport`; `confirmJms` uses the new check), `src/lib/work/events.ts` (`dpr_submitted`, `dpr_approved`, `dpr_sent_back`, `dpr_unlocked`; add the first three to `INSTANT`), `src/lib/store.tsx` (`applyDprAttendance`), `src/lib/acpl.ts` (accept crew marks from a report), new `src/components/work/work-reports.tsx` (report card: permit nos, TBT, crew attendance, zero reason, submit, SIC approve/send back, Owner unlock), `src/app/(app)/work/page.tsx` (Reports tab), `src/components/work/notifications.tsx`.
-- Rules: §5 *deadline* next day 10:00 (late flag); *before submitting* permit + TBT, every crew member marked, quantity > 0 or a reason; *SIC review* approve or reject with reason, resubmit; *after approval locked*, Owner/SA unlock with logged reason; §10 *closing*: SIC confirms only fully approved work; §18 *direct labour* from the DPR crew list (crew now has status and times); §19 instant approvals + 24 h escalation.
-- ⚠ New interlock (confirm with Owner): a job can't become a JMS while one of its DPRs is still unapproved. It follows from §5 + §10 but isn't written down. If the Owner agrees, add it to `rules-decisions.md` §10 in this PR.
-- Check: **Supervisor** can't submit without permit/TBT/crew marks; submits. **SIC** gets an instant notification, sends back with a reason, and the supervisor sees it and resubmits; SIC approves, and the HR attendance for that day appears. **Owner** unlocks with a reason and sees it in the activity log. **Finance** P&L labour for that day is still correct.
+### PR 3: Submit gates, SIC review, lock; SIC closes the cycle
+- Files: `src/lib/work/logic.ts` (`canSubmitReport`, `isLate`, `canCloseCycle`), `src/lib/work/store.tsx` (`submitReport`, `reviewReport`, `unlockReport`; `confirmJms` becomes **SIC closes the cycle**: it shows the cycle's DPRs, and closing approves any still `submitted` ones, each logged), `src/lib/work/types.ts` (`Jms.review`), `src/lib/work/events.ts` (`dpr_submitted`, `dpr_approved`, `dpr_sent_back`, `dpr_unlocked`, `cycle_closed`; instant ones added to `INSTANT`), `src/lib/store.tsx` (`applyDprAttendance`), `src/lib/acpl.ts` (accept crew marks from a report), new `src/components/work/work-reports.tsx` (report card: permit nos, TBT, crew attendance, zero reason, submit, SIC approve/send back, Owner unlock), `src/components/work/work-jobs.tsx` ("Close cycle → JMS" for SIC), `src/app/(app)/work/page.tsx` (Reports tab), `src/components/work/notifications.tsx`.
+- Rules: §5 *deadline* next day 10:00 (late flag); *before submitting* permit + TBT, every crew member marked, quantity > 0 or a reason; *SIC review* approve or reject with reason, resubmit; *after approval locked*, Owner/SA unlock with logged reason; §10 *closing* (Owner decision 2: SIC closes a cycle → internal JMS, with an audit trail); §18 *direct labour* from the DPR crew list (crew now has status and times); §19 instant approvals + 24 h escalation.
+- How unapproved DPRs are handled (my reading of decision 2): DPRs still in **draft** or **sent back** block the close, because the supervisor hasn't finished them. **Submitted** ones are approved by the SIC's close, and each approval is logged. **Owner to confirm.**
+- Check: **Supervisor** can't submit without permit/TBT/crew marks; submits; requests close. **SIC** gets an instant notification, sends one DPR back with a reason, and the supervisor fixes and resubmits; SIC closes the cycle → internal JMS, and HR attendance for those days appears. **Owner** sees every step in the activity log and unlocks a DPR with a reason. **Finance** sees the JMS in Payments as approved, not yet received.
 
-### PR 4: DPR desk writes to Work (legacy DPR becomes read-only adapter)
-- Files: `src/app/(app)/dpr/page.tsx`, `src/app/(app)/dpr/new/page.tsx`, `src/app/(app)/dpr/[id]/page.tsx`, `src/components/dpr/dpr-form.tsx` (painting lines now pick a **job** and enter members, reusing the Work member editor; scaffold lines gain `liftingTrips`), `src/components/dpr/safety-dpr-form.tsx`, `src/app/(app)/approvals/sic/page.tsx` (queue = Work reports), `src/lib/work/legacy.ts` (`reportsFromDprDocuments`), `src/lib/work/migrate.ts` (v6→v7, `imported.dpr`), `src/lib/work/types.ts` (`scaffold`, `safetyBody`, `storeBody`, `equipment`, `requests`, `legacyLines`), `src/lib/safety-dpr.ts` (`migrateLegacySafetyBody` runs inside the converter), `src/lib/store.tsx` (remove `saveDpr`/`submitDpr`/`reviewDpr`; `submitReport` raises equipment requests through a new `raiseRequestsFromDpr`; `migrateState` drops `dprDocuments`/`dprs`), `src/lib/seed.ts` (key → v10), new `src/lib/work/legacy-view.ts` (`reportsAsDprDocuments(work)`: a **temporary** selector so screens not yet moved keep showing DPRs), plus the "Link to job" action for `legacyLines`.
+### PR 4: DPR desk writes to Work (temporary adapter for unmoved screens)
+- Files: `src/app/(app)/dpr/page.tsx`, `src/app/(app)/dpr/new/page.tsx`, `src/app/(app)/dpr/[id]/page.tsx`, `src/components/dpr/dpr-form.tsx` (painting lines now pick a **job** and enter members, reusing the Work member editor; scaffold lines gain `liftingTrips`), `src/components/dpr/safety-dpr-form.tsx`, `src/app/(app)/approvals/sic/page.tsx` (queue = Work reports), `src/lib/work/types.ts` (`scaffold`, `safetyBody`, `storeBody`, `equipment`, `requests`; key → v7), `src/lib/safety-dpr.ts` (safety body helpers move with it), `src/lib/store.tsx` (remove `saveDpr`/`submitDpr`/`reviewDpr`; `submitReport` raises equipment requests through a new `raiseRequestsFromDpr`; `migrateState` drops `dprDocuments`/`dprs`), `src/lib/seed.ts` (key → v10), new `src/lib/work/legacy-view.ts` (`reportsAsDprDocuments(work)`: a **temporary** selector so screens not moved yet show the new Work reports).
 - Rules: all of §5 now enforced on the only DPR form; §5 *types* (painting & blasting, scaffolding, safety, store); §5 *scaffolding line* incl. lifting & shifting in trips; §5 *Admin as data operator* (`enteredBy`); §10 *each DPR line picks its stage*.
-- Check: **Supervisor** files a DPR on `/dpr/new`, and the job on `/work` moves forward (the twin systems now meet). **SIC** approves on `/approvals/sic`. **Owner** sees old DPRs migrated, with "Needs a job" lines listed. **Finance**: no change in P&L except labour from the new crew.
+- Check: **Supervisor** files a DPR on `/dpr/new`, and the job on `/work` moves forward (the twin systems now meet). **SIC** approves on `/approvals/sic`. **Owner** sees the same DPR on the Owner home and in Work. **Finance**: labour for that day appears in P&L.
 
 ### PR 5: Move the remaining DPR readers; delete the legacy DPR model
-- Files: `src/app/(app)/supervisor/page.tsx`, `src/app/(app)/sic/page.tsx`, `src/app/(app)/owner/page.tsx`, `src/components/owner/site-comparison.tsx`, `src/app/(app)/submissions/page.tsx`, `src/app/(app)/admin/page.tsx`, `src/app/(app)/safety/page.tsx`, `src/app/(app)/store/page.tsx` (store DPR list), `src/app/(app)/attendance/acpl/page.tsx`, `src/lib/acpl.ts` (`matchAcplAgainstApproved` reads approved Work reports), `src/app/(app)/hr/page.tsx` and `src/app/(app)/requests/page.tsx` (`sourceDprId` now holds a report id; link opens the Work report), `src/app/(app)/telegram/page.tsx` + `applyTelegram` (`dpr_note` → note on today's draft report), `src/lib/site-scope.ts`, `src/lib/types.ts` (delete `DprDocument`, legacy `DprEntry`, `DprPaintWorkLine`, and `DprStatus` in favour of Work's), `src/lib/seed.ts`/`seed-sites.ts` (remove legacy DPR seed; the Work seed now carries it), delete `src/lib/work/legacy-view.ts`.
+- Files: `src/app/(app)/supervisor/page.tsx`, `src/app/(app)/sic/page.tsx`, `src/app/(app)/owner/page.tsx`, `src/components/owner/site-comparison.tsx`, `src/app/(app)/submissions/page.tsx`, `src/app/(app)/admin/page.tsx`, `src/app/(app)/safety/page.tsx`, `src/app/(app)/store/page.tsx` (store DPR list), `src/app/(app)/attendance/acpl/page.tsx`, `src/lib/acpl.ts` (`matchAcplAgainstApproved` reads approved Work reports), `src/app/(app)/hr/page.tsx` and `src/app/(app)/requests/page.tsx` (`sourceDprId` now holds a report id; link opens the Work report), `src/app/(app)/telegram/page.tsx` + `applyTelegram` (`dpr_note` → note on today's draft report), `src/lib/site-scope.ts`, `src/lib/types.ts` (delete `DprDocument`, legacy `DprEntry`, `DprPaintWorkLine`, and `DprStatus` in favour of Work's), `src/lib/seed.ts`/`seed-sites.ts` (remove legacy DPR seed), delete `src/lib/work/legacy-view.ts`.
 - Rules: §5 (one DPR everywhere); §4/§12 attendance and ACPL match keep reading approved DPR crews; §19 waiting lists.
-- Check: **Owner** home pending counts = Work reports; site comparison per site. **SIC** home pending. **Supervisor** home "my DPRs". **Finance**: unaffected. Also open Safety, Store, HR, ACPL as **Super Admin** (View as) to confirm they still list DPR data.
+- Check: **Owner** home pending counts = Work reports; site comparison per site. **SIC** home pending. **Supervisor** home "my DPRs". **Finance**: unaffected. Also open Safety, Store, HR, ACPL as **Super Admin** (View as) to confirm they list the new DPRs.
 
-### PR 6: JMS upload into Work; `/jms` on Work
-- Files: `src/lib/work/types.ts` (`Jms` additions, optional `jobId`/`planLineId`/`confirmedOn`, `A1 REJECT`), `src/lib/work/logic.ts` (`jmsDifference`, `supervisorRatings`; make `lineStatus`, `woUsage`, `paymentRows`, `jobPnl` tolerate unlinked/unconfirmed JMS), `src/lib/work/store.tsx` (`uploadJms` with match-on-JMS-no, `linkJmsToJob`, `reviewUploadedJms`; `setJmsStatus` appends `statusLog`), `src/lib/work/events.ts` (`jms_uploaded`, `jms_status`, `jms_unpaid`), `src/lib/work/legacy.ts` (`jmsFromPackages`), `src/lib/work/migrate.ts` (v7→v8, `imported.jms`), `src/app/(app)/jms/page.tsx` (upload form, difference flags, "Not linked to a job", ratings from `supervisorRatings`, Owner "Post incentive"), `src/components/work/work-jms.tsx` (status log, upload info), `src/components/work/work-payments.tsx` (skip unconfirmed).
-- Rules: §10 *upload by Admin*; *check vs job's DPR total between start and end*; *flag any difference*; *bill status comes from the JMS, same JMS no. = stage update*; *Excel figures, PDF proof*; *a closed job is the JMS*; §14 status flow + re-upload rule; §18 *approved vs received* (payments only on SIC-confirmed JMS).
-- Check: **Supervisor**: closing a job still creates a JMS. **SIC** confirms and also reviews an uploaded JMS; the difference vs DPR is shown. **Owner** sees ratings and posts an incentive. **Finance** sees the uploaded JMS in Payments only after SIC confirmation.
+### PR 6: Submitted-JMS upload and comparison with the internal JMS
+- Files: `src/lib/work/types.ts` (`JmsSubmission`, `Jms.submissionId`; key → v8), `src/lib/work/logic.ts` (`compareJms`, `jmsStatus` derived from the submission, `supervisorRatings`), `src/lib/work/store.tsx` (`uploadSubmission` with match on RIL JMS no., `linkSubmission`/`unlinkSubmission`; `setJmsStatus` moves to the submission and writes an event), `src/lib/work/events.ts` (`jms_submitted`, `jms_status`, `jms_linked`, `jms_difference`, `jms_unpaid`), `src/app/(app)/jms/page.tsx` (upload Excel + PDF names, internal vs submitted side by side with differences, "no internal JMS" / "not submitted yet" lists, ratings from `supervisorRatings`, Owner "Post incentive"), `src/components/work/work-jms.tsx` (link + status from submission + audit trail per JMS), `src/components/work/work-activity.tsx` (JMS filter).
+- Rules: §10 *upload by Admin*; *check vs the job's DPR total*; *flag any difference*; *bill status comes from the JMS upload; same JMS no. = stage update*; *Excel figures, PDF proof*; *a closed cycle is the JMS* (Owner decision 2); §14 status flow + re-upload rule; audit log on every step.
+- Check: **Supervisor**: closing a cycle still creates the internal JMS. **SIC** sees internal vs submitted, with differences flagged. **Owner** sees the full trail for one JMS (closed by, uploaded by, linked, status changes) and posts an incentive. **Finance** sees the RIL status from the upload on the Payments row.
 
 ### PR 7: JMS readers in Finance/Owner/SIC; delete `JmsPackage`
 - Files: `src/app/(app)/finance/page.tsx` (payment = `recordPayment`; remove `markJmsPayment` and JMS finance alerts), `src/app/(app)/owner/page.tsx` (ratings, billed/received from Work; remove `billing`), `src/app/(app)/sic/page.tsx`, `src/app/(app)/submissions/page.tsx`, `src/app/(app)/admin/page.tsx`, `src/components/owner/site-comparison.tsx` (billed/received per site from `paymentRows`), `src/lib/store.tsx` (delete `uploadJmsPackage`, `matchJmsLines`, `reviewJmsPackage`, `computeRatings`, `markJmsPayment`; `migrateState` drops `jmsPackages`, `workRatings`, `billing`), `src/lib/types.ts` (delete `JmsPackage`, `JmsLine`, `WorkRating`, `BillingSnapshot`, JMS kinds of `FinanceAlert`), `src/lib/site-scope.ts`, `src/lib/seed.ts` (key → v11), `src/lib/seed-sites.ts`.
 - Rules: §18 *income when payment is received*, *earned not yet received* shown separately, *approved vs received* dashboard; §10 *bill status comes from the JMS*.
-- Check: **Finance** records a payment from Finance; it shows on the Owner `MoneyCard` and in P&L once, not twice. **Owner** dashboard billed/received per site matches Work Payments. **SIC** home shows JMS waiting. **Supervisor**: unaffected.
+- Check: **Finance** records a payment from Finance; it shows on the Owner `MoneyCard` and in P&L once. **Owner** dashboard billed/received per site matches Work Payments. **SIC** home shows cycles waiting to close. **Supervisor**: unaffected.
 
-### PR 8: Paint board on `PaintBatch`; delete `paintStock`
-- Files: `src/lib/work/types.ts` (`PaintBatch` additions, optional `mfg`/`expiry`), `src/lib/work/logic.ts` (`batchLifecycle(b, balances)` derives issued/consumed; `expiryState` → `"unknown"`; `paintVariance`; store stock = `sge_receive` only), `src/lib/work/store.tsx` (`receivePaint`, `advancePaintLifecycle`, `updatePaintBatch`; `issuePaint` from store stock only), `src/lib/work/events.ts` (`paint_received`, `paint_stage`, `paint_variance`), `src/lib/paint-lifecycle.ts` (stage order/labels reused; movement edit rules take a batch), `src/lib/work/legacy.ts` (`batchesFromPaintStock`), `src/lib/work/migrate.ts` (v8→v9, `imported.paint`), `src/app/(app)/store/page.tsx` (board reads Work batches), `src/app/(app)/supervisor/page.tsx` (my paint = `supervisorPaint`, with low/negative flags), `src/app/(app)/owner/page.tsx` (low stock / overdraw / expiry / variance from Work; remove `predictions`), `src/components/work/work-paint.tsx` (lifecycle column, "unknown expiry" slice), `src/app/(app)/telegram/page.tsx` + `applyTelegram` (`stock_receipt` → `receivePaint`), `src/lib/store.tsx` (delete `advancePaintStage`, `updatePaintLine`, `migratePaintStock`; drop `paintStock`, `predictions`), `src/lib/types.ts` (delete `PaintStockLine`, `PredictionAlert`), `src/lib/site-scope.ts`, `src/lib/seed.ts` (key → v12), `src/lib/seed-sites.ts`, `src/lib/work/scenarios.ts`.
-- Rules: §6 *all 8 stages*; *issued into the supervisor's name, can't issue more than the store holds*; *each DPR deducts its litres automatically*; *low / no stock flagged to the supervisor*; *variance alert to Owner, tolerance per MPS from Master Data*; *low stock = left < remaining m² × norm*; *overdraw allowed, negative + flagged*; *month end carries forward*; §17 expiry 60-day warning + pie.
-- Check: **Supervisor** sees their paint balance drop after filing a DPR with litres, and a low-stock flag. **Store** (via Super Admin View as) advances a batch PR → PO → … → SGE receive and issues it. **Owner** gets a variance alert after entering RIL posted litres. **SIC/Finance**: the board is read-only for them, as today.
+### PR 8: Paint board on `PaintBatch` + internal 941/942/261 steps; delete `paintStock`
+- Files: `src/lib/work/types.ts` (`PaintBatch` additions, `PaintStep`, optional `mfg`/`expiry`; key → v9), `src/lib/work/logic.ts` (`boardStage(batch, steps, balances)`, `stepsWaitingForRilRef`, `paintVariance`, `expiryState` → `"unknown"`, store stock = `sge_receive` only), `src/lib/work/store.tsx` (`receivePaint`, `advancePaintLifecycle`; `issuePaint` creates the 941 step and issues from store stock only; `recoMonth` (942 from DPR use), `postMonth` (261), `setRilRef`), `src/lib/work/events.ts` (`paint_received`, `paint_stage`, `paint_step`, `paint_variance`), `src/lib/paint-lifecycle.ts` (stage order/labels reused; "RIL ref allowed once our step exists"), `src/app/(app)/store/page.tsx` (board reads Work batches + steps; reco and post buttons; RIL ref fields), `src/app/(app)/supervisor/page.tsx` (my paint = `supervisorPaint`, with low/negative flags), `src/app/(app)/owner/page.tsx` (low stock / overdraw / expiry / variance / "waiting for RIL ref" from Work; remove `predictions`), `src/components/work/work-paint.tsx` (steps per supervisor + month, "unknown expiry" slice), `src/app/(app)/telegram/page.tsx` + `applyTelegram` (`stock_receipt` → `receivePaint`), `src/lib/store.tsx` (delete `advancePaintStage`, `updatePaintLine`, `migratePaintStock`; drop `paintStock`, `predictions`), `src/lib/types.ts` (delete `PaintStockLine`, `PredictionAlert`), `src/lib/site-scope.ts`, `src/lib/seed.ts` (key → v12), `src/lib/seed-sites.ts`, `src/lib/work/scenarios.ts`.
+- Rules: §6 *all 8 stages*; 941/942/261 tracked internally with RIL numbers as reference (Owner decision 3); *issued into the supervisor's name, can't issue more than the store holds*; *each DPR deducts its litres automatically*; *low / no stock flagged to the supervisor*; *variance alert to Owner, tolerance per MPS from Master Data*; *low stock = left < remaining m² × norm*; *overdraw allowed, negative + flagged*; *month end carries forward*; §17 expiry 60-day warning + pie.
+- Check: **Supervisor** sees the 941 issue in their name and the balance drop after a DPR with litres, plus a low-stock flag. **Store** (via Super Admin View as) moves a batch PR → PO → RIL receive → SGE receive, issues it, runs the month reco (942 litres = DPR use), posts (261), then types RIL's numbers. **Owner** sees "waiting for RIL ref" and a variance alert. **SIC/Finance**: the board is read-only for them, as today.
 
 ### PR 9: Finance entries become Work expenses; delete the legacy ledger
-- Files: `src/lib/work/types.ts` (`Expense` additions, `receipts`), `src/lib/work/logic.ts` (`canEditExpense`, `jobPnl` adds the unmatched-receipts line, today's spend helper), `src/lib/work/store.tsx` (`addExpense` validates §8 fields; `editExpense` with edit log; `removeExpense` Owner-only; `addReceipt`, `matchReceipt`), `src/lib/work/legacy.ts` (`expensesFromFinance`), `src/lib/work/migrate.ts` (v9→v10, `imported.money`), `src/app/(app)/finance/page.tsx` (entry form → `addExpense` with all §8 fields; ledger list = expenses + JMS payments + receipts; wage ledger stays), `src/components/work/work-pnl.tsx` (same form component, edit/history), `src/app/(app)/owner/page.tsx`, `src/app/(app)/sic/page.tsx` ("Today expenses" from Work), `src/components/owner/site-comparison.tsx`, `src/app/(app)/telegram/page.tsx` + `applyTelegram` (`expense` → draft expense for Finance to complete), `src/lib/store.tsx` (delete `addFinance`; drop `finance`), `src/lib/types.ts` (delete `FinanceEntry`), `src/lib/site-scope.ts`, `src/lib/seed.ts` (key → v13), `src/lib/seed-sites.ts`, `src/lib/permissions.ts` (Finance can add expenses).
+- Files: `src/lib/work/types.ts` (`Expense` additions; key → v10), `src/lib/work/logic.ts` (`canEditExpense`, today's spend helper), `src/lib/work/store.tsx` (`addExpense` validates §8 fields; `editExpense` with edit log; `removeExpense` Owner-only and logged), `src/app/(app)/finance/page.tsx` (entry form → `addExpense` with all §8 fields; ledger list = expenses + JMS payments; wage ledger stays), `src/components/work/work-pnl.tsx` (same form component, edit/history), `src/app/(app)/owner/page.tsx`, `src/app/(app)/sic/page.tsx` ("Today expenses" from Work), `src/components/owner/site-comparison.tsx`, `src/app/(app)/telegram/page.tsx` + `applyTelegram` (`expense` → draft expense for Finance to complete), `src/lib/store.tsx` (delete `addFinance`; drop `finance`), `src/lib/types.ts` (delete `FinanceEntry`), `src/lib/site-scope.ts`, `src/lib/seed.ts` (key → v13), `src/lib/seed-sites.ts`, `src/lib/permissions.ts` (Finance can add expenses), `docs/rules-decisions.md` §8 (Finance can add, matching §18).
 - Rules: §8 *who adds* (as updated by §18: Owner, SA, Finance), *no approval: posts on save*, *required fields*, *same-day edit by enterer, later Owner only, all edits logged*; §18 *direct job costs*, *overheads shared by labour-days*, *results per job/site/month*, *access*.
-- ⚠ Update `docs/rules-decisions.md` §8 in this PR to say Finance can add (already stated in §18, but §8 still reads "Owner / Super Admin only").
 - Check: **Finance** adds an expense with every required field, edits it the same day, and can't edit yesterday's. **Owner** edits yesterday's and sees the edit in the activity log; P&L moves by that amount. **SIC** home "Today expenses" matches. **Supervisor**: no finance access.
 
 ### PR 10: Cleanup and docs
-- Delete old storage keys after migration (`LEGACY_STORAGE_KEYS` v9–v12), remove the `DprEntry` copies of `supervisorId`/`enteredBy` (read from the report), drop now-unused helpers in `src/lib/store.tsx`, `src/lib/types.ts`, `src/lib/seed.ts`, `src/lib/seed-sites.ts`.
-- Docs: `AGENTS.md` §2 (remove "older screens … not yet joined") and §5 layout (new files); `docs/build-plan.md` data model aligned to the merged shapes (`dprs` + `dpr_lines` + `dpr_crew`, `jms` + `jms_status_log`, `paint_batches` with lifecycle, `finance_entries` → `expenses` + `receipts`) so the Supabase schema is written once, for one model.
-- Check: all four roles, full flow: plan → job → DPR (`/dpr/new`) → SIC approve → close → JMS → payment → P&L.
+- Remove old storage keys left in browsers, remove the `DprEntry` copies of `supervisorId`/`enteredBy` (read from the report), drop now-unused helpers in `src/lib/store.tsx`, `src/lib/types.ts`, `src/lib/seed.ts`, `src/lib/seed-sites.ts`.
+- Docs: `AGENTS.md` §2 (remove "older screens … not yet joined") and §5 layout (new files); `docs/build-plan.md` data model aligned to the merged shapes (`dprs` + `dpr_lines` + `dpr_crew`, `jms` + `jms_submissions` + `jms_status_log`, `paint_batches` + `paint_steps`, `expenses`) so the Supabase schema is written once, for one model.
+- Check: all four roles, full flow: plan → job → DPR (`/dpr/new`) → SIC approve → SIC closes cycle → internal JMS → upload submitted JMS → compare → payment → P&L.
 
 ---
 
-## 7. Decisions this plan makes (and the ones for the Owner)
-Made here, following the existing rules:
+## 7. Decisions
+From the Owner (2026-10-12):
+- Fresh start from October 2026; past data uploaded later, and a P&L change from that is fine.
+- SIC closes a cycle → internal JMS, compared with the uploaded submitted JMS; audit log on every step.
+- 941 / 942 / 261 are tracked internally as our own steps; RIL's numbers are reference only.
+
+Made in this plan, following the existing rules:
 - Work is the surviving model for all four pairs (AGENTS.md §1).
-- `issued` / `consumed` paint stages and "SGE used" litres are derived from DPRs, not typed (§6 *consumption is automatic*).
+- Paint "issued" / "consumed" and litres used are derived from issues and DPRs, never typed (§6 *consumption is automatic*).
 - Ratings are derived, not stored; posting an incentive to wages is an explicit Owner action.
 - `wageLedger` stays as payroll and does not enter P&L (avoids double-counting labour, §18).
-- Old painting lines with no job are kept read-only and not counted until Admin links them.
-
-Need an Owner answer before the named PR merges:
-1. **PR 3:** may SIC confirm a job → JMS while one of its DPRs is still unapproved? Plan says **no**.
-2. **PR 9:** legacy "RA bill" income with no JMS: keep as "received, not matched" and show it in P&L on its own line (plan), or leave it out of P&L?
-3. **PR 9:** old finance expenses enter P&L as site overheads. That changes past months' profit. OK?
+- When the SIC closes a cycle, draft or sent-back DPRs block it, and submitted ones are approved by the close (logged). **Owner to confirm** before PR 3 merges.
 
 ## 8. Why this order
-DPR comes first because JMS (qty from final-shade DPRs), paint (litres from DPRs) and P&L (labour from DPR crews) all depend on it. JMS comes before money because income is the JMS payment. Paint and money are independent of each other, so PRs 8 and 9 can swap. Every PR moves writers first, keeps readers working (adapter or migrated data), and deletes the legacy model only in the PR where its last reader leaves.
+DPR comes first because JMS (qty from final-shade DPRs), paint (litres from DPRs) and P&L (labour from DPR crews) all depend on it. JMS comes before money because income is the JMS payment. Paint and money are independent of each other, so PRs 8 and 9 can swap. Every PR moves writers first, keeps readers working (temporary adapter), and deletes the legacy model only in the PR where its last reader leaves.
