@@ -15,13 +15,17 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { dprCrew, validateDprForSubmit } from "@/lib/dpr-validate";
 import { useStore } from "@/lib/store";
+import { effectivePermission } from "@/lib/permissions";
+import { reviewEvent, reviewLine } from "@/lib/dpr-review";
+import { useWork } from "@/lib/work/store";
 import type { DprDocument } from "@/lib/types";
 
 function DprDetailPage() {
   const params = useParams();
   const id = String(params.id);
   const router = useRouter();
-  const { state, saveDpr, submitDpr, reviewDpr, unlockDpr } = useStore();
+  const { state, currentAccount, saveDpr, submitDpr, reviewDpr, unlockDpr } = useStore();
+  const { notify } = useWork();
   const [unlockReason, setUnlockReason] = useState("");
   const original = state.dprDocuments.find((d) => d.id === id);
   const [draft, setDraft] = useState<DprDocument | null>(null);
@@ -42,10 +46,9 @@ function DprDetailPage() {
   const canSubmit =
     canEdit && doc && (doc.status === "draft" || doc.status === "sic_rejected");
 
+  // SIC, Owner, Super Admin, and Admin on the SIC's behalf (B04)
   const canReview =
-    (state.currentRole === "sic" ||
-      state.currentRole === "owner" ||
-      state.currentRole === "super_admin") &&
+    effectivePermission(currentAccount, state.currentRole, "approvals", "approve") &&
     doc?.status === "submitted";
 
   if (!original || !doc) {
@@ -98,9 +101,10 @@ function DprDetailPage() {
       setMsg(r.error ?? "Review blocked");
       return;
     }
+    notify(reviewEvent({ doc, decision, note: sicNote, reviewerStaffId: state.currentUserId ?? "", role: state.currentRole, staff: state.staff, users: state.users }));
     setMsg(
       decision === "sic_approved"
-        ? "Approved — attendance derived for ACPL match."
+        ? "Approved — work quantities accepted."
         : "Rejected with note."
     );
     router.push("/approvals/sic");
@@ -141,12 +145,18 @@ function DprDetailPage() {
         </div>
       ) : null}
 
-      {doc.sicNote ? (
+      {doc.sicNote || reviewLine(doc, (id) => state.staff.find((s) => s.id === id)?.name ?? id) ? (
         <Panel>
           <div className="text-xs font-semibold uppercase text-[var(--sge-ink-3)]">
-            SIC note
+            Review
           </div>
-          <p className="mt-1 text-sm">{doc.sicNote}</p>
+          {reviewLine(doc, (id) => state.staff.find((s) => s.id === id)?.name ?? id) ? (
+            <p className="mt-1 text-sm font-semibold">
+              {reviewLine(doc, (id) => state.staff.find((s) => s.id === id)?.name ?? id)}
+              {doc.sicReviewedAt ? <span className="ml-2 text-xs font-normal text-[var(--sge-ink-3)]">{new Date(doc.sicReviewedAt).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}</span> : null}
+            </p>
+          ) : null}
+          {doc.sicNote ? <p className="mt-1 text-sm">{doc.sicNote}</p> : null}
         </Panel>
       ) : null}
 
@@ -190,7 +200,7 @@ function DprDetailPage() {
       {doc.status === "sic_approved" && (state.currentRole === "owner" || state.currentRole === "super_admin") ? (
         <Panel>
           <h3 className="mb-2 font-heading text-sm font-bold">Unlock for editing (Owner)</h3>
-          <p className="mb-2 text-xs text-[var(--sge-ink-3)]">The DPR goes back to draft and leaves attendance until it is approved again. The reason is logged.</p>
+          <p className="mb-2 text-xs text-[var(--sge-ink-3)]">The DPR goes back to draft and its attendance is taken out until it is submitted again. The reason is logged.</p>
           <div className="flex flex-wrap items-end gap-2">
             <Textarea className="min-w-[260px] flex-1" rows={2} value={unlockReason} onChange={(e) => setUnlockReason(e.target.value)} placeholder="Why it needs changing" />
             <Button
@@ -210,7 +220,9 @@ function DprDetailPage() {
 
       {canReview ? (
         <Panel>
-          <h3 className="mb-2 font-heading text-sm font-bold">SIC review</h3>
+          <h3 className="mb-2 font-heading text-sm font-bold">
+            {state.currentRole === "admin" ? "Review on behalf of the SIC" : "SIC review"}
+          </h3>
           <Label>Approval / rejection note (a reason is required to reject)</Label>
           <Textarea
             className="mt-1 mb-3"

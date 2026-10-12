@@ -17,6 +17,7 @@ import {
 } from "./acpl";
 import { dprCrew, validateDprForSubmit } from "./dpr-validate";
 import { approveBlock, checkCrewRequest } from "./crew";
+import { reviewedAsFor, reviewLine, siteSicId } from "./dpr-review";
 import { scoreFromMatchRatio } from "./estimate";
 import { effectivePermission } from "./permissions";
 import { PAINT_STAGE_ORDER } from "./paint-lifecycle";
@@ -998,6 +999,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         const doc = s.dprDocuments.find((d) => d.id === id);
         if (!doc || doc.status !== "submitted") return s;
         const now = new Date().toISOString();
+        // B04: Admin reviews on the SIC's behalf; record both people
+        const reviewedAs = reviewedAsFor(s.currentRole);
+        const onBehalfOf = reviewedAs === "admin_for_sic" ? siteSicId(s.staff, s.users, doc.siteId) : undefined;
         const dprDocuments = s.dprDocuments.map((d) =>
           d.id === id
             ? {
@@ -1006,9 +1010,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
                 sicNote: note,
                 sicReviewedBy: s.currentUserId ?? "st-sic",
                 sicReviewedAt: now,
+                reviewedAs,
+                reviewedOnBehalfOf: onBehalfOf,
                 updatedAt: now,
               }
             : d
+        );
+        const line = reviewLine(
+          { status: decision, sicReviewedBy: s.currentUserId ?? "st-sic", reviewedAs, reviewedOnBehalfOf: onBehalfOf },
+          (sid) => s.staff.find((x) => x.id === sid)?.name ?? sid
         );
 
         // Attendance was recorded at submit (docs §20); review covers the work quantities
@@ -1020,7 +1030,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
               next,
               "approvals",
               decision === "sic_approved" ? "approve" : "reject",
-              `${id} · ${note || decision}`,
+              `${id} · ${line ?? decision}${note ? ` · ${note}` : ""}`,
               doc.plant
             ),
             ...s.auditLog,

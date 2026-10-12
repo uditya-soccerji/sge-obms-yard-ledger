@@ -14,9 +14,15 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useStore } from "@/lib/store";
+import { reviewEvent, reviewLine, siteSicId } from "@/lib/dpr-review";
+import { useWork } from "@/lib/work/store";
 
 function SicApprovalsPage() {
   const { state, reviewDpr } = useStore();
+  const { notify } = useWork();
+  const nameOf = (id: string) => state.staff.find((s) => s.id === id)?.name ?? id;
+  // B04: Admin approves on the SIC's behalf; say so before they act
+  const forSic = state.currentRole === "admin";
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [msg, setMsg] = useState<string | null>(null);
 
@@ -26,14 +32,18 @@ function SicApprovalsPage() {
     .slice(0, 8);
 
   function act(id: string, decision: "sic_approved" | "sic_rejected") {
+    const doc = state.dprDocuments.find((d) => d.id === id);
     const r = reviewDpr(id, decision, notes[id] ?? "");
     if (!r.ok) {
       setMsg(r.error ?? "Review blocked");
       return;
     }
+    if (doc) {
+      notify(reviewEvent({ doc, decision, note: notes[id] ?? "", reviewerStaffId: state.currentUserId ?? "", role: state.currentRole, staff: state.staff, users: state.users }));
+    }
     setMsg(
       decision === "sic_approved"
-        ? "Approved — labour attendance derived for ACPL."
+        ? `Approved — work quantities accepted${forSic ? " on the SIC's behalf (the SIC is notified)" : ""}.`
         : "Rejected — sent back to the supervisor with your reason."
     );
   }
@@ -42,8 +52,13 @@ function SicApprovalsPage() {
     <div className="sge-enter space-y-6">
       <SectionHeader
         title="SIC approval inbox"
-        subtitle="Approve or reject supervisor / store / safety DPRs. Approved DPRs feed attendance & JMS matching."
+        subtitle="Approve or reject supervisor / store / safety DPRs. Attendance is already recorded at submit; approval accepts the work quantities."
       />
+      {forSic ? (
+        <div className="rounded-md border border-[var(--sge-brass)]/40 bg-[var(--sge-brass-wash)] px-3 py-2 text-sm text-[var(--sge-brass-ink)]">
+          You are reviewing as Admin <b>on behalf of the SIC</b>. Each decision is logged with your name and the site&apos;s SIC, and the SIC is notified.
+        </div>
+      ) : null}
 
       <div className="grid gap-3 sm:grid-cols-3">
         <KpiTile label="Pending" value={String(pending.length)} tone="accent" />
@@ -82,6 +97,7 @@ function SicApprovalsPage() {
           <div className="space-y-4">
             {pending.map((d) => {
               const name = state.staff.find((s) => s.id === d.submitterId)?.name;
+              const sicId = forSic ? siteSicId(state.staff, state.users, d.siteId) : undefined;
               return (
                 <div
                   key={d.id}
@@ -99,6 +115,11 @@ function SicApprovalsPage() {
                         <span className="text-xs text-[var(--sge-ink-3)]">
                           {name}
                         </span>
+                        {forSic ? (
+                          <span className="text-xs text-[var(--sge-brass-ink)]">
+                            for SIC {sicId ? nameOf(sicId) : "(no SIC on this site)"}
+                          </span>
+                        ) : null}
                       </div>
                       <p className="mt-1 text-sm text-[var(--sge-ink-2)]">
                         {d.note}
@@ -158,6 +179,7 @@ function SicApprovalsPage() {
               <span>
                 {d.date} · {d.plant} ·{" "}
                 {state.staff.find((s) => s.id === d.submitterId)?.name}
+                <span className="block text-xs text-[var(--sge-ink-3)]">{reviewLine(d, nameOf)}</span>
               </span>
               <StatusPill
                 tone={d.status === "sic_approved" ? "ok" : "crit"}

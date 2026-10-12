@@ -81,7 +81,9 @@ const ROLE_MATRIX: Record<RoleId, Partial<Record<ModuleId, PermissionAction[]>>>
   },
   admin: {
     admin: ["view", "create", "update", "upload"],
-    dpr: ["view", "create", "update", "upload", "submit"],
+    // docs §5 (B04): Admin approves work quantities on the SIC's behalf; both are logged
+    dpr: ["view", "create", "update", "upload", "submit", "approve"],
+    approvals: ["view", "approve"],
     acpl: ["view", "upload"],
     jms: ["view", "upload", "update"],
     calculators: ["view"],

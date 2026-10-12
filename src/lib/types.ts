@@ -557,6 +557,10 @@ export interface DprDocument {
   sicNote?: string;
   sicReviewedBy?: string;
   sicReviewedAt?: string;
+  /** Capacity of the reviewer; "admin_for_sic" = Admin approving on the SIC's behalf (docs §5, B04) */
+  reviewedAs?: "sic" | "admin_for_sic" | "owner" | "super_admin";
+  /** The site's SIC (staff id) when Admin reviewed on their behalf */
+  reviewedOnBehalfOf?: string;
   createdAt: string;
   updatedAt: string;
 }

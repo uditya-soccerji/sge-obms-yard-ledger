@@ -25,7 +25,9 @@ export type EventKind =
   | "crew_changed"
   | "crew_requested"
   | "crew_released"
-  | "crew_decided";
+  | "crew_decided"
+  // DPR reviewed (B04): the submitter, and the SIC when Admin acted for them
+  | "dpr_reviewed";
 
 export interface WorkEvent {
   id: string;
@@ -61,7 +63,7 @@ export interface Viewer {
 }
 
 /** Events that need someone to act, or tell the submitter the outcome: instant. */
-export const INSTANT: EventKind[] = ["job_closed", "jms_confirmed", "job_sent_back", "crew_requested", "crew_released", "crew_decided"];
+export const INSTANT: EventKind[] = ["job_closed", "jms_confirmed", "job_sent_back", "crew_requested", "crew_released", "crew_decided", "dpr_reviewed"];
 
 export const KIND_LABEL: Record<EventKind, string> = {
   dpr_added: "DPR entry",
@@ -83,6 +85,7 @@ export const KIND_LABEL: Record<EventKind, string> = {
   crew_requested: "Crew request",
   crew_released: "Labourer released",
   crew_decided: "Crew request decided",
+  dpr_reviewed: "DPR reviewed",
 };
 
 const onSite = (v: Viewer, siteId: string) => v.siteIds.length === 0 || v.siteIds.includes(siteId);
@@ -126,6 +129,9 @@ export function isFor(e: WorkEvent, v: Viewer): boolean {
     case "crew_requested":
     case "crew_released":
     case "crew_decided":
+      return mine || v.role === "sic";
+    case "dpr_reviewed":
+      // §19: the submitter hears the outcome; §5 (B04): the SIC hears when Admin approved for them
       return mine || v.role === "sic";
   }
 }

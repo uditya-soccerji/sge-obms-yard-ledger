@@ -12,7 +12,7 @@ Screenshots, when saved as files, go in `docs/bugs/` as `B<nn>-<n>.png`. Never i
 | B01 | 2026-10-13 | Super Admin · all sites · Master Data → Sites | Can't type a comma (or a space after a word) in "Plants (comma)", so plants can't be added on Add site or Edit | fixed |
 | B02 | 2026-10-13 | Super Admin · MTF · Master Data → Sites | Feature: plants need locations under them, and each plant/location needs an RP (MTF runs RP2 and RP5) | fixed (migration to apply at deploy) |
 | B03 | 2026-10-13 | Supervisor (Prasan Da, viewed as) · MTF · DPR → New | New supervisor's DPR shows an empty Labour attendance, and there's no way to give them labourers | fixed (shared database still to do) |
-| B04 | 2026-10-13 | Admin · DPR approvals | Admin approves DPR work quantities on SIC's behalf; both logged | open (rule agreed) |
+| B04 | 2026-10-13 | Admin · DPR approvals | Admin approves DPR work quantities on SIC's behalf; both logged | fixed |
 | B05 | 2026-10-13 | Supervisor · DPR → Equipment assigned | Equipment needs a detailed per-supervisor "setup" list (kinds, expiry, FEFO/FIFO), with expiry added by the supervisor | open (ready to build) |
 | B06 | 2026-10-13 | Store / Central store · dashboard | Equipment status changes reach SIC + site store + central store; requests board with urgent first and status buttons | open (ready to build) |
 | B07 | 2026-10-13 | Supervisor (Prasan Da) · MTF · DPR → Painting/blasting work | Line needs plant, location, activity, area m², MPS, paint type and litres per paint type | fixed |
@@ -142,6 +142,18 @@ Screenshots, when saved as files, go in `docs/bugs/` as `B<nn>-<n>.png`. Never i
 - Owner rule (2026-10-13, `rules-decisions.md` §5): Admin may approve a DPR's work quantities **on behalf of the SIC**. Both are logged: who approved, as whom ("Admin for SIC <name>").
 - Today: Admin's rights have `dpr: view/create/update/upload/submit` with no `approve` (`ROLE_MATRIX.admin`, `src/lib/permissions.ts`). `reviewDpr` records only `sicReviewedBy`.
 - Fix plan: give Admin `dpr: approve` and `approvals: view/approve` for their sites. The review record gets `approvedBy`, `approvedAs: "sic" | "admin_for_sic"` and `onBehalfOf` (the site's SIC). Audit/event text: "Approved by N. Sharma (Admin) on behalf of R. Mehta (SIC)". The SIC gets a notification that Admin approved.
+
+- Fix (2026-10-13, branch `fix/bugs-2026-10-13`):
+  - Rights: Admin gets `dpr: approve` and `approvals: view, approve`, plus an **Approvals** tab under Operations.
+  - Record: `DprDocument.reviewedAs` (`sic` | `admin_for_sic` | `owner` | `super_admin`) and `reviewedOnBehalfOf` (the site's SIC, found by `siteSicId` in new `src/lib/dpr-review.ts`).
+  - The audit entry, the inbox's "Recent decisions" and the DPR page all show e.g. **"Approved by N. Sharma (Admin) on behalf of R. Mehta (SIC)"** (`reviewLine`).
+  - Notification `dpr_reviewed` (instant): the submitter (§19) and the SIC. A send-back is flagged as a problem.
+  - Admin sees a banner "You are reviewing as Admin on behalf of the SIC…", and each DPR shows "for SIC <name>".
+  - Approval texts updated: attendance is recorded at submit (B03); approval accepts the work quantities. The review time shows in Indian time.
+- Verified on `npm run dev`:
+  - As @admin: the Approvals tab, banner and "for SIC R. Mehta" appear. Approving K. Solanki's DPR with note "Checked against site log" gave "Approved — work quantities accepted on the SIC's behalf (the SIC is notified)". Stored: `reviewedAs: admin_for_sic`, `reviewedOnBehalfOf: st-sic`, audit "Approved by N. Sharma (Admin) on behalf of R. Mehta (SIC) · Checked against site log".
+  - As @sic: the bell showed it instantly with that line; the DPR page's Review panel shows it with "13 Oct 2026, 4:46 am".
+  - `tsc` + `eslint src` clean.
 
 ### B05: Supervisor equipment "setup", in detail
 - Ask: under each supervisor, a **setup** listing every item assigned: Compressor, Hopper, Airless spray painting machine, Harness, PPE kit, IFR, Helmet, Gloves, Rope access. Each with expiry, opening in detail. List order can be **FEFO** (first expiry first out) or **FIFO** (first issued first out). The **supervisor can add the expiry** himself.

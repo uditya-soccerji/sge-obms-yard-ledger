@@ -66,6 +66,7 @@ const ROLE_PILLS: Record<RoleId, OpsPill[]> = {
   ],
   admin: [
     { id: "admin", label: "Uploads", module: "admin" },
+    { id: "approvals", label: "Approvals", module: "approvals" },
     { id: "dpr", label: "DPR", module: "dpr" },
     { id: "acpl", label: "ACPL", module: "acpl" },
     { id: "jms", label: "JMS", module: "jms" },
