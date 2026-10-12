@@ -1,5 +1,6 @@
 "use client";
 
+import { guarded } from "@/components/shared/require-module";
 import { useState } from "react";
 import Link from "next/link";
 import {
@@ -26,7 +27,7 @@ import { MoneyCard } from "@/components/work/money-card";
 import { useStore } from "@/lib/store";
 import type { WageLedgerEntry } from "@/lib/types";
 
-export default function FinancePage() {
+function FinancePage() {
   const {
     state,
     addFinance,
@@ -53,6 +54,8 @@ export default function FinancePage() {
   const entrySite = entrySitePick || entrySiteId(state);
   const siteCode = (id: string) => state.sites.find((s) => s.id === id)?.code ?? "";
   const [flagSic, setFlagSic] = useState(false);
+  const [payMsg, setPayMsg] = useState<string | null>(null);
+  const [paying, setPaying] = useState<Record<string, string>>({});
 
   const today = "2026-10-05";
   const todayEntries = state.finance.filter((f) => f.date === today);
@@ -151,6 +154,7 @@ export default function FinancePage() {
             </Button>
           </Link>
         </div>
+        {payMsg ? <p className="mb-2 text-xs text-[var(--sge-ink-2)]">{payMsg}</p> : null}
         {state.jmsPackages.length === 0 ? (
           <EmptyState
             title="No JMS packages"
@@ -166,25 +170,44 @@ export default function FinancePage() {
                 <div className="font-medium">{p.label}</div>
                 <div className="font-mono text-[11px] text-[var(--sge-ink-3)]">
                   expected {formatINR(p.expectedIncome)} · {p.status}
+                  {p.paymentReceived && p.paymentAmount != null ? ` · received ${formatINR(p.paymentAmount)}` : ""}
                 </div>
               </div>
               <div className="flex items-center gap-2">
                 <StatusPill tone={p.paymentReceived ? "ok" : "warn"}>
                   {p.paymentReceived ? "received" : "due"}
                 </StatusPill>
-                {!p.paymentReceived ? (
-                  <Button
-                    size="sm"
-                    onClick={() => markJmsPayment(p.id, true)}
-                  >
-                    Mark received
-                  </Button>
+                {!p.paymentReceived && p.status !== "sic_approved" ? (
+                  <span className="text-xs text-[var(--sge-ink-3)]">Waiting for SIC approval</span>
                 ) : null}
-                {!p.paymentReceived ? (
+                {!p.paymentReceived && p.status === "sic_approved" ? (
+                  paying[p.id] != null ? (
+                    <form
+                      className="flex items-center gap-1"
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        const r = markJmsPayment(p.id, true, { amount: Number(paying[p.id]) });
+                        setPayMsg(r.ok ? `Payment recorded for ${p.label}.` : r.error ?? "Couldn't record the payment");
+                        if (r.ok) setPaying((x) => { const n = { ...x }; delete n[p.id]; return n; });
+                      }}
+                    >
+                      <Input className="h-8 w-32" type="number" min="0" step="0.01" aria-label="Amount received" value={paying[p.id]} onChange={(e) => setPaying((x) => ({ ...x, [p.id]: e.target.value }))} />
+                      <Button size="sm" type="submit">Save</Button>
+                    </form>
+                  ) : (
+                    <Button size="sm" onClick={() => setPaying((x) => ({ ...x, [p.id]: String(p.expectedIncome) }))}>
+                      Mark received
+                    </Button>
+                  )
+                ) : null}
+                {!p.paymentReceived && p.status === "sic_approved" ? (
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() => markJmsPayment(p.id, false, "Still outstanding")}
+                    onClick={() => {
+                      const r = markJmsPayment(p.id, false);
+                      setPayMsg(r.ok ? `${p.label} flagged to SIC as still due.` : r.error ?? "Couldn't flag it");
+                    }}
                   >
                     Flag due → SIC
                   </Button>
@@ -437,3 +460,6 @@ export default function FinancePage() {
     </div>
   );
 }
+
+// Route guard: only roles that may use this page get past the URL
+export default guarded("finance", FinancePage);

@@ -1,12 +1,13 @@
 "use client";
 
+import { guarded } from "@/components/shared/require-module";
 import { useState } from "react";
 import { Panel, SectionHeader } from "@/components/shared/ui-bits";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { areaFromDims } from "@/lib/paint-calc";
 
-export default function AreaScopePage() {
+function AreaScopePage() {
   const [length, setLength] = useState(40);
   const [width, setWidth] = useState(12);
   const [faces, setFaces] = useState(1);
@@ -63,3 +64,6 @@ export default function AreaScopePage() {
     </div>
   );
 }
+
+// Route guard: only roles that may use this page get past the URL
+export default guarded("calculators", AreaScopePage);

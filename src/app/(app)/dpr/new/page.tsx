@@ -1,5 +1,6 @@
 "use client";
 
+import { guarded } from "@/components/shared/require-module";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 import { blankDpr, DprForm } from "@/components/dpr/dpr-form";
@@ -18,6 +19,7 @@ import {
   defaultDprSubmitterType,
 } from "@/lib/paint-lifecycle";
 import { useStore } from "@/lib/store";
+import { dprCrew, validateDprForSubmit } from "@/lib/dpr-validate";
 import { entrySiteId } from "@/lib/site-scope";
 import type { DprDocument, DprSubmitterType } from "@/lib/types";
 
@@ -28,7 +30,7 @@ const TYPE_LABEL: Record<DprSubmitterType, string> = {
   store: "Store Keeper",
 };
 
-export default function NewDprPage() {
+function NewDprPage() {
   const { state, saveDpr, submitDpr } = useStore();
   const router = useRouter();
 
@@ -96,6 +98,8 @@ export default function NewDprPage() {
     );
   }
 
+  const [problems, setProblems] = useState<string[]>([]);
+
   function handleSave(andSubmit: boolean) {
     const next = { ...doc, submitterId, submitterType };
     // Strip wrong-type bodies for safety (no paint fields)
@@ -116,7 +120,15 @@ export default function NewDprPage() {
       next.scaffoldWork = undefined;
       next.safetyBody = undefined;
     }
-    saveDpr(next);
+    if (andSubmit) {
+      // docs §5: permit + TBT, every crew member marked, quantity or a reason
+      const plants = state.sites.find((x) => x.id === next.siteId)?.plants ?? [];
+      const found = validateDprForSubmit(next, dprCrew(next, state.labourers), plants);
+      setProblems(found);
+      if (found.length) return;
+    }
+    const r = saveDpr(next);
+    if (!r.ok) return setProblems([r.error ?? "Save blocked"]);
     if (andSubmit) submitDpr(next.id);
     router.push(`/dpr/${next.id}`);
   }
@@ -203,6 +215,15 @@ export default function NewDprPage() {
 
       <DprForm value={doc} onChange={setDoc} />
 
+      {problems.length ? (
+        <div className="rounded-md border border-[var(--sge-crit)]/30 bg-[var(--sge-crit-wash)] px-3 py-2 text-sm text-[var(--sge-crit)]">
+          <div className="font-semibold">Fix these before submitting to SIC:</div>
+          <ul className="mt-1 list-inside list-disc">
+            {problems.map((p) => <li key={p}>{p}</li>)}
+          </ul>
+        </div>
+      ) : null}
+
       <div className="flex flex-wrap gap-2">
         <Button type="button" variant="outline" onClick={() => handleSave(false)}>
           Save draft
@@ -214,3 +235,6 @@ export default function NewDprPage() {
     </div>
   );
 }
+
+// Route guard: only roles that may use this page get past the URL
+export default guarded("dpr", NewDprPage, "create");

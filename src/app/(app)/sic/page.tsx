@@ -1,5 +1,6 @@
 "use client";
 
+import { guarded } from "@/components/shared/require-module";
 import Link from "next/link";
 import {
   EmptyState,
@@ -12,7 +13,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { useStore } from "@/lib/store";
 
-export default function SicHomePage() {
+function SicHomePage() {
   const { state } = useStore();
   const today = "2026-10-05";
   const pending = state.dprDocuments.filter((d) => d.status === "submitted");
@@ -149,3 +150,6 @@ export default function SicHomePage() {
     </div>
   );
 }
+
+// Route guard: only roles that may use this page get past the URL
+export default guarded("sic", SicHomePage);

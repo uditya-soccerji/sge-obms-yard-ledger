@@ -1,5 +1,6 @@
 "use client";
 
+import { guarded } from "@/components/shared/require-module";
 import Link from "next/link";
 import { useState } from "react";
 import {
@@ -20,7 +21,7 @@ import {
 import { useStore } from "@/lib/store";
 import type { AttendanceStatus } from "@/lib/types";
 
-export default function HrHomePage() {
+function HrHomePage() {
   const { state, markAttendance } = useStore();
   const today = "2026-10-05";
   const [msg, setMsg] = useState<string | null>(null);
@@ -227,3 +228,6 @@ export default function HrHomePage() {
     </div>
   );
 }
+
+// Route guard: only roles that may use this page get past the URL
+export default guarded("hr", HrHomePage);

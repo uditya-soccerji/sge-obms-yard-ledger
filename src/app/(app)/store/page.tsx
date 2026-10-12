@@ -1,5 +1,6 @@
 "use client";
 
+import { guarded } from "@/components/shared/require-module";
 import Link from "next/link";
 import {
   EmptyState,
@@ -20,7 +21,7 @@ import {
 import { useStore } from "@/lib/store";
 import type { PaintLifecycleStage } from "@/lib/types";
 
-export default function StoreHomePage() {
+function StoreHomePage() {
   const { state, advancePaintStage, updatePaintLine } = useStore();
 
   const byStage = PAINT_STAGE_ORDER.map((stage) => ({
@@ -371,3 +372,6 @@ function StageColumn({
     </div>
   );
 }
+
+// Route guard: only roles that may use this page get past the URL
+export default guarded("store", StoreHomePage);

@@ -200,6 +200,8 @@ export type AcplMatchFlag =
   | "match"
   | "dpr_only"
   | "acpl_only"
+  /** Absent / leave / off on the DPR, but punched in at the gate */
+  | "punched_but_absent"
   | "time_mismatch";
 
 export type AcplResolveStatus = "open" | "resolved_dpr" | "resolved_acpl" | "dismissed";
@@ -507,6 +509,12 @@ export interface DprDocument {
   scaffoldWork?: DprScaffoldWorkLine[];
   safetyBody?: DprSafetyBody;
   storeBody?: DprStoreBody;
+  /** Work permit seen and in force (docs §5: required before submitting) */
+  permitOk?: boolean;
+  /** Toolbox talk held with the crew (docs §5: required before submitting) */
+  tbtDone?: boolean;
+  /** Why the DPR reports no quantity, when it reports none (docs §5) */
+  zeroReason?: string;
   sicNote?: string;
   sicReviewedBy?: string;
   sicReviewedAt?: string;
@@ -625,6 +633,9 @@ export interface AcplMatchRow {
   flag: AcplMatchFlag;
   dprStatus?: AttendanceStatus;
   dprInTime?: string;
+  dprOutTime?: string;
+  /** How the punch was tied to the labourer: EP, or name when the EP was unknown (docs §12) */
+  matchedBy?: "ep" | "name";
   acplInTime?: string;
   acplOutTime?: string;
   resolveStatus: AcplResolveStatus;
@@ -643,8 +654,11 @@ export interface JmsLine {
   unit: "m2" | "m3";
   rateInr: number;
   amountInr: number;
+  /** First matched DPR (rating is credited to its submitter) */
   matchedDprId?: string;
   matchedWorkLineId?: string;
+  /** Every DPR work line summed into dprClaimedQty */
+  matchedWorkLineIds?: string[];
   dprClaimedQty?: number;
   matchRatio?: number;
 }
@@ -662,6 +676,8 @@ export interface JmsPackage {
   expectedIncome: number;
   paymentReceived: boolean;
   paymentReceivedAt?: string;
+  /** Amount actually received (may differ from expectedIncome) */
+  paymentAmount?: number;
   paymentNote?: string;
   /** Site this row belongs to (unset = company-wide). */
   siteId?: string;
@@ -707,6 +723,8 @@ export interface WageLedgerEntry {
   amount: number;
   note: string;
   flaggedToSic?: boolean;
+  /** Incentive drafted from this JMS package's ratings (re-running ratings replaces it) */
+  jmsPackageId?: string;
   /** Site this row belongs to (unset = company-wide). */
   siteId?: string;
 }

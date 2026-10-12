@@ -1,5 +1,6 @@
 "use client";
 
+import { guarded } from "@/components/shared/require-module";
 import Link from "next/link";
 import {
   EmptyState,
@@ -12,7 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useStore } from "@/lib/store";
 
-export default function SafetyHomePage() {
+function SafetyHomePage() {
   const { state, toggleSafetyItem, signSafetyDay } = useStore();
   const day = state.safetyDays[0];
   const safetyDprs = state.dprDocuments.filter(
@@ -199,3 +200,6 @@ export default function SafetyHomePage() {
     </div>
   );
 }
+
+// Route guard: only roles that may use this page get past the URL
+export default guarded("safety", SafetyHomePage);

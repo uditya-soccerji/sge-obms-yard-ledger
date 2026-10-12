@@ -1,5 +1,6 @@
 "use client";
 
+import { guarded } from "@/components/shared/require-module";
 import {
   EmptyState,
   formatINR,
@@ -18,7 +19,7 @@ import {
 import { useStore } from "@/lib/store";
 import { useMemo, useState } from "react";
 
-export default function LabourerHomePage() {
+function LabourerHomePage() {
   const { state, currentAccount, updateLabourer } = useStore();
   const isLabourerOnly = state.currentRole === "labourer";
   const lockedId = isLabourerOnly
@@ -293,3 +294,6 @@ export default function LabourerHomePage() {
     </div>
   );
 }
+
+// Route guard: only roles that may use this page get past the URL
+export default guarded("labourer", LabourerHomePage);

@@ -1,12 +1,13 @@
 "use client";
 
+import { guarded } from "@/components/shared/require-module";
 import { useState } from "react";
 import { Panel, SectionHeader } from "@/components/shared/ui-bits";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { scaffoldVolume } from "@/lib/paint-calc";
 
-export default function ScaffoldPage() {
+function ScaffoldPage() {
   const [l, setL] = useState(20);
   const [b, setB] = useState(8);
   const [h, setH] = useState(12);
@@ -73,3 +74,6 @@ export default function ScaffoldPage() {
     </div>
   );
 }
+
+// Route guard: only roles that may use this page get past the URL
+export default guarded("calculators", ScaffoldPage);

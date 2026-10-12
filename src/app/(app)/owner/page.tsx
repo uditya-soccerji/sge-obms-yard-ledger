@@ -1,5 +1,6 @@
 "use client";
 
+import { guarded } from "@/components/shared/require-module";
 import Link from "next/link";
 import {
   EmptyState,
@@ -16,7 +17,7 @@ import { MoneyCard } from "@/components/work/money-card";
 import { ALL_SITES } from "@/lib/site-scope";
 import { useStore } from "@/lib/store";
 
-export default function OwnerHomePage() {
+function OwnerHomePage() {
   const { state } = useStore();
   const today = "2026-10-05";
   const allSites = state.currentSiteId === ALL_SITES;
@@ -255,3 +256,6 @@ export default function OwnerHomePage() {
     </div>
   );
 }
+
+// Route guard: only roles that may use this page get past the URL
+export default guarded("owner", OwnerHomePage);

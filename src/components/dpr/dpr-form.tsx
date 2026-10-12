@@ -236,6 +236,36 @@ export function DprForm({
             rows={2}
           />
         </div>
+        {value.submitterType === "painting_blasting" || value.submitterType === "scaffolding" ? (
+          <div className="mt-3 grid gap-3 sm:grid-cols-3">
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox
+                disabled={readOnly}
+                checked={!!value.permitOk}
+                onCheckedChange={(c) => onChange({ ...value, permitOk: !!c })}
+              />
+              Work permit seen and in force
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <Checkbox
+                disabled={readOnly}
+                checked={!!value.tbtDone}
+                onCheckedChange={(c) => onChange({ ...value, tbtDone: !!c })}
+              />
+              Toolbox talk (TBT) held
+            </label>
+            <div>
+              <Label>Reason, if no quantity today</Label>
+              <Input
+                className="mt-1"
+                disabled={readOnly}
+                value={value.zeroReason ?? ""}
+                placeholder="e.g. permit not issued, rain"
+                onChange={(e) => onChange({ ...value, zeroReason: e.target.value })}
+              />
+            </div>
+          </div>
+        ) : null}
         {value.telegramDraftLines.length > 0 ? (
           <div className="mt-3 rounded-md border border-[var(--sge-line)] bg-[var(--sge-ground)] px-3 py-2">
             <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--sge-ink-3)]">
