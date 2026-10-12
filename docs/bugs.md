@@ -10,6 +10,7 @@ Screenshots, when saved as files, go in `docs/bugs/` as `B<nn>-<n>.png`. Never i
 | # | Reported | Role · site · page | Bug | Status |
 |---|---|---|---|---|
 | B01 | 2026-10-13 | Super Admin · all sites · Master Data → Sites | Can't type a comma (or a space after a word) in "Plants (comma)", so plants can't be added on Add site or Edit | confirmed |
+| B02 | 2026-10-13 | Super Admin · MTF · Master Data → Sites | Feature: plants need locations under them, and each plant/location needs an RP (MTF runs RP2 and RP5) | open (waiting for answers) |
 
 ## Details
 <!-- One section per bug:
@@ -40,4 +41,30 @@ Screenshots, when saved as files, go in `docs/bugs/` as `B<nn>-<n>.png`. Never i
   - (c) Work plan lines upper-case plant names while Master Data keeps `CPP-flare` mixed case. Match plants ignoring case (merge plan, "Before PR 2").
 - Data done 2026-10-13 (user's request): the 12 DTA plants were added to live Master Data by pasting the full list (the workaround), keeping CPP, CPP-flare and ARMA. Checked in Supabase: `sites` DTA now has 15 plants (updated 21:38 UTC). Then, at the user's request, CPP and CPP-flare were removed: DTA now has 13 plants (ARMA + the 12), updated 21:41 UTC. The same list is in `src/lib/seed.ts` for local runs without Supabase. `STORAGE_KEY` was deliberately not bumped, since that would wipe testers' browser data; on production, sites come from Supabase at sign-in.
 - Fix: _pending (app folder busy)_
+
+### B02: Plant → location level, with RP on each (feature)
+- Reported: 2026-10-13 · Role: Super Admin · Site: MTF · Page: Master Data → Sites
+- Ask: "give option to add RP to plant and location". MTF runs both RP2 and RP5, so the site-level RP list (`rp_tags`) isn't enough.
+- Data from the user's sheet (plant → location):
+
+| Plant | Location |
+|---|---|
+| MTF | LFP to Saipem |
+| MTF | Saipem to DTA product (CT vicinity) |
+| MTF | Crude ISBL |
+| MTF | Haul road |
+| MTF | Culvert-2 |
+| RRTF | North culvert |
+| RRTF | RRTF ISBL/OSBL CORRIDOR, LPG RAIL GANTRY, LPG RACK, RIL-1, RIL-2 (one cell; one location or five? asked) |
+| RRTF | South culvert |
+| RRTF | Street-3 end culvert |
+
+- Done now (live, 2026-10-13): plant **RRTF** added to MTF, so MTF plants = MTF, ARMA, RRTF (checked in Supabase, updated 21:44 UTC). Same in `src/lib/seed.ts`. Locations are **not** stored yet, because there's nowhere to keep them.
+- Today: `sites.plants` is `text[]` (names only); `sites.rp_tags` is per site. Work jobs keep `location` as free text.
+- Plan (needs owner OK + a migration, applied to live only after confirming):
+  1. Migration `supabase/migrations/<date>_site_plants_locations.sql`: a `site_plants` table (site_id, name, rp, active) and a `plant_locations` table (plant_id, name, rp, active), with RLS like `sites`. Keep `sites.plants` filled for one release so nothing breaks.
+  2. Master Data → Sites: per site, a plant table (name, RP from the site's RP list) with locations under each (name, RP; default = the plant's RP).
+  3. Work jobs and DPR lines pick plant → location from Master Data (fits merge plan PR 2 "one plant list per site").
+- Open questions: RP for MTF, ARMA and RRTF (and for each location if it differs from its plant)? Is the LPG/RIL cell one location or five? Does ARMA stay under MTF?
+- Fix: _pending (app folder busy; needs answers)_
 

@@ -522,7 +522,7 @@ export function createSeedState(): AppState {
         client: "Sikka Ports & Terminals Limited",
         enabled: true,
         rpTags: ["RP2", "RP5"],
-        plants: ["MTF", "ARMA"],
+        plants: ["MTF", "ARMA", "RRTF"],
       },
       {
         id: "site-marine",
