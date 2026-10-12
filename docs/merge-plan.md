@@ -275,10 +275,22 @@ Each PR is a draft PR off `main`, leaves every screen working, passes `npx tsc -
 - Rules: §17 fresh start (Owner decision 1); §18 P&L starts from October.
 - Check: **Owner** opens Work and sees October with empty plan/jobs/P&L, then adds a plan line. **Supervisor** starts a job on it. **SIC** and **Finance** see the same empty-then-new data. Owner → Test tools → Load demo brings back the Aug–Sep sample, and Start fresh empties it again.
 
+### Before PR 2: one plant list per site (found on production, 2026-10-13)
+Three lists of DTA plants disagree today:
+| Where | DTA plants |
+|---|---|
+| Master Data → Sites (live in Supabase `sites.plants`; local seed in `src/lib/seed.ts`) | CPP, CPP-flare, ARMA |
+| Work plan lines (`PlanLine.plant`, free text; `SUP_OF` in `src/lib/work/seed.ts`) | AROMATIC, CES, COKER, CRUDE, FCCU, HYDROGEN, HYDROTREATER, PP, PRU & HPIB, RTF, SULPHUR, UTILITY & ETP |
+| Old DPR desk (`dprDocuments`) | CPP |
+
+§3 says every DPR and request must pick a plant, and Master Data is the one list. Once PR 4 makes the DPR form pick plants from Master Data, no Work job would match. So:
+1. **Data step, no code (Owner / Super Admin):** in Master Data → Sites → DTA → Edit, add DTA's real plants from the Aug-26 job plan (the 12 above, spelled exactly the same, trimmed, §15 "plant names trimmed + matched"). Do the same for the other five sites when their job plans are shared. The Owner decides whether CPP, CPP-flare and ARMA stay (ARMA is also under MTF, which §3 allows). This writes the live `sites` row in the Yard Ledger Supabase project, so **confirm with the Owner first**.
+2. **In PR 2 (code):** plan lines and jobs pick their plant from the site's Master Data list instead of free text. `addPlanLine` in `src/lib/work/store.tsx` rejects a plant that isn't on the site's list. A pure `isSitePlant(sites, siteId, plant)` goes in `src/lib/site-scope.ts`. The plant field in `src/components/work/work-plan.tsx` today suggests Master Data plants plus any plant already typed on a plan line (`knownPlants`) and accepts free text. It becomes a Master Data-only dropdown. `src/lib/seed.ts` gets the same DTA plants so a local (non-Supabase) run matches.
+
 ### PR 2: DPR report header inside Work
-- Files: `src/lib/work/types.ts` (`DprReport`, `DprEntry.reportId`), `src/lib/work/store.tsx` (`addDpr` attaches to the day's report; `saveReport`), `src/lib/work/logic.ts` (`reportOf`, `reportsForDay`), `src/lib/work/seed.ts` (demo entries grouped into approved reports; key → v6), `src/lib/work/scenarios.ts`, `src/components/work/work-jobs.tsx` (entries grouped under "Report · date · plant"), `src/app/(app)/work/page.tsx`.
-- Rules: §5 *how many per day* (any number), *painting line* (plant, location, MPS, start/end, 2,000 m² max: existing checks keep running), *job register* (every line picks a job); §10 *job stages*.
-- Check: **Supervisor** adds a DPR line on a job and sees it under today's report. **SIC/Owner** see job progress move. **Finance** P&L labour picks up the crew.
+- Files: `src/lib/work/types.ts` (`DprReport`, `DprEntry.reportId`), `src/lib/work/store.tsx` (`addDpr` attaches to the day's report; `saveReport`; `addPlanLine` checks the plant against Master Data), `src/lib/work/logic.ts` (`reportOf`, `reportsForDay`), `src/lib/site-scope.ts` (`isSitePlant`), `src/lib/seed.ts` (DTA plants), `src/lib/work/seed.ts` (demo entries grouped into approved reports; key → v6), `src/lib/work/scenarios.ts`, `src/components/work/work-plan.tsx` (plant dropdown), `src/components/work/work-jobs.tsx` (entries grouped under "Report · date · plant"), `src/app/(app)/work/page.tsx`.
+- Rules: §3 *every DPR and request must pick a plant* (from the site's Master Data list); §5 *how many per day* (any number), *painting line* (plant, location, MPS, start/end, 2,000 m² max: existing checks keep running), *job register* (every line picks a job); §10 *job stages*.
+- Check: **Owner** adds a plan line and can only pick DTA plants from Master Data. **Supervisor** adds a DPR line on a job and sees it under today's report. **SIC/Owner** see job progress move. **Finance** P&L labour picks up the crew.
 
 ### PR 3: Submit gates, SIC review, lock; SIC closes the cycle
 - Files: `src/lib/work/logic.ts` (`canSubmitReport`, `isLate`, `canCloseCycle`), `src/lib/work/store.tsx` (`submitReport`, `reviewReport`, `unlockReport`; `confirmJms` becomes **SIC closes the cycle**: it shows the cycle's DPRs, and closing approves any still `submitted` ones, each logged), `src/lib/work/types.ts` (`Jms.review`), `src/lib/work/events.ts` (`dpr_submitted`, `dpr_approved`, `dpr_sent_back`, `dpr_unlocked`, `cycle_closed`; instant ones added to `INSTANT`), `src/lib/store.tsx` (`applyDprAttendance`), `src/lib/acpl.ts` (accept crew marks from a report), new `src/components/work/work-reports.tsx` (report card: permit nos, TBT, crew attendance, zero reason, submit, SIC approve/send back, Owner unlock), `src/components/work/work-jobs.tsx` ("Close cycle → JMS" for SIC), `src/app/(app)/work/page.tsx` (Reports tab), `src/components/work/notifications.tsx`.
