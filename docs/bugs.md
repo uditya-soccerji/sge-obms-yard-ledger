@@ -9,6 +9,7 @@ Screenshots, when saved as files, go in `docs/bugs/` as `B<nn>-<n>.png`. Never i
 ## Summary
 | # | Reported | Role · site · page | Bug | Status |
 |---|---|---|---|---|
+| B01 | 2026-10-13 | Super Admin · all sites · Master Data → Sites | Can't type a comma (or a space after a word) in "Plants (comma)", so plants can't be added on Add site or Edit | confirmed |
 
 ## Details
 <!-- One section per bug:
@@ -22,3 +23,20 @@ Screenshots, when saved as files, go in `docs/bugs/` as `B<nn>-<n>.png`. Never i
 - Notes: <live-site check, suspected cause, files>
 - Fix: <filled when fixed>
 -->
+
+### B01: Plants field swallows commas, so plants can't be added
+- Reported: 2026-10-13 · Role: Super Admin · Site: All sites (JETTY entry) · Page: Master Data → Sites → Add site / Edit
+- Steps: Edit DTA (or Add site), click in **Plants (comma)**, type `, RTF` key by key.
+- Excel: DTA plants from the Aug-26 job plan (AROMATIC, CES, COKER, CRUDE, FCCU, HYDROGEN, HYDROTREATER, PP, PRU & HPIB, RTF, SULPHUR, UTILITY & ETP).
+- Expected: field shows `CPP, CPP-flare, ARMA, RTF`; Save stores 4 plants.
+- Actual: the comma and the space vanish as they're typed, giving `CPP, CPP-flare, ARMARTF` (user's screenshot: a new site's field shows `RRTF`). Names with spaces such as `PRU & HPIB` or `UTILITY & ETP` can't be typed at all.
+- Screenshot: user's, localhost Master Data → Sites, DTA edit form open, Plants field reads `RRTF`.
+- Confirmed on the live site 2026-10-13 (typed key by key, then Cancel; nothing saved). Pasting the whole list in one go does work, because it arrives as a single change.
+- Cause: `SiteForm` in `src/components/master/master-desk.tsx` keeps plants only as an array. Every keystroke splits on `,`, trims and drops empty parts, then rejoins, so a just-typed comma or trailing space is deleted at once.
+- Fix plan: keep the raw text in local state while typing; split, trim, drop empties and de-duplicate (ignoring case) only on **Save**.
+- Related, fix together:
+  - (a) **Save** does nothing, with no message, when Code is empty.
+  - (b) `remoteSaveSite` (`src/lib/supabase/remote.ts`) only logs a failed Supabase save to the console. The screen shows the change, but it's gone after a reload. Show the error instead.
+  - (c) Work plan lines upper-case plant names while Master Data keeps `CPP-flare` mixed case. Match plants ignoring case (merge plan, "Before PR 2").
+- Fix: _pending (app folder busy)_
+
