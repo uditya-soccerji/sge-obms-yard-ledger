@@ -1,6 +1,7 @@
 "use client";
 
 import { guarded } from "@/components/shared/require-module";
+import { today as todayDate } from "@/lib/today";
 import { useState } from "react";
 import Link from "next/link";
 import {
@@ -41,7 +42,7 @@ function FinancePage() {
   const [category, setCategory] = useState("Transport");
   const [amount, setAmount] = useState("");
   const [description, setDescription] = useState("");
-  const [date, setDate] = useState("2026-10-05");
+  const [date, setDate] = useState(todayDate);
   const [wageKind, setWageKind] =
     useState<WageLedgerEntry["kind"]>("advance");
   const [wageAmount, setWageAmount] = useState("");
@@ -57,7 +58,7 @@ function FinancePage() {
   const [payMsg, setPayMsg] = useState<string | null>(null);
   const [paying, setPaying] = useState<Record<string, string>>({});
 
-  const today = "2026-10-05";
+  const today = todayDate();
   const todayEntries = state.finance.filter((f) => f.date === today);
   const expenseToday = todayEntries
     .filter((f) => f.kind === "expense")

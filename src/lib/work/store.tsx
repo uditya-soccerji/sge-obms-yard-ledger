@@ -1,9 +1,9 @@
 "use client";
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
-import { canCloseJob, currentMonthOf, EXPENSE_CATEGORIES, entryDiffs, isMonthClosed, jobJmsQty, lineStatus, nextMonth, round3 } from "./logic";
+import { canCloseJob, canVoidExpense, JMS_FLOW, currentMonthOf, EXPENSE_CATEGORIES, entryDiffs, finalStage, isMonthClosed, jobJmsQty, lineStatus, nextJmsStatuses, nextJobNo, nextMonth, pickWorkOrder, round3, validMembers, woUsage } from "./logic";
 import { createWorkSeed, WORK_STORAGE_KEY } from "./seed";
-import { today } from "../today";
+import { daysAgo, today } from "../today";
 import { applyScenario, type ScenarioId } from "./scenarios";
 import { useStore } from "../store";
 import type { RoleId } from "../types";
@@ -25,13 +25,16 @@ interface WorkApi {
   confirmJms: (jobId: string) => Result;
   /** SIC sends a closed job back to the supervisor, with the reason (docs §5, §19) */
   rejectClose: (jobId: string, reason: string) => Result;
-  setJmsStatus: (jmsId: string, status: JmsStatus) => void;
+  /** Move a JMS one stage on (Owner / Super Admin may step back one); every change is logged */
+  setJmsStatus: (jmsId: string, status: JmsStatus, note?: string) => Result;
   /** Close one site's current month and carry its unfinished work forward */
   closeMonth: (siteId: string) => Result;
   issuePaint: (batchId: string, supervisorId: string, qtyL: number) => Result;
-  recordPayment: (jmsId: string, payment: JmsPayment | null) => Result;
+  /** Record the money received, or clear it (null) with a reason */
+  recordPayment: (jmsId: string, payment: JmsPayment | null, clearReason?: string) => Result;
   addExpense: (input: Omit<Expense, "id">) => Result;
-  removeExpense: (id: string) => void;
+  /** Void a cost with a reason: it stays on record but leaves the P&L (docs §8) */
+  removeExpense: (id: string, reason: string) => Result;
   loadScenario: (id: ScenarioId) => void;
   /** Mark every current event as seen by this account (bell) */
   markSeen: (accountId: string) => void;
@@ -54,11 +57,20 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
 
   // Who is acting (the viewed-as account when Super Admin uses "View as")
   const { currentAccount, state: appState, fullState } = useStore();
-  const actor = React.useRef({ name: "System", role: null as RoleId | null, staffId: null as string | null, accountId: "" });
-  actor.current = { name: currentAccount?.name ?? "System", role: appState.currentRole, staffId: appState.currentUserId, accountId: currentAccount?.id ?? "" };
-  // Staff list is a reference list (never cut to a site), used to check site rules
+  const actor = React.useRef({ name: "System", role: null as RoleId | null, staffId: null as string | null, accountId: "", impersonatedBy: undefined as string | undefined });
+  actor.current = {
+    name: currentAccount?.name ?? "System",
+    role: appState.currentRole,
+    staffId: appState.currentUserId,
+    accountId: currentAccount?.id ?? "",
+    // "View as": keep the Super Admin's name on everything done in someone else's seat
+    impersonatedBy: fullState.impersonatorAccountId ? fullState.users.find((u) => u.id === fullState.impersonatorAccountId)?.name : undefined,
+  };
+  // Staff and sites are reference lists (never cut to a site), used to check site rules
   const staffRef = React.useRef(fullState.staff);
   staffRef.current = fullState.staff;
+  const sitesRef = React.useRef(fullState.sites);
+  sitesRef.current = fullState.sites;
   const rights = () => workRights(actor.current.role);
   /** A supervisor may only act on their own lines and jobs. */
   const notMine = (supervisorId: string) => actor.current.role === "supervisor" && supervisorId !== actor.current.staffId;
@@ -67,7 +79,7 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
   const log = useCallback((e: Omit<WorkEvent, "id" | "seq" | "at" | "day" | "actorName" | "actorRole">) => {
     setWork((s) => {
       const seq = (s.events[s.events.length - 1]?.seq ?? 0) + 1;
-      const ev: WorkEvent = { ...e, id: `ev-${seq}`, seq, at: new Date().toISOString(), day: today(), actorName: actor.current.name, actorRole: actor.current.role };
+      const ev: WorkEvent = { ...e, id: `ev-${seq}`, seq, at: new Date().toISOString(), day: today(), actorName: actor.current.name, actorRole: actor.current.role, impersonatedBy: actor.current.impersonatedBy };
       return { ...s, events: [...s.events, ev] };
     });
   }, []);
@@ -129,11 +141,13 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
     if (isMonthClosed(w, line.siteId, line.month)) return { ok: false, error: "That plan month is closed" };
     if (!input.location.trim()) return { ok: false, error: "Location is required" };
     if (input.stages.length === 0) return { ok: false, error: "Pick at least one stage" };
-    const seq = w.jobs.length + 101;
-    const site = line.siteId.replace("site-", "").toUpperCase();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(input.startDate)) return { ok: false, error: "Pick the start date" };
+    if (input.startDate > today()) return { ok: false, error: "A job can't start in the future" };
+    const siteCode = sitesRef.current.find((x) => x.id === line.siteId)?.code ?? line.siteId.replace("site-", "").toUpperCase();
     const job: Job = {
       id: uid("job"),
-      jobNo: `J-${site}-${String(seq).padStart(4, "0")}`,
+      // Numbered per site: J-MTF-0001, not a count shared by every site
+      jobNo: nextJobNo(w.jobs, siteCode),
       planLineId: line.id,
       location: input.location.trim(),
       startDate: input.startDate,
@@ -154,16 +168,36 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
     if (notMine(job.supervisorId)) return { ok: false, error: "That job belongs to another supervisor" };
     if (job.status !== "open") return { ok: false, error: "Job is closed — no more DPR entries" };
     if (!job.stages.includes(input.stage)) return { ok: false, error: "That stage isn't part of this job" };
-    const members = input.members.filter((m) => m.name.trim() && m.nos > 0 && m.side > 0 && m.length > 0 && m.cf > 0);
-    if (members.length === 0) return { ok: false, error: "Add at least one measured member (NOS, SIDE, LENGTH, CF all above 0)" };
+    // Date (docs §4, §5): never in the future or before the job started; field
+    // and office roles back-date to yesterday at most, Owner / Super Admin further
+    const role = actor.current.role;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date)) return { ok: false, error: "Pick the date" };
+    if (input.date > today()) return { ok: false, error: "A DPR can't be dated in the future" };
+    if (input.date < job.startDate) return { ok: false, error: `The job started on ${job.startDate} — the DPR can't be earlier` };
+    if (role !== "owner" && role !== "super_admin" && input.date < daysAgo(1)) {
+      return { ok: false, error: "Only today or yesterday can be entered — ask the Owner to back-date further" };
+    }
+    // Same row rules as the form: a half-filled row is an error, not silently dropped
+    const checked = validMembers(input.members);
+    if (checked.error) return { ok: false, error: checked.error };
+    const members = checked.members;
+    // DFT at final shade (docs §17), checked here too so no screen can skip it
+    const item = w.serviceItems.find((x) => x.code === w.planLines.find((l) => l.id === job.planLineId)?.serviceCode);
+    if (input.stage === finalStage(job) && item?.paints.length && !(Number(input.dft) > 0)) {
+      return { ok: false, error: "Actual DFT is required at final shade" };
+    }
+    if (input.dft != null && (input.dft <= 0 || input.dft > 2000)) return { ok: false, error: "DFT must be between 1 and 2,000 µm" };
     const area = members.reduce((s, m) => s + m.nos * m.side * m.length * m.cf, 0);
     if (area > 2000) return { ok: false, error: `Area ${round3(area)} m² is over the 2,000 m² per line limit` };
     if (input.litres < 0) return { ok: false, error: "Litres can't be negative" };
     if (input.litres > 0 && !input.paintSap) return { ok: false, error: "Pick which paint the litres are from" };
-    const entry: DprEntry = { ...input, members, id: uid("wd"), supervisorId: job.supervisorId };
+    // Who keyed it in comes from the signed-in role, not the screen (docs §5b)
+    const enteredBy: DprEntry["enteredBy"] =
+      role === "admin" || role === "sic" || role === "owner" || role === "super_admin" ? role : "supervisor";
+    const entry: DprEntry = { ...input, members, enteredBy, enteredByName: actor.current.name, id: uid("wd"), supervisorId: job.supervisorId };
     setWork((s) => ({ ...s, dprs: [...s.dprs, entry] }));
     const siteId = siteOfJob(w, job);
-    log({ kind: "dpr_added", siteId, subjectStaffId: job.supervisorId, title: `${job.jobNo} · ${STAGES.find((x) => x.id === entry.stage)?.label} ${round3(entryArea(entry))} m²`, detail: `${job.location}${entry.enteredBy === "admin" ? " · entered by Admin" : ""}${entry.crew?.length ? ` · crew ${entry.crew.length}` : ""}`, tab: "jobs", refId: job.id });
+    log({ kind: "dpr_added", siteId, subjectStaffId: job.supervisorId, title: `${job.jobNo} · ${STAGES.find((x) => x.id === entry.stage)?.label} ${round3(entryArea(entry))} m²`, detail: `${job.location}${entry.enteredBy !== "supervisor" ? ` · entered by ${entry.enteredByName} (${entry.enteredBy.replace("_", " ")})` : ""}${entry.crew?.length ? ` · crew ${entry.crew.length}` : ""}`, tab: "jobs", refId: job.id });
     // Double entry (docs §5b): Admin's figure counts; tell the supervisor when the two differ
     const diff = entryDiffs([...w.dprs, entry]).find((d) => d.jobId === job.id && d.date === entry.date && d.stage === entry.stage);
     if (diff) {
@@ -217,11 +251,18 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
     const w = ref.current;
     const job = w.jobs.find((j) => j.id === jobId);
     if (!job || job.status !== "awaiting_sic") return { ok: false, error: "Job isn't waiting for SIC" };
+    // Nobody confirms a JMS for a job they closed themselves
+    if (job.closeRequestedBy && job.closeRequestedBy === actor.current.accountId && !rights().isBoss) {
+      return { ok: false, error: "You closed this job — another SIC (or the Owner) has to confirm it" };
+    }
     const line = w.planLines.find((l) => l.id === job.planLineId)!;
     const item = w.serviceItems.find((s) => s.code === line.serviceCode)!;
-    const wo = w.workOrders.find((o) => o.siteId === line.siteId && o.scope[line.serviceCode] != null);
     const qty = jobJmsQty(job, w.dprs);
     const dates = w.dprs.filter((d) => d.jobId === jobId).map((d) => d.date).sort();
+    const periodTo = dates[dates.length - 1] ?? today();
+    // The work order must be valid on the JMS date (docs §17)
+    const wo = pickWorkOrder(w, line.siteId, line.serviceCode, periodTo);
+    if (!wo) return { ok: false, error: `No valid work order covers ${line.serviceCode} on ${periodTo} — add or extend the work order first` };
     const last = Math.max(0, ...w.jms.map((j) => Number(j.jmsNo) || 0));
     const id = uid("jms");
     const row: Jms = {
@@ -233,25 +274,49 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
       qty,
       rate: item.rate,
       amount: Math.round(qty * item.rate * 100) / 100,
-      periodFrom: job.startDate,
-      periodTo: dates[dates.length - 1] ?? today(),
+      periodFrom: [job.startDate, ...dates].sort()[0],
+      periodTo,
       status: "JMS SUBMITTED",
-      woId: wo?.id ?? "",
+      woId: wo.id,
       confirmedOn: today(),
+      ratePending: item.ratePending || undefined,
+      statusLog: [{ at: new Date().toISOString(), by: actor.current.name, from: "JMS SUBMITTED", to: "JMS SUBMITTED", note: "Created on SIC confirm" }],
     };
     setWork((s) => ({
       ...s,
       jms: [...s.jms, row],
       jobs: s.jobs.map((j) => (j.id === jobId ? { ...j, status: "closed", closedAt: today(), jmsId: id } : j)),
     }));
-    log({ kind: "jms_confirmed", siteId: line.siteId, subjectStaffId: job.supervisorId, title: `JMS ${row.jmsNo} confirmed · ${job.jobNo}`, detail: `${qty} m² × ₹${item.rate} = ₹${row.amount.toLocaleString("en-IN")}`, tab: "jms", refId: id });
+    log({ kind: "jms_confirmed", siteId: line.siteId, subjectStaffId: job.supervisorId, title: `JMS ${row.jmsNo} confirmed · ${job.jobNo}`, detail: `${qty} m² × ₹${item.rate}${item.ratePending ? " (placeholder rate — ARC list pending)" : ""} = ₹${row.amount.toLocaleString("en-IN")}`, tab: "jms", refId: id });
+    // Tell Owner / SIC / Finance when this JMS takes the WO past its cap or an item past its scope
+    const before = woUsage(wo.id, w);
+    if (before) {
+      const capAfter = (before.billed + row.amount) / (wo.capInr || Infinity);
+      const itemScope = wo.scope[line.serviceCode] ?? 0;
+      const itemAfter = (before.items.find((i) => i.code === line.serviceCode)?.used ?? 0) + qty;
+      if (capAfter > 1 || (itemScope > 0 && itemAfter > itemScope)) {
+        log({ kind: "wo_warning", problem: true, siteId: line.siteId, title: `WO ${wo.woNo} over ${capAfter > 1 ? "its ₹ cap" : `scope for ${line.serviceCode}`}`, detail: `JMS ${row.jmsNo} · ${capAfter > 1 ? `${Math.round(capAfter * 100)}% of cap` : `${round3(itemAfter)} of ${itemScope} m²`}`, tab: "wo", refId: wo.id });
+      }
+    }
     return { ok: true, id };
   }, [log]);
 
-  const setJmsStatus = useCallback((jmsId: string, status: JmsStatus) => {
-    if (!rights().canConfirm) return;
-    setWork((s) => ({ ...s, jms: s.jms.map((j) => (j.id === jmsId ? { ...j, status } : j)) }));
-  }, []);
+  const setJmsStatus = useCallback<WorkApi["setJmsStatus"]>((jmsId, status, note) => {
+    if (!rights().canConfirm) return NOT_ALLOWED;
+    const w = ref.current;
+    const j = w.jms.find((x) => x.id === jmsId);
+    if (!j) return { ok: false, error: "JMS not found" };
+    if (status === "PAID") return { ok: false, error: "PAID is set by recording the payment on the Payments tab" };
+    if (!nextJmsStatuses(j.status, rights().isBoss).includes(status)) {
+      return { ok: false, error: `${j.status} can only move to ${nextJmsStatuses(j.status, rights().isBoss).join(" or ") || "nothing (it's paid)"}` };
+    }
+    const entry = { at: new Date().toISOString(), by: actor.current.name, from: j.status, to: status, note: note?.trim() || undefined };
+    setWork((s) => ({ ...s, jms: s.jms.map((x) => (x.id === jmsId ? { ...x, status, statusLog: [...(x.statusLog ?? []), entry] } : x)) }));
+    const job = w.jobs.find((x) => x.id === j.jobId);
+    const back = JMS_FLOW.indexOf(status) < JMS_FLOW.indexOf(j.status);
+    log({ kind: "jms_status", problem: back, siteId: job ? siteOfJob(w, job) : "", subjectStaffId: job?.supervisorId, title: `JMS ${j.jmsNo}: ${j.status} → ${status}`, detail: back ? "Stepped back" : "RIL stage moved on", tab: "jms", refId: j.id });
+    return { ok: true };
+  }, [log]);
 
   /** Close one site's current month: its unfinished balance + open jobs move to next month. */
   const closeMonth = useCallback<WorkApi["closeMonth"]>((siteId) => {
@@ -306,13 +371,15 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
   }, [log]);
 
   /** Record (or clear, with null) the money received against a JMS. */
-  const recordPayment = useCallback<WorkApi["recordPayment"]>((jmsId, payment) => {
+  const recordPayment = useCallback<WorkApi["recordPayment"]>((jmsId, payment, clearReason) => {
     if (!rights().canMoney) return NOT_ALLOWED;
     const j = ref.current.jms.find((x) => x.id === jmsId);
     if (!j) return { ok: false, error: "JMS not found" };
+    if (!payment && !clearReason?.trim()) return { ok: false, error: "Give a reason for clearing this payment" };
     if (payment) {
       if (!(payment.amount > 0)) return { ok: false, error: "Amount received must be above zero" };
       if (!payment.receivedOn) return { ok: false, error: "Date received is required" };
+      if (payment.receivedOn > today()) return { ok: false, error: "The date received can't be in the future" };
       if (payment.receivedOn < j.confirmedOn) return { ok: false, error: "Payment date can't be before SIC approval" };
       if (Math.abs(payment.amount - j.amount) >= 1 && !payment.reason) return { ok: false, error: "Pick a reason for the difference" };
     }
@@ -329,6 +396,10 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
       const job = w.jobs.find((x) => x.id === j.jobId);
       const gap = Math.round((payment.amount - j.amount) * 100) / 100;
       log({ kind: "payment_recorded", problem: gap <= -1, siteId: job ? siteOfJob(w, job) : "", subjectStaffId: job?.supervisorId, title: `JMS ${j.jmsNo} paid ₹${payment.amount.toLocaleString("en-IN")}`, detail: gap <= -1 ? `Short by ₹${(-gap).toLocaleString("en-IN")} (${reasonText(payment.reason)})` : "Matches approved value", tab: "payments", refId: j.id });
+    } else {
+      const w = ref.current;
+      const job = w.jobs.find((x) => x.id === j.jobId);
+      log({ kind: "payment_cleared", problem: true, siteId: job ? siteOfJob(w, job) : "", title: `Payment cleared · JMS ${j.jmsNo}`, detail: clearReason!.trim(), tab: "payments", refId: j.id });
     }
     return { ok: true };
   }, [log]);
@@ -366,10 +437,21 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
     return { ok: true, id };
   }, [log]);
 
-  const removeExpense = useCallback((id: string) => {
-    if (!rights().canMoney) return;
-    setWork((s) => ({ ...s, expenses: s.expenses.filter((x) => x.id !== id) }));
-  }, []);
+  const removeExpense = useCallback<WorkApi["removeExpense"]>((id, reason) => {
+    if (!rights().canMoney) return NOT_ALLOWED;
+    const x = ref.current.expenses.find((e) => e.id === id);
+    if (!x) return { ok: false, error: "Cost not found" };
+    if (!canVoidExpense(x, { accountId: actor.current.accountId, role: actor.current.role }, today())) {
+      return { ok: false, error: "Only the person who entered it can void it, on the same day — after that, the Owner" };
+    }
+    if (!reason.trim()) return { ok: false, error: "Give a reason for voiding this cost" };
+    const voided = { by: actor.current.name, at: new Date().toISOString(), reason: reason.trim() };
+    setWork((s) => ({ ...s, expenses: s.expenses.map((e) => (e.id === id ? { ...e, voided } : e)) }));
+    // Owner sees edits after the day as problems (docs §19)
+    const late = (x.enteredAt ?? "").slice(0, 10) !== today();
+    log({ kind: "expense_voided", problem: late, siteId: x.siteId, title: `Cost voided · ₹${x.amount.toLocaleString("en-IN")} ${x.category}`, detail: reason.trim(), tab: "pnl", refId: id });
+    return { ok: true };
+  }, [log]);
 
   /** Test helper: load a prepared state on top of fresh seed data. */
   const loadScenario = useCallback((id: ScenarioId) => {

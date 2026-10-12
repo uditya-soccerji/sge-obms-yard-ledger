@@ -1,6 +1,7 @@
 "use client";
 
 import { guarded } from "@/components/shared/require-module";
+import { today as todayDate } from "@/lib/today";
 import Link from "next/link";
 import { useState } from "react";
 import {
@@ -23,7 +24,7 @@ import type { AttendanceStatus } from "@/lib/types";
 
 function HrHomePage() {
   const { state, markAttendance } = useStore();
-  const today = "2026-10-05";
+  const today = todayDate();
   const [msg, setMsg] = useState<string | null>(null);
 
   const attendToday = state.attendance.filter((a) => a.date === today);

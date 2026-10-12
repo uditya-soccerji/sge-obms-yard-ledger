@@ -26,7 +26,13 @@ export function useWorkScope() {
   const { state, fullState } = useStore();
   const { work } = useWork();
   const wages = new Map(fullState.labourers.map((l) => [l.id, l.wageDaily]));
-  const wageOf = (id: string) => wages.get(id) ?? DEFAULT_WAGE;
+  // A missing or ₹0 wage is costed at the default, so labour never shows as free
+  const wageOf = (id: string) => {
+    const w = wages.get(id);
+    return w && w > 0 ? w : DEFAULT_WAGE;
+  };
+  /** Labourers whose wage isn't set (costed at the default wage) */
+  const noWage = (id: string) => !(Number(wages.get(id)) > 0);
   const inSite = (siteId: string) =>
     state.currentSiteId === ALL_SITES || state.currentSiteId === siteId;
   const lineIds = new Set(work.planLines.filter((l) => inSite(l.siteId)).map((l) => l.id));
@@ -51,11 +57,18 @@ export function useWorkScope() {
     sites: state.sites,
     staff: state.staff,
     wageOf,
+    noWage,
     /** The current month of a site (each site closes its own month) */
     monthOf: (siteId: string) => currentMonthOf(work, siteId),
     // canMoney, canConfirm, canPlan, canEnter, canIssuePaint, isBoss
     ...workRights(role),
-    enteredBy: (role === "admin" ? "admin" : "supervisor") as "admin" | "supervisor",
+    /** How a DPR entry from this seat is recorded (the store sets the same from the signed-in role) */
+    enteredBy: (role === "admin" || role === "sic" || role === "owner" || role === "super_admin" ? role : "supervisor") as
+      | "supervisor"
+      | "admin"
+      | "sic"
+      | "owner"
+      | "super_admin",
   };
 }
 

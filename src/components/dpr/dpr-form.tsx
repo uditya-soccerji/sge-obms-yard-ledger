@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { today as todayDate } from "@/lib/today";
 import { Panel, StatusPill } from "@/components/shared/ui-bits";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -38,7 +39,7 @@ export function blankDpr(opts: {
   const now = new Date().toISOString();
   return {
     id: uid("dprd"),
-    date: "2026-10-05",
+    date: todayDate(),
     siteId: opts.siteId,
     plant: "CPP",
     submitterId: opts.submitterId,
@@ -367,7 +368,7 @@ export function DprForm({
                   {eq.expiryDate ? (
                     <span
                       className={
-                        eq.expiryDate < "2026-10-05"
+                        eq.expiryDate < todayDate()
                           ? "font-mono text-[var(--sge-crit)]"
                           : "font-mono text-[var(--sge-ink-3)]"
                       }

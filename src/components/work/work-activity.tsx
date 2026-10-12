@@ -60,6 +60,7 @@ export function WorkActivity() {
                   </td>
                   <td className={tdCls + " text-xs"}>
                     <b>{e.actorName}</b>
+                    {e.impersonatedBy ? <div className="text-[10px] text-[var(--sge-warn)]">via {e.impersonatedBy} (view-as)</div> : null}
                     <div className="text-[10px] uppercase text-[var(--sge-ink-3)]">{e.actorRole?.replace("_", " ")}</div>
                   </td>
                   <td className={tdCls + " text-xs"}>{KIND_LABEL[e.kind]}</td>

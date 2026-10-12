@@ -1,6 +1,7 @@
 "use client";
 
 import { guarded } from "@/components/shared/require-module";
+import { daysAgo } from "@/lib/today";
 import { useState } from "react";
 import {
   EmptyState,
@@ -34,7 +35,8 @@ PP5920188421,Ramesh Kumar,07:58,18:05`;
 
 function AcplMatchPage() {
   const { state, uploadAcplText, runAcplMatch, resolveAcplFlag } = useStore();
-  const [date, setDate] = useState("2026-10-04");
+  // Gate punches are uploaded the next morning: default to yesterday
+  const [date, setDate] = useState(() => daysAgo(1));
   const [paste, setPaste] = useState(SAMPLE_CSV);
   const [msg, setMsg] = useState<string | null>(null);
 

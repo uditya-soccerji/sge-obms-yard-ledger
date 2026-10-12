@@ -1,6 +1,7 @@
 "use client";
 
 import { guarded } from "@/components/shared/require-module";
+import { today as todayDate } from "@/lib/today";
 import { useState } from "react";
 import {
   EmptyState,
@@ -81,7 +82,7 @@ FS-01 scaffold,CPP,scaffolding,840,m3,85`
     const id = uploadJmsPackage({
       label,
       period,
-      uploadedAt: "2026-10-05",
+      uploadedAt: todayDate(),
       uploadedBy: state.currentUserId ?? "st-admin",
       status: "uploaded",
       lines,

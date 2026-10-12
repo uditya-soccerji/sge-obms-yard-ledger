@@ -1,6 +1,7 @@
 "use client";
 
 import { guarded } from "@/components/shared/require-module";
+import { today as todayDate } from "@/lib/today";
 import Link from "next/link";
 import {
   EmptyState,
@@ -15,7 +16,7 @@ import { useStore } from "@/lib/store";
 
 function SicHomePage() {
   const { state } = useStore();
-  const today = "2026-10-05";
+  const today = todayDate();
   const pending = state.dprDocuments.filter((d) => d.status === "submitted");
   const todayDocs = state.dprDocuments.filter((d) => d.date === today);
   const attend = state.attendance.filter((a) => a.date === today);

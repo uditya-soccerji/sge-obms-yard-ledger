@@ -16,7 +16,11 @@ export type EventKind =
   | "month_closed"
   | "paint_issued"
   | "payment_recorded"
-  | "expense_added";
+  | "payment_cleared"
+  | "expense_added"
+  | "expense_voided"
+  | "jms_status"
+  | "wo_warning";
 
 export interface WorkEvent {
   id: string;
@@ -33,6 +37,8 @@ export interface WorkEvent {
   subjectStaffId?: string;
   title: string;
   detail: string;
+  /** Super Admin who did it while using "View as" */
+  impersonatedBy?: string;
   /** Problems are highlighted and pass the "Problems only" filter */
   problem?: boolean;
   /** Work tab to open (e.g. "jobs", "payments") */
@@ -61,7 +67,11 @@ export const KIND_LABEL: Record<EventKind, string> = {
   month_closed: "Month closed",
   paint_issued: "Paint issued",
   payment_recorded: "Payment recorded",
+  payment_cleared: "Payment cleared",
   expense_added: "Cost added",
+  expense_voided: "Cost voided",
+  jms_status: "JMS status",
+  wo_warning: "Work order warning",
 };
 
 const onSite = (v: Viewer, siteId: string) => v.siteIds.length === 0 || v.siteIds.includes(siteId);
@@ -81,15 +91,23 @@ export function isFor(e: WorkEvent, v: Viewer): boolean {
       // The supervisor is told of each difference; SIC and Admin see them for the monthly review (docs §5b)
       return mine || v.role === "sic" || v.role === "admin";
     case "jms_confirmed":
-    case "job_sent_back":
       return mine || v.role === "finance";
+    case "job_sent_back":
+      // The supervisor who has to fix it; money isn't involved yet
+      return mine;
+    case "jms_status":
+      return v.role === "finance" || v.role === "sic";
+    case "wo_warning":
+      return v.role === "sic" || v.role === "finance";
     case "plan_added":
     case "month_closed":
       return v.role === "supervisor" ? mine || e.kind === "month_closed" : v.role === "sic" || v.role === "admin";
     case "paint_issued":
       return mine || v.role === "store";
     case "payment_recorded":
+    case "payment_cleared":
     case "expense_added":
+    case "expense_voided":
       return v.role === "finance";
   }
 }

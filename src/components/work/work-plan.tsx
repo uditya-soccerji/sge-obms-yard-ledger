@@ -5,7 +5,7 @@ import { KpiTile, Panel, StatusPill } from "@/components/shared/ui-bits";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { isMonthClosed, lineStatus, monthLabel, nextMonth, OVER_TOLERANCE, UNDER_TOLERANCE } from "@/lib/work/logic";
+import { furthestStageArea, isMonthClosed, lineStatus, monthLabel, nextMonth, OVER_TOLERANCE, UNDER_TOLERANCE } from "@/lib/work/logic";
 import { useWork } from "@/lib/work/store";
 import { STAGES } from "@/lib/work/types";
 import { fmtM2, fmtPct, Msg, selectCls, tdCls, thCls, useWorkScope } from "./common";
@@ -36,7 +36,7 @@ export function WorkPlan() {
     .sort((a, b) => a.plant.localeCompare(b.plant) || a.serviceCode.localeCompare(b.serviceCode));
   const rows = lines.map((l) => ({ l, st: lineStatus(l, work) }));
   const tot = rows.reduce(
-    (t, { st }) => ({ plan: t.plan + st.plan, actual: t.actual + st.actual, remaining: t.remaining + st.remaining, wip: t.wip + Object.values(st.inProgress).reduce((a, b) => Math.max(a, b), 0) }),
+    (t, { st }) => ({ plan: t.plan + st.plan, actual: t.actual + st.actual, remaining: t.remaining + st.remaining, wip: t.wip + furthestStageArea(st.inProgress) }),
     { plan: 0, actual: 0, remaining: 0, wip: 0 }
   );
   const flagged = rows.filter((r) => r.st.flag === "short" || r.st.flag === "over").length;
@@ -160,8 +160,14 @@ export function WorkPlan() {
                       <StatusPill tone={fl.tone}>{fl.label}</StatusPill>
                       {st.flag !== "running" ? (
                         <div className="mt-0.5 font-mono text-[10px] text-[var(--sge-ink-3)]">
-                          {st.variance >= 0 ? "+" : ""}
-                          {(st.variance * 100).toFixed(1)}%
+                          {Number.isFinite(st.variance) ? (
+                            <>
+                              {st.variance >= 0 ? "+" : ""}
+                              {(st.variance * 100).toFixed(1)}%
+                            </>
+                          ) : (
+                            "no plan left"
+                          )}
                         </div>
                       ) : null}
                     </td>

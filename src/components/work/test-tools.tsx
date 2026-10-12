@@ -8,6 +8,8 @@ import { Button } from "@/components/ui/button";
 import { useStore } from "@/lib/store";
 import { SCENARIOS } from "@/lib/work/scenarios";
 import { useWork } from "@/lib/work/store";
+import { demoToday, realToday, setDemoToday } from "@/lib/today";
+import { WORK_TODAY } from "@/lib/work/seed";
 import { Msg, selectCls } from "./common";
 
 /** Demo accounts a tester can "view as" — matched by username, since account ids differ once logins live in Supabase. */
@@ -85,6 +87,22 @@ export function TestTools() {
                 </button>
               ))}
             </div>
+          </div>
+
+          <div>
+            <div className="mb-1.5 text-[11px] uppercase tracking-wide text-[var(--sge-ink-3)]">App date</div>
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              <span>
+                Using <b>{demoToday() ?? realToday()}</b> {demoToday() ? "(demo date)" : "(today)"}
+              </span>
+              <Button size="sm" variant="outline" onClick={() => { setDemoToday(WORK_TODAY); location.reload(); }}>
+                Use the demo date ({WORK_TODAY})
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => { setDemoToday(null); location.reload(); }}>
+                Use today
+              </Button>
+            </div>
+            <p className="mt-1 text-[11px] text-[var(--sge-ink-3)]">The demo data is set in Aug–Sep 2026; the demo date replays it as if it were live. This browser only.</p>
           </div>
 
           <div className="flex items-center gap-3">

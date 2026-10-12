@@ -1,6 +1,7 @@
 "use client";
 
 import { guarded } from "@/components/shared/require-module";
+import { today as todayDate } from "@/lib/today";
 import Link from "next/link";
 import {
   EmptyState,
@@ -19,7 +20,7 @@ import { useStore } from "@/lib/store";
 
 function OwnerHomePage() {
   const { state } = useStore();
-  const today = "2026-10-05";
+  const today = todayDate();
   const allSites = state.currentSiteId === ALL_SITES;
   const siteName = state.sites.find((s) => s.id === state.currentSiteId)?.name;
   const siteCode = (id: string) => state.sites.find((s) => s.id === id)?.code ?? "";

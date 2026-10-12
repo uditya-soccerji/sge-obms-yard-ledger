@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useStore } from "@/lib/store";
-import { canCloseJob, effectiveEntries, entryArea, entryDiffs, finalStage, jobStageAreas, memberArea, monthLabel, round3 } from "@/lib/work/logic";
+import { canCloseJob, effectiveEntries, entryArea, entryDiffs, finalStage, jobStageAreas, memberArea, monthLabel, round3, validMembers } from "@/lib/work/logic";
+import { daysAgo } from "@/lib/today";
 import { today } from "@/lib/today";
 import { useWork } from "@/lib/work/store";
 import type { Job, Member, Stage } from "@/lib/work/types";
@@ -131,7 +132,11 @@ export function WorkJobs() {
                       size="sm"
                       onClick={() => {
                         const r = confirmJms(job.id);
-                        setMsg(r.ok ? { ok: true, msg: `${job.jobNo} confirmed — JMS created for ${fmtM2(areas[fin])} m².` } : { ok: false, msg: r.error });
+                        setMsg(
+                          r.ok
+                            ? { ok: true, msg: `${job.jobNo} confirmed — JMS created for ${fmtM2(areas[fin])} m².${it?.ratePending ? " The rate is a placeholder until the ARC list arrives." : ""}` }
+                            : { ok: false, msg: r.error }
+                        );
                       }}
                     >
                       Confirm → JMS
@@ -207,7 +212,8 @@ export function WorkJobs() {
                         <td className="px-2 py-1.5 text-right font-mono">{e.dft ?? "—"}</td>
                         <td className="px-2 py-1.5 text-right font-mono">{e.crew?.length ?? "—"}</td>
                         <td className="px-2 py-1.5">
-                          {e.enteredBy === "admin" ? "Admin (data operator)" : "Supervisor"}
+                          {e.enteredBy === "admin" ? "Admin (data operator)" : e.enteredBy === "supervisor" ? "Supervisor" : e.enteredBy.replace("_", " ")}
+                          {e.enteredByName ? <span className="text-[var(--sge-ink-3)]"> · {e.enteredByName}</span> : null}
                           {counted.has(e.id) ? null : <span className="ml-1 text-[var(--sge-ink-3)]">· not counted (Admin&apos;s figure used)</span>}
                         </td>
                       </tr>
@@ -248,7 +254,9 @@ function DprForm({ job, onDone }: { job: Job; onDone: (m: { ok: boolean; msg: st
   const roster = appState.labourers.filter((l) => l.active && l.supervisorId === job.supervisorId);
   const lastCrew = [...s.work.dprs].reverse().find((d) => d.jobId === job.id && d.crew?.length)?.crew ?? [];
   const [crew, setCrew] = useState<string[]>(lastCrew.filter((id) => roster.some((l) => l.id === id)));
-  const area = round3(members.reduce((t, m) => t + memberArea(m), 0));
+  // Total of the rows that will actually be saved (blank rows ignored) — same rule as the store
+  const area = round3(validMembers(members).members.reduce((t, m) => t + m.nos * m.side * m.length * m.cf, 0));
+  const canBackdate = s.role === "owner" || s.role === "super_admin";
   const norm = it?.paints.find((p) => p.sap === paintSap)?.normL ?? 0;
   const expected = round3(area * norm);
   const lit = Number(litres) || 0;
@@ -261,6 +269,8 @@ function DprForm({ job, onDone }: { job: Job; onDone: (m: { ok: boolean; msg: st
       className="mt-4 space-y-3 rounded-sm border border-[var(--sge-brass)]/40 bg-[var(--sge-brass-wash)]/40 p-3"
       onSubmit={(e) => {
         e.preventDefault();
+        const rows = validMembers(members);
+        if (rows.error) return setErr(rows.error);
         if (stage === fin && it?.paints.length && !(Number(dft) > 0)) return setErr("Actual DFT is required at final shade");
         const r = addDpr({ date, jobId: job.id, stage, members, paintSap: lit > 0 ? paintSap : undefined, litres: lit, dft: Number(dft) || undefined, enteredBy: s.enteredBy, crew });
         if (!r.ok) return setErr(r.error);
@@ -270,7 +280,15 @@ function DprForm({ job, onDone }: { job: Job; onDone: (m: { ok: boolean; msg: st
       <div className="grid gap-3 sm:grid-cols-3">
         <div>
           <Label>Date</Label>
-          <Input type="date" className="mt-1" value={date} onChange={(e) => setDate(e.target.value)} />
+          <Input
+            type="date"
+            className="mt-1"
+            // Today or yesterday (docs §4); Owner / Super Admin may back-date to the job start
+            min={canBackdate ? job.startDate : [daysAgo(1), job.startDate].sort().pop()}
+            max={today()}
+            value={date}
+            onChange={(e) => setDate(e.target.value)}
+          />
         </div>
         <div>
           <Label>Stage</Label>
@@ -281,7 +299,7 @@ function DprForm({ job, onDone }: { job: Job; onDone: (m: { ok: boolean; msg: st
           </select>
         </div>
         <div className="flex items-end text-xs text-[var(--sge-ink-2)]">
-          Entered as: <b className="ml-1">{s.enteredBy === "admin" ? "Admin (data operator)" : "Supervisor"}</b>
+          Entered as: <b className="ml-1">{s.enteredBy === "admin" ? "Admin (data operator)" : s.enteredBy === "supervisor" ? "Supervisor" : s.enteredBy.replace("_", " ")}</b>
         </div>
       </div>
 
@@ -351,6 +369,11 @@ function DprForm({ job, onDone }: { job: Job; onDone: (m: { ok: boolean; msg: st
         </div>
       </div>
 
+      {it?.paintsPending ? (
+        <p className="rounded-sm bg-[var(--sge-warn-wash)] px-2.5 py-1.5 text-[11px] text-[var(--sge-warn)]">
+          The paint list and norms for {it.mps} haven&apos;t been received yet — litres go against a placeholder until the Owner adds them.
+        </p>
+      ) : null}
       {it?.paints.length ? (
         <div className="grid gap-3 sm:grid-cols-3">
           <div>
@@ -394,6 +417,7 @@ function StartJob({ onDone }: { onDone: (m: { ok: boolean; msg: string }) => voi
   const line = s.line(lineId);
   const it = line ? s.item(line.serviceCode) : undefined;
   const [location, setLocation] = useState("");
+  const [startDate, setStartDate] = useState(today());
   const [stages, setStages] = useState<Stage[] | null>(null);
   const chosen = stages ?? it?.defaultStages ?? ["prep", "coat1", "coat2", "final"];
 
@@ -407,7 +431,7 @@ function StartJob({ onDone }: { onDone: (m: { ok: boolean; msg: string }) => voi
           className="space-y-3"
           onSubmit={(e) => {
             e.preventDefault();
-            const r = startJob({ planLineId: lineId, location, stages: chosen, startDate: today() });
+            const r = startJob({ planLineId: lineId, location, stages: chosen, startDate });
             onDone(r.ok ? { ok: true, msg: "Job started — add DPR entries as work progresses." } : { ok: false, msg: r.error });
             if (r.ok) { setLocation(""); setStages(null); }
           }}
@@ -418,6 +442,10 @@ function StartJob({ onDone }: { onDone: (m: { ok: boolean; msg: string }) => voi
               <select className={selectCls + " mt-1"} value={lineId} onChange={(e) => { setLineId(e.target.value); setStages(null); }}>
                 {lines.map((l) => <option key={l.id} value={l.id}>{lineLabel(l, s.item(l.serviceCode))}</option>)}
               </select>
+            </div>
+            <div>
+              <Label>Start date</Label>
+              <Input type="date" className="mt-1" max={today()} value={startDate} onChange={(e) => setStartDate(e.target.value)} />
             </div>
             <div>
               <Label>Location / area</Label>

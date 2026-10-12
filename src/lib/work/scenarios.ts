@@ -2,7 +2,7 @@
  * Test scenarios: each takes fresh seed data and prepares one situation a
  * tester wants to try, so nobody has to click through setup by hand.
  */
-import { currentMonthOf, jobStageAreas } from "./logic";
+import { currentMonthOf, entryArea, jobStageAreas } from "./logic";
 import { WORK_TODAY } from "./seed";
 import type { WorkState } from "./types";
 
@@ -38,10 +38,14 @@ export function applyScenario(w: WorkState, id: ScenarioId): WorkState {
       const line = s.planLines.find((l) => l.id === job.planLineId);
       if (job.status !== "open" || !line || line.month !== currentMonthOf(s, line.siteId)) continue;
       const done = jobStageAreas(job, s.dprs);
-      const last = [...s.dprs].reverse().find((d) => d.jobId === job.id);
+      // A job with no DPR at all can't be closed — leave it open
+      const entries = s.dprs.filter((d) => d.jobId === job.id);
+      if (!entries.length) continue;
+      // Copy the members of the largest stage done so far, so the final shade covers the measured area
+      const biggest = [...entries].sort((a, b) => entryArea(b) - entryArea(a))[0];
       for (const stage of job.stages) {
-        if (done[stage] > 0 || !last) continue;
-        s.dprs.push({ ...last, id: `wd-sc-${job.id}-${stage}`, stage, date: WORK_TODAY, litres: 0, paintSap: undefined, dft: stage === "final" ? 100 : undefined });
+        if (done[stage] > 0) continue;
+        s.dprs.push({ ...biggest, id: `wd-sc-${job.id}-${stage}`, stage, date: WORK_TODAY, litres: 0, paintSap: undefined, dft: stage === "final" ? 100 : undefined });
       }
       job.status = "awaiting_sic";
       job.closeRequestedAt = WORK_TODAY;

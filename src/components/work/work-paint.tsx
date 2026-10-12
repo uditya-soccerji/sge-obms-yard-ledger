@@ -91,7 +91,7 @@ export function WorkPaint() {
                     <td className={tdCls + " text-right font-semibold tabular-nums"}>{fmtM2(r.balance)}</td>
                     <td className={tdCls + " text-right tabular-nums"}>{fmtM2(Math.round(r.needed))}</td>
                     <td className={tdCls}>
-                      {r.flag === "negative" ? <StatusPill tone="crit">Negative</StatusPill> : r.flag === "low" ? <StatusPill tone="warn">Low — issue more</StatusPill> : r.flag === "none" ? <StatusPill>Not issued</StatusPill> : <StatusPill tone="ok">OK</StatusPill>}
+                      {r.flag === "negative" ? <StatusPill tone="crit">Negative</StatusPill> : r.flag === "low" ? <StatusPill tone="warn">Low — issue more</StatusPill> : r.flag === "no_stock" ? <StatusPill tone="crit">No stock — issue paint</StatusPill> : r.flag === "none" ? <StatusPill>Not issued</StatusPill> : <StatusPill tone="ok">OK</StatusPill>}
                     </td>
                   </tr>
                 ))}

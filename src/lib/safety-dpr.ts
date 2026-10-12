@@ -1,3 +1,4 @@
+import { today as todayDate } from "./today";
 import type {
   DprSafetyBody,
   SafetyChecklistAnswer,
@@ -156,7 +157,7 @@ export function recomputeGlanceFromObservations(
   ).length;
   const closed = observations.filter((o) => o.status === "CLOSED").length;
   const stillOpen = observations.filter((o) => o.status === "OPEN").length;
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayDate();
   const lateOver10Days = observations.filter((o) => {
     if (!o.firstFoundOn || o.status === "CLOSED") return false;
     const found = new Date(o.firstFoundOn);
