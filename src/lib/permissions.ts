@@ -182,6 +182,15 @@ export function plantScopeFor(
   return account.plantIds.length ? account.plantIds : "all";
 }
 
+/**
+ * Reset and test tools wipe or replace this browser's data, so only Owner and
+ * Super Admin get them, and not while viewing as someone else (the tester
+ * should see exactly what that role sees).
+ */
+export function canUseTestTools(role: RoleId | null | undefined, viewingAs: boolean): boolean {
+  return !viewingAs && (role === "owner" || role === "super_admin");
+}
+
 export function describeOverride(o: PermissionOverride): string {
   return `${o.module}:${o.action} → ${o.allow ? "allow" : "deny"}`;
 }

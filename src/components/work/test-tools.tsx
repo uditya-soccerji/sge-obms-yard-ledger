@@ -5,6 +5,7 @@ import { useState } from "react";
 import { FlaskConical } from "lucide-react";
 import { Panel } from "@/components/shared/ui-bits";
 import { Button } from "@/components/ui/button";
+import { canUseTestTools } from "@/lib/permissions";
 import { useStore } from "@/lib/store";
 import { SCENARIOS } from "@/lib/work/scenarios";
 import { useWork } from "@/lib/work/store";
@@ -33,7 +34,7 @@ export function TestTools() {
   const [viewAs, setViewAs] = useState(VIEW_AS[0].id);
   const [msg, setMsg] = useState<{ ok: boolean; msg: string } | null>(null);
   const role = state.currentRole;
-  if (state.impersonatorAccountId || (role !== "super_admin" && role !== "owner")) return null;
+  if (!canUseTestTools(role, !!state.impersonatorAccountId)) return null;
 
   return (
     <Panel className="border-dashed">
