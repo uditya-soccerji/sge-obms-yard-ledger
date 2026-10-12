@@ -21,7 +21,7 @@ Actual = Σ JMS on the plan line · Remaining = Plan − Actual · unfinished wo
 ```
 
 ## 2. Status (2026-10-11)
-- **Prototype only.** All data lives in the browser (`localStorage`); no backend yet.
+- **Backend started (Supabase project `sge-obms`, Mumbai).** Live in Supabase: logins (username + password; hidden email `<username>@obms.internal`), `profiles` (roles, sites), `sites`, `master_items` (Master Data catalog) and `audit_log`, all with RLS. Owner/Super Admin user management goes through the `admin-users` edge function (`supabase/functions/admin-users`). **Everything else** (Work module, DPRs, labourers, attendance, finance…) is still browser `localStorage`. Without the env vars the app falls back to the old local mock login.
 - Demo logins are in `README.md` (e.g. `uditya` / `password` = Super Admin). They are demo seed values, not secrets.
 - The **Work** module (`/work`) implements the flow above with real DTA Aug-2026 figures, plus **Payments** (SIC-approved vs received per JMS), **P&L** (cash basis; labour from DPR crews, fixed costs shared by labour-days) and **Test tools** (View as, scenarios, reset — Owner/Super Admin), a header **notification bell** ("Waiting for me", instant approvals/problems, daily summary, 24 h escalation) and an **Activity log** tab (Owner/Super Admin). Every Work action writes an event via `log()` in `work/store.tsx`; who sees it is decided in `work/events.ts` (`isFor`). The Owner home and Finance show the same "Approved vs received" card.
 - Older demo screens (Operations, DPR desk, attendance, finance) use a separate store and are not yet joined to the Work module.
@@ -32,7 +32,7 @@ Actual = Σ JMS on the plan line · Remaining = Plan − Actual · unfinished wo
 - Next.js **15.5** (App Router, Turbopack dev) · React **19.1** · TypeScript (strict)
 - Tailwind CSS **v4** (`@import "tailwindcss"` in `src/app/globals.css`) + shadcn/ui on Radix (`src/components/ui/*`) · lucide-react icons
 - Fonts via `next/font`: Barlow Semi Condensed (headings, numbers), Inter (body), JetBrains Mono (codes)
-- No backend yet; state in React context + `localStorage`
+- Supabase (`@supabase/supabase-js`; client in `src/lib/supabase/`) for logins + users + master data; rest is still React context + `localStorage`
 
 ## 4. Run / check
 ```bash
@@ -118,7 +118,7 @@ docs/
 | Carry forward | Unfinished plan m² + open jobs move to next month when a month is closed |
 
 ## 8. Guardrails
-- Don't commit secrets. When Supabase arrives: only `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` in the browser; service-role key only server-side. Every schema/RLS change = a migration file in `supabase/migrations/`.
+- Don't commit secrets. When Supabase arrives: only `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` in the browser (see `.env.example`); service-role key only server-side. Every schema/RLS change = a migration file in `supabase/migrations/`.
 - Real people's data (Aadhaar, bank, wages) must never go in seed files or the repo.
 - Don't touch the separate **Operations Hub** project or its Supabase (`smmqycmbrpqthvnhrwzv`) from here.
 - Work on a branch; open a draft PR; keep `main` deployable.

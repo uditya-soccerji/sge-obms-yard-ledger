@@ -24,6 +24,7 @@ export default function LoginPage() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     if (hydrated && state.currentRole) {
@@ -31,9 +32,11 @@ export default function LoginPage() {
     }
   }, [hydrated, state.currentRole, router]);
 
-  function enter(user: string, pass: string) {
+  async function enter(user: string, pass: string) {
     setError(null);
-    const result = login(user, pass);
+    setBusy(true);
+    const result = await login(user, pass);
+    setBusy(false);
     if (!result.ok) {
       setError(result.error);
       return;
@@ -144,8 +147,8 @@ export default function LoginPage() {
               {error}
             </div>
           ) : null}
-          <Button type="submit" className="w-full gap-2 rounded-sm">
-            Enter desk
+          <Button type="submit" disabled={busy} className="w-full gap-2 rounded-sm">
+            {busy ? "Signing in…" : "Enter desk"}
             <ArrowRight className="h-3.5 w-3.5" />
           </Button>
         </form>

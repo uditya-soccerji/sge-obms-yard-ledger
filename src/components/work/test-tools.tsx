@@ -10,13 +10,13 @@ import { SCENARIOS } from "@/lib/work/scenarios";
 import { useWork } from "@/lib/work/store";
 import { Msg, selectCls } from "./common";
 
-/** Demo accounts a tester can "view as" (seed logins). */
+/** Demo accounts a tester can "view as" — matched by username, since account ids differ once logins live in Supabase. */
 const VIEW_AS = [
-  { id: "usr-paint", label: "Supervisor — V. Chauhan" },
-  { id: "usr-sic", label: "SIC — R. Mehta" },
-  { id: "usr-admin", label: "Admin (data operator)" },
-  { id: "usr-finance", label: "Finance" },
-  { id: "usr-owner", label: "Owner" },
+  { id: "paint", label: "Supervisor — V. Chauhan" },
+  { id: "sic", label: "SIC — R. Mehta" },
+  { id: "admin", label: "Admin (data operator)" },
+  { id: "finance", label: "Finance" },
+  { id: "owner", label: "Owner" },
 ];
 
 /**
@@ -24,7 +24,7 @@ const VIEW_AS = [
  * load a prepared scenario, or reset. Collapsed by default.
  */
 export function TestTools() {
-  const { state, startImpersonation } = useStore();
+  const { state, fullState, startImpersonation } = useStore();
   const { loadScenario, resetWork } = useWork();
   const router = useRouter();
   const [open, setOpen] = useState(false);
@@ -54,7 +54,9 @@ export function TestTools() {
               <Button
                 variant="outline"
                 onClick={() => {
-                  const r = startImpersonation(viewAs);
+                  const target = fullState.users.find((u) => u.username === viewAs);
+                  if (!target) return setMsg({ ok: false, msg: `No account "@${viewAs}" found` });
+                  const r = startImpersonation(target.id);
                   if (!r.ok) return setMsg({ ok: false, msg: r.error });
                   router.push("/work");
                 }}

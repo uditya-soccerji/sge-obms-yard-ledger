@@ -276,7 +276,13 @@ function SiteForm({
 }
 
 function UsersSheet({ showInactive }: { showInactive: boolean }) {
-  const { fullState: state, createUser, updateUser, startImpersonation } = useStore();
+  const {
+    fullState: state,
+    createUser,
+    updateUser,
+    setUserPassword,
+    startImpersonation,
+  } = useStore();
   const router = useRouter();
   const isSa =
     state.currentRole === "super_admin" && !state.impersonatorAccountId;
@@ -348,9 +354,9 @@ function UsersSheet({ showInactive }: { showInactive: boolean }) {
           <Button
             size="sm"
             disabled={!canEdit}
-            onClick={() => {
+            onClick={async () => {
               const input = {
-                username: username.trim(),
+                username: username.trim().toLowerCase(),
                 password,
                 name: name.trim(),
                 roles: [role],
@@ -362,7 +368,8 @@ function UsersSheet({ showInactive }: { showInactive: boolean }) {
               // Check here too: the store's result isn't known until React applies the update
               const invalid = checkSeat(input, state.users);
               if (invalid) return setMsg({ ok: false, text: invalid });
-              createUser(input);
+              const r = await createUser(input);
+              if (!r.ok) return setMsg({ ok: false, text: r.error ?? "Failed" });
               setMsg({ ok: true, text: `Created @${input.username} · ${siteCodes(state, siteIds)}` });
               setUsername("");
               setName("");
@@ -395,11 +402,25 @@ function UsersSheet({ showInactive }: { showInactive: boolean }) {
               user={u}
               isSa={isSa}
               canEdit={canEdit}
-              onToggle={() => updateUser(u.id, { active: !u.active })}
+              onToggle={async () => {
+                const r = await updateUser(u.id, { active: !u.active });
+                if (!r.ok) setMsg({ ok: false, text: r.error ?? "Failed" });
+              }}
+              onResetPassword={async () => {
+                const pw = window.prompt(`New password for @${u.username} (min ${MIN_PASSWORD} characters)`);
+                if (!pw) return;
+                const r = await setUserPassword(u.id, pw);
+                setMsg({
+                  ok: r.ok,
+                  text: r.ok ? `Password reset for @${u.username}` : r.error ?? "Failed",
+                });
+              }}
               onSites={(ids) => {
                 const bad = checkSites(u.roles, ids);
                 if (bad) return bad;
-                updateUser(u.id, { siteIds: ids });
+                void updateUser(u.id, { siteIds: ids }).then((r) => {
+                  if (!r.ok) setMsg({ ok: false, text: r.error ?? "Failed" });
+                });
                 return null;
               }}
               onViewAs={() => {
@@ -471,6 +492,7 @@ function UserRow({
   isSa,
   canEdit,
   onToggle,
+  onResetPassword,
   onSites,
   onViewAs,
 }: {
@@ -478,6 +500,7 @@ function UserRow({
   isSa: boolean;
   canEdit: boolean;
   onToggle: () => void;
+  onResetPassword: () => void;
   /** Returns an error message, or null when saved */
   onSites: (ids: string[]) => string | null;
   onViewAs: () => void;
@@ -554,7 +577,10 @@ function UserRow({
             View as
           </Button>
         ) : null}
-        <Button size="sm" variant="ghost" onClick={onToggle}>
+        <Button size="sm" variant="ghost" disabled={!canEdit} onClick={onResetPassword}>
+          Reset password
+        </Button>
+        <Button size="sm" variant="ghost" disabled={!canEdit} onClick={onToggle}>
           {user.active ? "Deactivate" : "Activate"}
         </Button>
       </td>
