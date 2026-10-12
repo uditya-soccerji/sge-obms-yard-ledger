@@ -19,6 +19,8 @@ import { resolveActivityRate, withSupersession } from "./rate-book";
 import { roleMeta } from "./roles";
 import { migrateLegacySafetyBody } from "./safety-dpr";
 import { seedMasterCatalog } from "./master/seed-catalog";
+import { supabase } from "./supabase/client";
+import { remoteAudit, remoteLogin, remoteLogout } from "./supabase/remote";
 import type { CatalogItem, Contractor, MasterCatalog, MaterialItem } from "./master/types";
 import { createSeedState, STORAGE_KEY } from "./seed";
 import type {
@@ -55,9 +57,10 @@ interface StoreApi {
   state: AppState;
   hydrated: boolean;
   currentAccount: UserAccount | null;
-  login: (username: string, password: string) =>
-    | { ok: true; role: RoleId }
-    | { ok: false; error: string };
+  login: (
+    username: string,
+    password: string
+  ) => Promise<{ ok: true; role: RoleId } | { ok: false; error: string }>;
   switchRole: (role: RoleId) => void;
   logout: () => void;
   resetSeed: () => void;
@@ -301,7 +304,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   }, [state, hydrated]);
 
-  const login = useCallback((username: string, password: string) => {
+  const mockLogin = useCallback((username: string, password: string) => {
     const s = stateRef.current;
     const account = s.users.find(
       (u) =>
@@ -369,6 +372,43 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     return { ok: true as const, role };
   }, []);
 
+  /** Real login against Supabase when configured, else the local mock. */
+  const login = useCallback(
+    async (username: string, password: string) => {
+      if (!supabase) return mockLogin(username, password);
+      const res = await remoteLogin(username, password);
+      if (!res.ok) return { ok: false as const, error: res.error };
+      const { me, users, sites } = res.session;
+      const role = me.roles[0];
+      const s = stateRef.current;
+      const siteId = me.siteIds[0] ?? s.currentSiteId;
+      const next: AppState = {
+        ...s,
+        users,
+        sites: sites.length ? sites : s.sites,
+        currentAccountId: me.id,
+        currentRole: role,
+        currentUserId: me.staffId ?? me.labourerId ?? null,
+        currentSiteId: siteId,
+        impersonatorAccountId: null,
+        impersonatorSnapshot: null,
+      };
+      const entry = makeAudit(next, "users", "login", `Signed in as ${me.username} (${role})`);
+      setState({ ...next, auditLog: [entry, ...s.auditLog] });
+      void remoteAudit({
+        userId: me.id,
+        username: me.username,
+        role,
+        siteId,
+        module: "users",
+        action: "login",
+        detail: entry.detail,
+      });
+      return { ok: true as const, role };
+    },
+    [mockLogin]
+  );
+
   const switchRole = useCallback((role: RoleId) => {
     setState((s) => {
       const account = s.users.find((u) => u.id === s.currentAccountId);
@@ -385,6 +425,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const logout = useCallback(() => {
+    void remoteLogout();
     setState((s) => {
       const entry = makeAudit(s, "users", "logout", "Signed out");
       return {
