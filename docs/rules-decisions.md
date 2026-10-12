@@ -231,6 +231,14 @@ Management accounting (costing + P&L), not statutory books — Tally stays for G
 - **Escalation:** an approval waiting more than **24 hours** is escalated to Owner and Super Admin.
 - Every record keeps its trail: submitted by / when, approved or sent back by / when.
 
+## 20. Supervisor crews (decided 2026-10-13)
+- **Standing crew:** each labourer belongs to one supervisor's crew on a site, and stays there until changed. The supervisor's DPR lists their crew for attendance.
+- **Who changes crews:** the SIC (for their sites), Owner and Super Admin. Every crew change is logged (who, when, from → to, labourer).
+- **Major change:** Owner and Super Admin are notified when a labourer is moved off a supervisor's crew (transfer or removal).
+- **Supervisor picking labourers:** only when Owner / Super Admin has given that supervisor the right. A pick is a **request** that the SIC approves before the labourer joins the crew.
+- **Labourer already on another crew:** the request needs SIC approval, and the current supervisor is notified. If the current supervisor **releases** the labourer, they become free and the transfer can go ahead (still through SIC approval).
+- **Attendance:** marking attendance for one's own crew is submitted directly; the SIC gets a notification, not an approval step.
+
 ## Still open
 - **OT source:** neither ACPL nor eSSL monthly reports carry in/out times. Need an eSSL report with punch times (e.g. "Daily Attendance / In-Out" export) or in/out typed on the DPR.
 - **eSSL:** what are the two companies (Default vs SGE) and the 217 short codes (`2`, `3`…)?

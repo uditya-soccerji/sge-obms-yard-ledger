@@ -11,7 +11,7 @@ Screenshots, when saved as files, go in `docs/bugs/` as `B<nn>-<n>.png`. Never i
 |---|---|---|---|---|
 | B01 | 2026-10-13 | Super Admin · all sites · Master Data → Sites | Can't type a comma (or a space after a word) in "Plants (comma)", so plants can't be added on Add site or Edit | confirmed |
 | B02 | 2026-10-13 | Super Admin · MTF · Master Data → Sites | Feature: plants need locations under them, and each plant/location needs an RP (MTF runs RP2 and RP5) | open (ready to build) |
-| B03 | 2026-10-13 | Supervisor (Prasan Da, viewed as) · MTF · DPR → New | New supervisor's DPR shows an empty Labour attendance, and there's no way to give them labourers | needs owner |
+| B03 | 2026-10-13 | Supervisor (Prasan Da, viewed as) · MTF · DPR → New | New supervisor's DPR shows an empty Labour attendance, and there's no way to give them labourers | open (rules agreed, §20) |
 
 ## Details
 <!-- One section per bug:
@@ -94,5 +94,11 @@ Screenshots, when saved as files, go in `docs/bugs/` as `B<nn>-<n>.png`. Never i
   - (c) A Supervisor column in Master Data → Labourers; new labourers start with **no** supervisor instead of `staff[0]`.
   - (d) In the DPR form, an empty-crew message ("No labourers assigned to you — ask your SIC"), plus "Add from site list" for supervisors who have the right.
   - (e) Move labourers + assignments to Supabase (migration + RLS: SIC for their sites, supervisor for own crew when allowed). That's the step that makes it work across devices; confirm before applying to live.
-- Fix: _pending (app folder busy; needs owner answers)_
+- Owner answers (2026-10-13), now `docs/rules-decisions.md` §20:
+  1. **Standing crew** per site. The SIC can change it. Every change is logged, and Owner + Super Admin are notified of major changes (a labourer moved off a crew).
+  2. A supervisor **picking** labourers needs SIC approval. **Attendance** for their crew is submitted directly, and the SIC only gets a notification.
+  3. A labourer on **another crew** needs SIC approval, and that supervisor is notified. If they **release** the labourer, the transfer can go ahead.
+- Build adds to the fix plan: `CrewRequest` (requester, labourer, from-supervisor, status: requested / released / approved / rejected); events `crew_changed` (problem flag for moves off a crew → Owner/SA), `crew_requested` (to SIC + current supervisor, instant), `crew_released`, `crew_approved` / `crew_rejected` (to requester), `attendance_submitted` (to SIC, daily summary).
+- Check with owner during build: point 2 makes attendance count when it's submitted. Today attendance becomes official only when the SIC approves the DPR (§5, `reviewDpr` → `attendanceFromApprovedDpr`). Does the SIC still approve the DPR's **work** quantities (§5), while attendance no longer waits for that?
+- Fix: _pending (app folder busy)_
 
