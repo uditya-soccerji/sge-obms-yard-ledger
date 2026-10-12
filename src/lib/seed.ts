@@ -744,21 +744,21 @@ export function createSeedState(): AppState {
       },
     ],
     labourers: [
-      { id: "lb-01", name: "Ramesh Kumar", trade: "painter", tradeSubcategory: "spray", epNumber: "EP-88421", gatePass: "GP-DTA-1201", siteId: SITE, supervisorId: "st-sup1", contractorId: "con-sge", wageDaily: 850, equipmentIds: ["eq-harness-1"], active: true },
-      { id: "lb-02", name: "Suresh Yadav", trade: "painter", tradeSubcategory: "manual", epNumber: "EP-88422", gatePass: "GP-DTA-1202", siteId: SITE, supervisorId: "st-sup1", contractorId: "con-sge", wageDaily: 850, equipmentIds: [], active: true },
-      { id: "lb-03", name: "Imran Shaikh", trade: "blaster", epNumber: "EP-88430", gatePass: "GP-DTA-1210", siteId: SITE, supervisorId: "st-sup2", contractorId: "con-sub-a", wageDaily: 920, equipmentIds: ["eq-hopper-1"], active: true },
-      { id: "lb-04", name: "Deepak Singh", trade: "blaster", epNumber: "EP-88431", gatePass: "GP-DTA-1211", siteId: SITE, supervisorId: "st-sup2", contractorId: "con-sub-a", wageDaily: 900, equipmentIds: [], active: true },
-      { id: "lb-05", name: "Mahesh Rathod", trade: "scaffolder", epNumber: "EP-88440", gatePass: "GP-DTA-1220", siteId: SITE, supervisorId: "st-sup3", contractorId: "con-sge", wageDaily: 880, equipmentIds: ["eq-harness-2"], active: true },
-      { id: "lb-06", name: "Anil Prajapati", trade: "scaffolder", epNumber: "EP-88441", gatePass: "GP-DTA-1221", siteId: SITE, supervisorId: "st-sup3", contractorId: "con-sge", wageDaily: 880, equipmentIds: [], active: true },
-      { id: "lb-07", name: "Jignesh Barot", trade: "helper", epNumber: "EP-88450", gatePass: "GP-DTA-1230", siteId: SITE, supervisorId: "st-sup2", contractorId: "con-sub-a", wageDaily: 650, equipmentIds: [], active: true },
-      { id: "lb-08", name: "Faruk Pathan", trade: "rigger", epNumber: "EP-88455", gatePass: "GP-DTA-1235", siteId: SITE, supervisorId: "st-sup1", contractorId: "con-sge", wageDaily: 800, equipmentIds: [], active: true },
-      { id: "lb-09", name: "Kiran Makwana", trade: "painter", tradeSubcategory: "spray", epNumber: "EP-88423", gatePass: "GP-DTA-1203", siteId: SITE, supervisorId: "st-sup1", contractorId: "con-sge", wageDaily: 850, equipmentIds: [], active: true },
-      { id: "lb-10", name: "Bharat Gohil", trade: "fitter", epNumber: "EP-88460", gatePass: "GP-DTA-1240", siteId: SITE, supervisorId: "st-sup2", contractorId: "con-sge", wageDaily: 870, equipmentIds: [], active: false },
+      { id: "lb-01", name: "Ramesh Kumar", trade: "painter", tradeSubcategory: "spray", epNumber: "PP5920188421", gatePass: "GP-DTA-1201", siteId: SITE, supervisorId: "st-sup1", contractorId: "con-sge", wageDaily: 850, equipmentIds: ["eq-harness-1"], active: true },
+      { id: "lb-02", name: "Suresh Yadav", trade: "painter", tradeSubcategory: "manual", epNumber: "PP5920188422", gatePass: "GP-DTA-1202", siteId: SITE, supervisorId: "st-sup1", contractorId: "con-sge", wageDaily: 850, equipmentIds: [], active: true },
+      { id: "lb-03", name: "Imran Shaikh", trade: "blaster", epNumber: "PP5920188430", gatePass: "GP-DTA-1210", siteId: SITE, supervisorId: "st-sup2", contractorId: "con-sub-a", wageDaily: 920, equipmentIds: ["eq-hopper-1"], active: true },
+      { id: "lb-04", name: "Deepak Singh", trade: "blaster", epNumber: "PP5920188431", gatePass: "GP-DTA-1211", siteId: SITE, supervisorId: "st-sup2", contractorId: "con-sub-a", wageDaily: 900, equipmentIds: [], active: true },
+      { id: "lb-05", name: "Mahesh Rathod", trade: "scaffolder", epNumber: "PP5920188440", gatePass: "GP-DTA-1220", siteId: SITE, supervisorId: "st-sup3", contractorId: "con-sge", wageDaily: 880, equipmentIds: ["eq-harness-2"], active: true },
+      { id: "lb-06", name: "Anil Prajapati", trade: "scaffolder", epNumber: "PP5920188441", gatePass: "GP-DTA-1221", siteId: SITE, supervisorId: "st-sup3", contractorId: "con-sge", wageDaily: 880, equipmentIds: [], active: true },
+      { id: "lb-07", name: "Jignesh Barot", trade: "helper", epNumber: "PP5920188450", gatePass: "GP-DTA-1230", siteId: SITE, supervisorId: "st-sup2", contractorId: "con-sub-a", wageDaily: 650, equipmentIds: [], active: true },
+      { id: "lb-08", name: "Faruk Pathan", trade: "rigger", epNumber: "PP5920188455", gatePass: "GP-DTA-1235", siteId: SITE, supervisorId: "st-sup1", contractorId: "con-sge", wageDaily: 800, equipmentIds: [], active: true },
+      { id: "lb-09", name: "Kiran Makwana", trade: "painter", tradeSubcategory: "spray", epNumber: "PP5920188423", gatePass: "GP-DTA-1203", siteId: SITE, supervisorId: "st-sup1", contractorId: "con-sge", wageDaily: 850, equipmentIds: [], active: true },
+      { id: "lb-10", name: "Bharat Gohil", trade: "fitter", epNumber: "PP5920188460", gatePass: "GP-DTA-1240", siteId: SITE, supervisorId: "st-sup2", contractorId: "con-sge", wageDaily: 870, equipmentIds: [], active: false },
       ...Array.from({ length: 40 }, (_, i) => ({
         id: `lb-x-${i + 1}`,
         name: `Roster ${String(i + 1).padStart(2, "0")}`,
         trade: i % 3 === 0 ? "helper" : i % 3 === 1 ? "painter" : "scaffolder",
-        epNumber: `EP-89${String(i + 100).slice(-3)}`,
+        epNumber: `PP5920189${String(i + 100).slice(-3)}`,
         gatePass: `GP-DTA-13${String(i + 10).padStart(2, "0")}`,
         siteId: SITE,
         supervisorId: i % 2 ? "st-sup1" : "st-sup3",
@@ -1154,18 +1154,18 @@ export function createSeedState(): AppState {
       { id: "vn-3", name: "Gujarat PPE Mart", category: "PPE", status: "active" },
     ],
     acplPunches: [
-      { id: "acpl-1", date: YDAY, epNumber: "EP-88440", labourerName: "Mahesh Rathod", inTime: "07:52", outTime: "18:02", source: "seed" },
-      { id: "acpl-2", date: YDAY, epNumber: "EP-88441", labourerName: "Anil Prajapati", inTime: "08:20", outTime: "18:10", source: "seed" },
-      { id: "acpl-3", date: YDAY, epNumber: "EP-88499", labourerName: "Unknown punch", inTime: "09:00", outTime: "17:00", source: "seed" },
-      { id: "acpl-4", date: D2, epNumber: "EP-88421", labourerName: "Ramesh Kumar", inTime: "08:00", outTime: "18:00", source: "seed" },
-      { id: "acpl-5", date: D2, epNumber: "EP-88422", labourerName: "Suresh Yadav", inTime: "08:05", outTime: "18:00", source: "seed" },
+      { id: "acpl-1", date: YDAY, epNumber: "PP5920188440", labourerName: "Mahesh Rathod", inTime: "07:52", outTime: "18:02", source: "seed" },
+      { id: "acpl-2", date: YDAY, epNumber: "PP5920188441", labourerName: "Anil Prajapati", inTime: "08:20", outTime: "18:10", source: "seed" },
+      { id: "acpl-3", date: YDAY, epNumber: "PP5920188499", labourerName: "Unknown punch", inTime: "09:00", outTime: "17:00", source: "seed" },
+      { id: "acpl-4", date: D2, epNumber: "PP5920188421", labourerName: "Ramesh Kumar", inTime: "08:00", outTime: "18:00", source: "seed" },
+      { id: "acpl-5", date: D2, epNumber: "PP5920188422", labourerName: "Suresh Yadav", inTime: "08:05", outTime: "18:00", source: "seed" },
     ],
     acplMatches: [
       {
         id: "am-1",
         date: YDAY,
         labourerId: "lb-05",
-        epNumber: "EP-88440",
+        epNumber: "PP5920188440",
         flag: "match",
         dprStatus: "present",
         dprInTime: "07:50",
@@ -1177,7 +1177,7 @@ export function createSeedState(): AppState {
         id: "am-2",
         date: YDAY,
         labourerId: "lb-06",
-        epNumber: "EP-88441",
+        epNumber: "PP5920188441",
         flag: "time_mismatch",
         dprStatus: "present",
         dprInTime: "07:55",
@@ -1188,7 +1188,7 @@ export function createSeedState(): AppState {
       {
         id: "am-3",
         date: YDAY,
-        epNumber: "EP-88499",
+        epNumber: "PP5920188499",
         flag: "acpl_only",
         acplInTime: "09:00",
         acplOutTime: "17:00",
@@ -1198,7 +1198,7 @@ export function createSeedState(): AppState {
         id: "am-4",
         date: D2,
         labourerId: "lb-02",
-        epNumber: "EP-88422",
+        epNumber: "PP5920188422",
         flag: "dpr_only",
         dprStatus: "present",
         dprInTime: "08:00",
@@ -1396,7 +1396,8 @@ export function createSeedState(): AppState {
 }
 
 /** v9: per-site demo data — a new key so old browsers load the new seed. */
-export const STORAGE_KEY = "sge-obms-ops-v9-sites";
+/** v10: EP numbers in the PP + 10 digit format (docs §1) */
+export const STORAGE_KEY = "sge-obms-ops-v10-ep";
 export { SAFETY_ITEMS };
 
 /**

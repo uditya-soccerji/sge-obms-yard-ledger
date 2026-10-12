@@ -12,6 +12,7 @@ import { WorkPayments } from "@/components/work/work-payments";
 import { WorkPlan } from "@/components/work/work-plan";
 import { WorkPnl } from "@/components/work/work-pnl";
 import { canAccessWork } from "@/lib/desk";
+import { workTabsFor } from "@/lib/work/permissions";
 import { ALL_SITES } from "@/lib/site-scope";
 import { useStore } from "@/lib/store";
 import { useWork } from "@/lib/work/store";
@@ -37,13 +38,14 @@ function WorkInner() {
   const role = state.currentRole;
   const canMoney = role === "owner" || role === "super_admin" || role === "finance";
   const isBoss = role === "owner" || role === "super_admin";
-  const tabs = TABS.filter((t) => (!t.money || canMoney) && (!t.boss || isBoss));
-  const fallback: TabId = role === "finance" ? "payments" : "plan";
+  const only = workTabsFor(role);
+  const tabs = TABS.filter((t) => (!t.money || canMoney) && (!t.boss || isBoss) && (only === "all" || only.includes(t.id)));
+  const fallback: TabId = role === "finance" ? "payments" : (tabs[0]?.id ?? "plan");
   const tab = (tabs.find((t) => t.id === params.get("t"))?.id ?? fallback) as TabId;
   const siteName = state.currentSiteId === ALL_SITES ? "All sites" : state.sites.find((s) => s.id === state.currentSiteId)?.name;
 
   if (!canAccessWork(role)) {
-    return <EmptyState title="Work is for supervisors, SIC, Admin, Finance, Owner and Super Admin" detail="Switch to one of those seats to open it." />;
+    return <EmptyState title="Work is for supervisors, SIC, Admin, Store, Finance, Owner and Super Admin" detail="Switch to one of those seats to open it." />;
   }
   if (!hydrated) return <div className="py-16 text-center text-sm text-[var(--sge-ink-3)]">Loading work…</div>;
 

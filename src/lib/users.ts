@@ -9,7 +9,7 @@ export const MIN_PASSWORD = 6;
  * Pass `editingId` when changing an existing user so it isn't matched against itself.
  */
 export function checkSeat(
-  input: { name: string; username: string; password: string; roles: RoleId[]; siteIds: string[] },
+  input: { name: string; username: string; password: string; roles: RoleId[]; siteIds: string[]; staffId?: string; labourerId?: string },
   users: UserAccount[],
   editingId?: string
 ): string | null {
@@ -20,7 +20,23 @@ export function checkSeat(
   }
   if (input.password.length < MIN_PASSWORD) return `Password must be at least ${MIN_PASSWORD} characters`;
   if (input.roles.length === 0) return "Pick a role";
+  const link = checkLink(input.roles, input.staffId, input.labourerId);
+  if (link) return link;
   return checkSites(input.roles, input.siteIds);
+}
+
+/** Roles whose work is tied to a person in the registers (jobs, DPRs, crews, paint). */
+export const STAFF_LINKED_ROLES: RoleId[] = ["supervisor", "sic", "store", "safety", "admin", "hr", "finance"];
+
+/**
+ * A login must point at the person it belongs to: a staff record for field and
+ * office roles, a labourer for the labourer role. Without it the app can't tell
+ * whose jobs, DPRs or crew the login sees.
+ */
+export function checkLink(roles: RoleId[], staffId?: string, labourerId?: string): string | null {
+  if (roles.includes("labourer") && !labourerId) return "Link this login to a labourer";
+  if (roles.some((r) => STAFF_LINKED_ROLES.includes(r)) && !staffId) return "Link this login to a staff record (or create one)";
+  return null;
 }
 
 /** Site rules: at least one; supervisors work on exactly one site (they may cover several plants there). */

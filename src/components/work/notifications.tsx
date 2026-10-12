@@ -5,22 +5,29 @@ import { useEffect, useRef, useState } from "react";
 import { Bell, ShieldAlert } from "lucide-react";
 import { useStore } from "@/lib/store";
 import { isFor, isInstant, KIND_LABEL, type Viewer, type WorkEvent } from "@/lib/work/events";
-import { canCloseJob, daysBetween } from "@/lib/work/logic";
-import { WORK_TODAY } from "@/lib/work/seed";
+import { canCloseJob } from "@/lib/work/logic";
 import { useWork } from "@/lib/work/store";
 import { cn } from "@/lib/utils";
 
-/** Approvals older than this escalate to Owner / Super Admin (docs §19). */
-export const ESCALATE_AFTER_DAYS = 1;
+/** Approvals waiting longer than this escalate to Owner / Super Admin (docs §19). */
+export const ESCALATE_AFTER_HOURS = 24;
 
 export interface WaitingItem {
   id: string;
   title: string;
   detail: string;
-  ageDays: number;
+  ageHours: number;
   escalated: boolean;
   tab: string;
 }
+
+/** Hours since an ISO timestamp (or a date-only value, read as midnight UTC). */
+export function hoursSince(at: string, now = Date.now()): number {
+  const t = Date.parse(at);
+  return Number.isFinite(t) ? Math.max(0, (now - t) / 3_600_000) : 0;
+}
+
+export const ageLabel = (hours: number) => (hours < 24 ? `${Math.floor(hours)} h` : `${Math.floor(hours / 24)} d`);
 
 /** What the viewer has to act on right now, derived from live state. */
 export function useWaitingForMe(): WaitingItem[] {
@@ -35,17 +42,18 @@ export function useWaitingForMe(): WaitingItem[] {
     const line = lineOf(job.planLineId);
     if (!line || !onSite(line.siteId)) continue;
     if (job.status === "awaiting_sic") {
-      const age = daysBetween(job.closeRequestedAt ?? WORK_TODAY, WORK_TODAY);
-      const escalated = age >= ESCALATE_AFTER_DAYS;
+      // Real elapsed time: the close is stamped when the supervisor asks (docs §19, 24 h)
+      const age = job.closeRequestedAt ? hoursSince(job.closeRequestedAt) : 0;
+      const escalated = age >= ESCALATE_AFTER_HOURS;
       // SIC approves; Owner / Super Admin see every waiting item, escalated ones flagged
       const mine = role === "sic" || role === "owner" || role === "super_admin";
-      if (mine) items.push({ id: job.id, title: `Confirm JMS · ${job.jobNo}`, detail: `${line.plant} · ${job.location}`, ageDays: age, escalated, tab: "jobs" });
+      if (mine) items.push({ id: job.id, title: `Confirm JMS · ${job.jobNo}`, detail: `${line.plant} · ${job.location}`, ageHours: age, escalated, tab: "jobs" });
     }
     if (role === "supervisor" && job.supervisorId === state.currentUserId && canCloseJob(job, work.dprs).ok) {
-      items.push({ id: job.id, title: `Close job · ${job.jobNo}`, detail: `All stages done · ${job.location}`, ageDays: 0, escalated: false, tab: "jobs" });
+      items.push({ id: job.id, title: `Close job · ${job.jobNo}`, detail: `All stages done · ${job.location}`, ageHours: 0, escalated: false, tab: "jobs" });
     }
   }
-  return items.sort((a, b) => Number(b.escalated) - Number(a.escalated) || b.ageDays - a.ageDays);
+  return items.sort((a, b) => Number(b.escalated) - Number(a.escalated) || b.ageHours - a.ageHours);
 }
 
 export function useMyEvents() {
@@ -136,10 +144,10 @@ export function NotificationBell() {
                     <span className="text-sm font-semibold">{w.title}</span>
                     {w.escalated ? (
                       <span className="flex items-center gap-1 rounded-sm bg-[var(--sge-crit-wash)] px-1.5 py-0.5 text-[10px] font-bold uppercase text-[var(--sge-crit)]">
-                        <ShieldAlert className="h-3 w-3" /> Escalated · {w.ageDays} d
+                        <ShieldAlert className="h-3 w-3" /> Escalated · {ageLabel(w.ageHours)}
                       </span>
-                    ) : w.ageDays > 0 ? (
-                      <span className="text-[10px] text-[var(--sge-ink-3)]">{w.ageDays} d</span>
+                    ) : w.ageHours >= 1 ? (
+                      <span className="text-[10px] text-[var(--sge-ink-3)]">{ageLabel(w.ageHours)}</span>
                     ) : null}
                   </div>
                   <div className="text-xs text-[var(--sge-ink-3)]">{w.detail}</div>

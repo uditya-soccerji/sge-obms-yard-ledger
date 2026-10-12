@@ -47,10 +47,13 @@ const ROLE_MATRIX: Record<RoleId, Partial<Record<ModuleId, PermissionAction[]>>>
     dpr: ["view", "approve"],
     approvals: ["view", "approve"],
     acpl: ["view"],
-    jms: ["view", "export"],
+    // Owner signs off JMS alongside SIC (the JMS screen offers it)
+    jms: ["view", "approve", "export"],
     calculators: ["view"],
     telegram: ["view", "create"],
     audit: ["view", "export"],
+    // Owner manages seats in Master Data (not the Super Admin role itself)
+    users: ["view", "create", "update"],
     requests: ["view"],
     submissions: ["view"],
     trades: ["view"],
@@ -169,11 +172,14 @@ export function plantScopeFor(
     activeRole === "sic" ||
     activeRole === "admin" ||
     activeRole === "hr" ||
-    activeRole === "finance"
+    activeRole === "finance" ||
+    // The store serves every plant on its site
+    activeRole === "store"
   ) {
     return "all";
   }
-  return account.plantIds.length ? account.plantIds : [];
+  // No plants assigned means no restriction (the site rule still applies), not "nothing"
+  return account.plantIds.length ? account.plantIds : "all";
 }
 
 export function describeOverride(o: PermissionOverride): string {

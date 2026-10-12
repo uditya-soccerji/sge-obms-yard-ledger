@@ -28,11 +28,66 @@ export function entryArea(e: DprEntry): number {
   return round3(e.members.reduce((s, m) => s + memberArea(m), 0));
 }
 
-/** m² done per stage on a job. */
+const entryKey = (e: DprEntry) => `${e.jobId}|${e.date}|${e.stage}`;
+
+/**
+ * Double entry (docs §5, §5b): Admin re-enters every DPR and Admin's figures
+ * win. For each job · date · stage that Admin entered, the supervisor's
+ * entries are kept for comparison only and never counted.
+ */
+export function effectiveEntries(dprs: DprEntry[]): DprEntry[] {
+  const admin = new Set(dprs.filter((e) => e.enteredBy === "admin").map(entryKey));
+  return dprs.filter((e) => e.enteredBy === "admin" || !admin.has(entryKey(e)));
+}
+
+export interface EntryDiff {
+  jobId: string;
+  date: string;
+  stage: Stage;
+  supervisorArea: number;
+  adminArea: number;
+  supervisorLitres: number;
+  adminLitres: number;
+}
+
+/** Days where the supervisor's and Admin's entries for the same job and stage differ (docs §5b). */
+export function entryDiffs(dprs: DprEntry[]): EntryDiff[] {
+  const byKey = new Map<string, EntryDiff & { hasSup: boolean; hasAdmin: boolean }>();
+  for (const e of dprs) {
+    const k = entryKey(e);
+    const d = byKey.get(k) ?? { jobId: e.jobId, date: e.date, stage: e.stage, supervisorArea: 0, adminArea: 0, supervisorLitres: 0, adminLitres: 0, hasSup: false, hasAdmin: false };
+    if (e.enteredBy === "admin") {
+      d.hasAdmin = true;
+      d.adminArea = round3(d.adminArea + entryArea(e));
+      d.adminLitres = round3(d.adminLitres + e.litres);
+    } else {
+      d.hasSup = true;
+      d.supervisorArea = round3(d.supervisorArea + entryArea(e));
+      d.supervisorLitres = round3(d.supervisorLitres + e.litres);
+    }
+    byKey.set(k, d);
+  }
+  return [...byKey.values()]
+    .filter((d) => d.hasSup && d.hasAdmin && (d.supervisorArea !== d.adminArea || d.supervisorLitres !== d.adminLitres))
+    .map((d) => ({ jobId: d.jobId, date: d.date, stage: d.stage, supervisorArea: d.supervisorArea, adminArea: d.adminArea, supervisorLitres: d.supervisorLitres, adminLitres: d.adminLitres }));
+}
+
+/** m² done per stage on a job (Admin's entries win, see effectiveEntries). */
 export function jobStageAreas(job: Job, dprs: DprEntry[]): Record<Stage, number> {
   const out: Record<Stage, number> = { prep: 0, coat1: 0, coat2: 0, final: 0 };
-  for (const e of dprs) if (e.jobId === job.id) out[e.stage] = round3(out[e.stage] + entryArea(e));
+  for (const e of effectiveEntries(dprs)) if (e.jobId === job.id) out[e.stage] = round3(out[e.stage] + entryArea(e));
   return out;
+}
+
+// ─── Plan months per site (docs §15) ───────────────────────────────────────
+
+/** The month a site's new plan lines and jobs go into. */
+export function currentMonthOf(w: WorkState, siteId: string): string {
+  return w.siteMonths[siteId]?.current ?? w.defaultMonth;
+}
+
+export function isMonthClosed(w: WorkState, siteId: string, month: string): boolean {
+  return w.siteMonths[siteId]?.closed.includes(month) ?? false;
 }
 
 /** The job's "final shade" = the last stage it requires. */
@@ -78,7 +133,7 @@ export function lineStatus(line: PlanLine, w: WorkState): LineStatus {
     for (const s of job.stages) inProgress[s] = round3(inProgress[s] + a[s]);
   }
   const variance = plan > 0 ? actual / plan - 1 : 0;
-  const closed = w.closedMonths.includes(line.month);
+  const closed = isMonthClosed(w, line.siteId, line.month);
   let flag: LineStatus["flag"] = "running";
   if (variance > OVER_TOLERANCE) flag = "over";
   else if (closed) flag = variance < -UNDER_TOLERANCE ? "short" : "ok";
@@ -133,9 +188,9 @@ export function warnLevel(pct: number): "ok" | "warn" | "crit" {
   return "ok";
 }
 
-/** Litres a supervisor has used per paint, from their DPR entries. */
+/** Litres a supervisor has used per paint, from their DPR entries (Admin's entries win). */
 export function paintUsed(supervisorId: string, sap: string, dprs: DprEntry[]): number {
-  return round3(dprs.filter((e) => e.supervisorId === supervisorId && e.paintSap === sap).reduce((s, e) => s + e.litres, 0));
+  return round3(effectiveEntries(dprs).filter((e) => e.supervisorId === supervisorId && e.paintSap === sap).reduce((s, e) => s + e.litres, 0));
 }
 
 /**
@@ -192,7 +247,7 @@ export interface SupervisorPaint {
  * needed for their open plan lines (remaining m² × norm). Low = balance below
  * what the remaining scope needs (docs §6).
  */
-export function supervisorPaint(w: WorkState, month: string): SupervisorPaint[] {
+export function supervisorPaint(w: WorkState): SupervisorPaint[] {
   const rows = new Map<string, SupervisorPaint>();
   for (const b of w.paint) {
     if (!b.supervisorId) continue;
@@ -201,7 +256,7 @@ export function supervisorPaint(w: WorkState, month: string): SupervisorPaint[] 
     r.issued = round3(r.issued + b.qtyL);
     rows.set(key, r);
   }
-  for (const line of w.planLines.filter((l) => l.month === month)) {
+  for (const line of w.planLines.filter((l) => l.month === currentMonthOf(w, l.siteId))) {
     const item = w.serviceItems.find((s) => s.code === line.serviceCode);
     const rem = lineStatus(line, w).remaining;
     for (const p of item?.paints ?? []) {
@@ -292,7 +347,7 @@ export function labourByJob(w: WorkState, wageOf: (labourerId: string) => number
     return v;
   };
   const slots = new Map<string, Set<string>>();
-  for (const e of w.dprs) {
+  for (const e of effectiveEntries(w.dprs)) {
     for (const lab of e.crew ?? []) {
       const key = `${lab}|${e.date}`;
       slots.set(key, (slots.get(key) ?? new Set()).add(e.jobId));
@@ -324,12 +379,17 @@ export function labourByJob(w: WorkState, wageOf: (labourerId: string) => number
 }
 
 export interface JobPnl {
+  /** Job id, or `unalloc|<site>|<month>` for overhead with no crew to share it over */
   jobId: string;
+  kind: "job" | "unallocated";
   siteId: string;
   supervisorId: string;
   serviceCode: string;
   month: string;
+  /** m² of JMS approved (earned basis) */
   qty: number;
+  /** m² of JMS paid (cash basis) */
+  paidQty: number;
   /** JMS value approved by SIC (earned) */
   earned: number;
   /** Money received (cash basis income) */
@@ -344,57 +404,121 @@ export interface JobPnl {
   earnedProfit: number;
 }
 
-export function jobPnl(w: WorkState, wageOf: (labourerId: string) => number): JobPnl[] {
-  const labour = labourByJob(w, wageOf);
+/** Labour-days per site · month, the key fixed costs are shared by. */
+function siteLabourDays(w: WorkState, labour: Map<string, JobLabour>): Map<string, number> {
   const lineOf = new Map(w.planLines.map((l) => [l.id, l]));
-  // Site labour-days per month, to share fixed costs
-  const siteDays = new Map<string, number>();
+  const out = new Map<string, number>();
   for (const job of w.jobs) {
     const site = lineOf.get(job.planLineId)?.siteId ?? "";
     for (const [m, d] of Object.entries(labour.get(job.id)?.byMonth ?? {})) {
-      siteDays.set(`${site}|${m}`, (siteDays.get(`${site}|${m}`) ?? 0) + d);
+      out.set(`${site}|${m}`, (out.get(`${site}|${m}`) ?? 0) + d);
     }
   }
-  const fixed = new Map<string, number>();
+  return out;
+}
+
+function fixedBySiteMonth(w: WorkState): Map<string, number> {
+  const out = new Map<string, number>();
   for (const x of w.expenses) {
     if (x.kind !== "fixed") continue;
-    fixed.set(`${x.siteId}|${x.month}`, (fixed.get(`${x.siteId}|${x.month}`) ?? 0) + x.amount);
+    out.set(`${x.siteId}|${x.month}`, (out.get(`${x.siteId}|${x.month}`) ?? 0) + x.amount);
   }
-  return w.jobs.map((job) => {
-    const line = lineOf.get(job.planLineId)!;
+  return out;
+}
+
+const inMonth = (date: string | undefined, month: string) => month === "all" || (!!date && date.slice(0, 7) === month);
+
+/**
+ * P&L per job (docs §18) for one month, or "all". Each figure lands in the
+ * month it happened: income when the money was received (cash basis), earned
+ * when SIC approved the JMS, labour on the days worked, overhead in its own
+ * month, direct costs in the month they were spent.
+ *
+ * Fixed costs of a site-month with no DPR labour-days can't be shared over
+ * any job; they come back as "unallocated" rows so the totals still carry them.
+ */
+export function pnlRows(w: WorkState, wageOf: (labourerId: string) => number, month = "all"): JobPnl[] {
+  const labour = labourByJob(w, wageOf);
+  const lineOf = new Map(w.planLines.map((l) => [l.id, l]));
+  const siteDays = siteLabourDays(w, labour);
+  const fixed = fixedBySiteMonth(w);
+  const rows: JobPnl[] = [];
+  for (const job of w.jobs) {
+    const line = lineOf.get(job.planLineId);
+    if (!line) continue;
     const lab = labour.get(job.id) ?? { days: 0, cost: 0, byMonth: {}, costByMonth: {} };
     let overhead = 0;
+    let labourCost = 0;
+    let labourDays = 0;
     for (const [m, d] of Object.entries(lab.byMonth)) {
+      if (!inMonth(m, month)) continue;
+      labourDays += d;
+      labourCost += lab.costByMonth[m] ?? 0;
       const total = siteDays.get(`${line.siteId}|${m}`) ?? 0;
       if (total > 0) overhead += (fixed.get(`${line.siteId}|${m}`) ?? 0) * (d / total);
     }
-    const direct = w.expenses.filter((x) => x.kind === "direct" && x.jobId === job.id).reduce((s, x) => s + x.amount, 0);
+    const direct = w.expenses
+      .filter((x) => x.kind === "direct" && x.jobId === job.id && inMonth(x.month || x.date, month))
+      .reduce((s, x) => s + x.amount, 0);
     const jms = w.jms.find((j) => j.id === job.jmsId);
-    const earned = jms?.amount ?? 0;
-    const income = jms?.payment?.amount ?? 0;
-    const cost = lab.cost + direct + overhead;
-    return {
+    const approvedNow = !!jms && inMonth(jms.confirmedOn, month);
+    const paidNow = !!jms?.payment && inMonth(jms.payment.receivedOn, month);
+    const earned = approvedNow ? jms!.amount : 0;
+    const income = paidNow ? jms!.payment!.amount : 0;
+    const cost = labourCost + direct + overhead;
+    rows.push({
       jobId: job.id,
+      kind: "job",
       siteId: line.siteId,
       supervisorId: job.supervisorId,
       serviceCode: line.serviceCode,
-      month: line.month,
-      qty: jms?.qty ?? 0,
+      month: month === "all" ? line.month : month,
+      qty: approvedNow ? jms!.qty : 0,
+      paidQty: paidNow ? jms!.qty : 0,
       earned,
       income,
-      labour: lab.cost,
-      labourDays: lab.days,
+      labour: labourCost,
+      labourDays,
       direct,
       overhead,
       profit: income - cost,
       earnedProfit: earned - cost,
-    };
-  });
+    });
+  }
+  for (const [key, amount] of fixed) {
+    const [siteId, m] = key.split("|");
+    if (!inMonth(m, month) || (siteDays.get(key) ?? 0) > 0 || amount === 0) continue;
+    rows.push({
+      jobId: `unalloc|${siteId}|${m}`,
+      kind: "unallocated",
+      siteId,
+      supervisorId: "",
+      serviceCode: "",
+      month: m,
+      qty: 0,
+      paidQty: 0,
+      earned: 0,
+      income: 0,
+      labour: 0,
+      labourDays: 0,
+      direct: 0,
+      overhead: amount,
+      profit: -amount,
+      earnedProfit: -amount,
+    });
+  }
+  return rows;
+}
+
+/** All-months P&L per job (kept for callers that want every month at once). */
+export function jobPnl(w: WorkState, wageOf: (labourerId: string) => number): JobPnl[] {
+  return pnlRows(w, wageOf, "all");
 }
 
 export interface PnlTotals {
   key: string;
   qty: number;
+  paidQty: number;
   earned: number;
   income: number;
   labour: number;
@@ -410,8 +534,9 @@ export function rollUp(rows: JobPnl[], keyOf: (r: JobPnl) => string): PnlTotals[
   const m = new Map<string, PnlTotals>();
   for (const r of rows) {
     const k = keyOf(r);
-    const t = m.get(k) ?? { key: k, qty: 0, earned: 0, income: 0, labour: 0, labourDays: 0, direct: 0, overhead: 0, profit: 0, earnedProfit: 0 };
+    const t = m.get(k) ?? { key: k, qty: 0, paidQty: 0, earned: 0, income: 0, labour: 0, labourDays: 0, direct: 0, overhead: 0, profit: 0, earnedProfit: 0 };
     t.qty += r.qty;
+    t.paidQty += r.paidQty;
     t.earned += r.earned;
     t.income += r.income;
     t.labour += r.labour;

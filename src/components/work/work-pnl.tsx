@@ -1,12 +1,12 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import { Trash2 } from "lucide-react";
 import { formatINR, KpiTile, Panel, StatusPill } from "@/components/shared/ui-bits";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { jobPnl, monthLabel, perUnit, rollUp, type JobPnl, type PnlTotals } from "@/lib/work/logic";
+import { monthLabel, perUnit, pnlRows, rollUp, type JobPnl, type PnlTotals } from "@/lib/work/logic";
 import { WORK_TODAY } from "@/lib/work/seed";
 import { useWork } from "@/lib/work/store";
 import type { ExpenseKind } from "@/lib/work/types";
@@ -34,12 +34,13 @@ export function WorkPnl() {
   const [month, setMonth] = useState<string>("all");
   const months = [...new Set(work.planLines.map((l) => l.month))].sort();
 
-  const rows = useMemo(
-    () => jobPnl(work, s.wageOf).filter((r) => s.inSite(r.siteId) && (month === "all" || r.month === month)),
-    [work, s, month]
-  );
+  // Each figure lands in the month it happened (docs §18): cash = received that month,
+  // earned = approved that month, costs = incurred that month
+  const rows = pnlRows(work, s.wageOf, month).filter((r) => s.inSite(r.siteId));
   const profitOf = (t: { profit: number; earnedProfit: number }) => (basis === "cash" ? t.profit : t.earnedProfit);
   const incomeOf = (t: { income: number; earned: number }) => (basis === "cash" ? t.income : t.earned);
+  // m² that matches the basis: paid m² for cash, approved m² for earned
+  const qtyOf = (t: { qty: number; paidQty: number }) => (basis === "cash" ? t.paidQty : t.qty);
   const tot = rollUp(rows, () => "all")[0];
 
   const keyOf: Record<View, (r: JobPnl) => string> = {
@@ -49,6 +50,11 @@ export function WorkPnl() {
     site_month: (r) => `${r.siteId}|${r.month}`,
   };
   const labelOf = (key: string) => {
+    if (key.startsWith("unalloc|")) {
+      const [, site, m] = key.split("|");
+      return { main: "Unallocated overhead", sub: `${s.siteCode(site)} · ${monthLabel(m)} · no DPR crew that month to share it over` };
+    }
+    if (key === "" && view !== "site_month") return { main: "Unallocated overhead", sub: "Fixed costs in months with no DPR crew" };
     if (view === "job") {
       const j = work.jobs.find((x) => x.id === key);
       const l = j && s.line(j.planLineId);
@@ -63,14 +69,14 @@ export function WorkPnl() {
     return { main: `${s.siteCode(site)} · ${monthLabel(m)}`, sub: "" };
   };
   const groups = rollUp(rows, keyOf[view])
-    .filter((g) => g.qty > 0 || g.labour > 0 || g.direct > 0 || g.overhead > 0)
+    .filter((g) => qtyOf(g) > 0 || incomeOf(g) > 0 || g.labour > 0 || g.direct > 0 || g.overhead > 0)
     .sort((a, b) => profitOf(a) - profitOf(b));
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-end gap-3">
         <div>
-          <Label className="text-[11px] uppercase tracking-wide text-[var(--sge-ink-3)]">Plan month</Label>
+          <Label className="text-[11px] uppercase tracking-wide text-[var(--sge-ink-3)]">Month</Label>
           <select className={selectCls + " mt-1 w-40"} value={month} onChange={(e) => setMonth(e.target.value)}>
             <option value="all">All months</option>
             {months.map((m) => <option key={m} value={m}>{monthLabel(m)}</option>)}
@@ -94,7 +100,7 @@ export function WorkPnl() {
           ))}
         </div>
         <p className="max-w-md text-[11px] text-[var(--sge-ink-3)]">
-          Income counts when money is received. Labour = DPR crew × daily wage (split days shared). Fixed costs are shared over jobs by labour-days.
+          Each figure sits in the month it happened: cash income when received, earned when SIC approved, costs when incurred. Labour = DPR crew × daily wage (split days shared). Fixed costs are shared over jobs by labour-days; a month with no crew shows them as unallocated overhead.
         </p>
       </div>
 
@@ -104,7 +110,7 @@ export function WorkPnl() {
           <KpiTile label="Labour" value={money(tot.labour)} hint={`${fmtM2(Math.round(tot.labourDays))} labour-days`} />
           <KpiTile label="Direct + overhead" value={money(tot.direct + tot.overhead)} />
           <KpiTile label="Profit / loss" value={money(profitOf(tot))} tone={profitOf(tot) < 0 ? "crit" : "accent"} />
-          <KpiTile label="Per m²" value={money(perUnit(profitOf(tot), tot.qty))} hint={`${fmtM2(Math.round(tot.qty))} m² measured`} />
+          <KpiTile label="Per m²" value={money(perUnit(profitOf(tot), qtyOf(tot)))} hint={`${fmtM2(Math.round(qtyOf(tot)))} m² ${basis === "cash" ? "paid" : "approved"}`} />
           <KpiTile label="Per labour-day" value={money(perUnit(profitOf(tot), tot.labourDays))} />
         </div>
       ) : null}
@@ -145,7 +151,7 @@ export function WorkPnl() {
             </thead>
             <tbody>
               {groups.map((g) => (
-                <PnlRow key={g.key} g={g} label={labelOf(g.key)} income={incomeOf(g)} profit={profitOf(g)} />
+                <PnlRow key={g.key} g={g} label={labelOf(g.key)} income={incomeOf(g)} profit={profitOf(g)} qty={qtyOf(g)} />
               ))}
               {groups.length === 0 ? (
                 <tr>
@@ -165,7 +171,7 @@ export function WorkPnl() {
   );
 }
 
-function PnlRow({ g, label, income, profit }: { g: PnlTotals; label: { main: string; sub: string }; income: number; profit: number }) {
+function PnlRow({ g, label, income, profit, qty }: { g: PnlTotals; label: { main: string; sub: string }; income: number; profit: number; qty: number }) {
   const margin = income > 0 ? profit / income : null;
   return (
     <tr className="border-b border-[var(--sge-line)]">
@@ -173,14 +179,14 @@ function PnlRow({ g, label, income, profit }: { g: PnlTotals; label: { main: str
         <div className="font-medium">{label.main}</div>
         {label.sub ? <div className="text-[10px] text-[var(--sge-ink-3)]">{label.sub}</div> : null}
       </td>
-      <td className={tdCls + " text-right tabular-nums"}>{g.qty ? fmtM2(Math.round(g.qty * 10) / 10) : "—"}</td>
+      <td className={tdCls + " text-right tabular-nums"}>{qty ? fmtM2(Math.round(qty * 10) / 10) : "—"}</td>
       <td className={tdCls + " text-right tabular-nums"}>{money(income)}</td>
       <td className={tdCls + " text-right tabular-nums"}>{money(g.labour)}</td>
       <td className={tdCls + " text-right tabular-nums"}>{g.labourDays ? fmtM2(Math.round(g.labourDays * 10) / 10) : "—"}</td>
       <td className={tdCls + " text-right tabular-nums"}>{money(g.direct)}</td>
       <td className={tdCls + " text-right tabular-nums"}>{money(g.overhead)}</td>
       <td className={cn(tdCls, "text-right font-semibold tabular-nums", profit < 0 ? "text-[var(--sge-crit)]" : "text-[var(--sge-ok)]")}>{money(profit)}</td>
-      <td className={tdCls + " text-right tabular-nums"}>{money(perUnit(profit, g.qty))}</td>
+      <td className={tdCls + " text-right tabular-nums"}>{money(perUnit(profit, qty))}</td>
       <td className={tdCls + " text-right tabular-nums"}>{money(perUnit(profit, g.labourDays))}</td>
       <td className={tdCls + " text-right"}>
         {margin == null ? <StatusPill tone="warn">No income</StatusPill> : <StatusPill tone={margin < 0 ? "crit" : margin < 0.1 ? "warn" : "ok"}>{(margin * 100).toFixed(1)}%</StatusPill>}
@@ -193,12 +199,14 @@ function Expenses() {
   const { addExpense, removeExpense } = useWork();
   const s = useWorkScope();
   const { work } = s;
-  const defaultSite = s.allSites ? "site-dta" : s.currentSiteId;
-  const [f, setF] = useState({ kind: "fixed" as ExpenseKind, siteId: defaultSite, month: work.currentMonth, category: "", amount: "", jobId: "", note: "" });
+  const [f, setF] = useState({ kind: "fixed" as ExpenseKind, siteId: "", month: "", category: "", amount: "", jobId: "", note: "" });
+  // Site follows the header; only All sites picks one here
+  const site = s.allSites ? f.siteId || s.entrySite : s.currentSiteId;
+  const costMonth = f.month || s.monthOf(site);
   const [msg, setMsg] = useState<{ ok: boolean; msg: string } | null>(null);
   // Jobs on this site that are live or have DPR history (imported August jobs have none)
   const jobs = work.jobs.filter(
-    (j) => s.line(j.planLineId)?.siteId === f.siteId && (j.status !== "closed" || work.dprs.some((d) => d.jobId === j.id))
+    (j) => s.line(j.planLineId)?.siteId === site && (j.status !== "closed" || work.dprs.some((d) => d.jobId === j.id))
   );
   const list = work.expenses.filter((x) => s.inSite(x.siteId)).sort((a, b) => b.date.localeCompare(a.date));
 
@@ -212,8 +220,8 @@ function Expenses() {
             e.preventDefault();
             const r = addExpense({
               date: WORK_TODAY,
-              month: f.month,
-              siteId: f.siteId,
+              month: costMonth,
+              siteId: site,
               kind: f.kind,
               category: f.category,
               amount: Number(f.amount),
@@ -234,7 +242,7 @@ function Expenses() {
           {s.allSites ? (
             <div>
               <Label>Site</Label>
-              <select className={selectCls + " mt-1"} value={f.siteId} onChange={(e) => setF({ ...f, siteId: e.target.value, jobId: "" })}>
+              <select className={selectCls + " mt-1"} value={site} onChange={(e) => setF({ ...f, siteId: e.target.value, jobId: "" })}>
                 {s.sites.filter((x) => x.enabled).map((x) => <option key={x.id} value={x.id}>{x.code}</option>)}
               </select>
             </div>
@@ -242,7 +250,7 @@ function Expenses() {
           {f.kind === "fixed" ? (
             <div>
               <Label>Month</Label>
-              <Input type="month" className="mt-1" value={f.month} onChange={(e) => setF({ ...f, month: e.target.value })} />
+              <Input type="month" className="mt-1" value={costMonth} onChange={(e) => setF({ ...f, month: e.target.value })} />
             </div>
           ) : (
             <div>

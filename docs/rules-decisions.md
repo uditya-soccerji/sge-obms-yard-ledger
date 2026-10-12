@@ -240,3 +240,16 @@ Management accounting (costing + P&L), not statutory books — Tally stays for G
 
 ## 5b. Double-entry mismatch (DPR)
 - Admin's version wins. The supervisor is notified of each difference; differences feed the monthly review, and progress is calculated from Admin's figures.
+- **Built (2026-10-12):** per job · date · stage, if Admin entered anything only Admin's entries count for m², litres and crew; the supervisor gets a "figures differ" notification and the job card lists the differences.
+
+## 20. Decisions taken while fixing the high-priority bugs (2026-10-12)
+Taken without a fresh Owner answer, following the rules above; change here if the Owner disagrees.
+- **Plan month is per site.** Each site closes and carries forward its own month; closing DTA no longer closes MTF (§15).
+- **Store Keeper issues paint** in Work → Paint stock (Store, Owner, Super Admin). SIC and Admin no longer issue paint (§6, §9). The Store Keeper sees only the Paint stock tab of Work.
+- **P&L months:** each figure sits in the month it happened — cash income when received, earned when SIC approved, labour on the days worked, fixed costs in their month, direct costs in the month spent (§18). Fixed costs of a site-month with no DPR crew show as "Unallocated overhead" instead of disappearing.
+- **Approvals escalate after 24 real hours** from the close request (§19).
+- **DPR submit checks** (§5): plant from the site's list, permit and TBT confirmed, every crew member marked, m² / m³ above zero or a reason, max 2,000 m² per painting line, requests described with qty. Drafts can still be saved incomplete. A DPR can only be rejected with a reason.
+- **ACPL match** (§12): EPs are `PP` + 10 digits (a bare 10-digit code gets its PP); an unknown EP falls back to the labourer's name and is marked "matched by name". New flag **punched_but_absent**: absent / leave / off on the DPR but punched in. Out-times are compared as well as in-times.
+- **Legacy JMS packages:** paid once, only after SIC approval, at the amount actually received; ratings need an approved JMS and re-running them replaces that package's incentive drafts; DPR matching uses only SIC-approved DPRs on the same site, plant, activity and period and sums them.
+- **Logins:** every login is linked to a staff record (field and office roles) or a labourer; Master Data creates the staff record when needed.
+- **Access:** every page and store action checks the role's rights (lib/permissions.ts). Owner gains `jms: approve` and `users: view/create/update`; an account with no plants assigned covers every plant on its sites.

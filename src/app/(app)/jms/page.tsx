@@ -1,5 +1,6 @@
 "use client";
 
+import { guarded } from "@/components/shared/require-module";
 import { useState } from "react";
 import {
   EmptyState,
@@ -13,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { effectivePermission } from "@/lib/permissions";
 import { useStore } from "@/lib/store";
 import type { JmsLine } from "@/lib/types";
 
@@ -20,9 +22,10 @@ function uid(prefix: string) {
   return `${prefix}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
-export default function JmsPage() {
+function JmsPage() {
   const {
     state,
+    currentAccount,
     uploadJmsPackage,
     matchJmsLines,
     reviewJmsPackage,
@@ -36,8 +39,14 @@ export default function JmsPage() {
 V-204 blasting,CPP,blasting,150,m2,380
 FS-01 scaffold,CPP,scaffolding,840,m3,85`
   );
-  const [sicNote, setSicNote] = useState("");
+  // One note and one "amount received" box per package
+  const [notes, setNotes] = useState<Record<string, string>>({});
+  const [paying, setPaying] = useState<Record<string, string>>({});
   const [msg, setMsg] = useState<string | null>(null);
+  const role = state.currentRole;
+  const canUpload = effectivePermission(currentAccount, role, "jms", "upload");
+  const canApprove = effectivePermission(currentAccount, role, "jms", "approve");
+  const canPay = effectivePermission(currentAccount, role, "finance", "create");
 
   const pkgs = state.jmsPackages;
   const ratings = state.workRatings;
@@ -108,9 +117,7 @@ FS-01 scaffold,CPP,scaffolding,840,m3,85`
         </div>
       ) : null}
 
-      {(state.currentRole === "admin" ||
-        state.currentRole === "owner" ||
-        state.currentRole === "hr") && (
+      {canUpload && (
         <Panel>
           <h3 className="mb-3 font-heading text-sm font-bold">
             Upload JMS (CSV paste)
@@ -181,27 +188,24 @@ FS-01 scaffold,CPP,scaffolding,840,m3,85`
                 </div>
               </div>
               <div className="flex flex-wrap gap-1">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => {
-                    matchJmsLines(pkg.id);
-                    setMsg("Lines matched to DPR work.");
-                  }}
-                >
-                  Match → DPR
-                </Button>
-                {(state.currentRole === "sic" ||
-                  state.currentRole === "owner") && (
+                {canUpload || canApprove ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      matchJmsLines(pkg.id);
+                      setMsg("Lines matched to approved DPR work on the same site, plant and period.");
+                    }}
+                  >
+                    Match → DPR
+                  </Button>
+                ) : null}
+                {canApprove && (pkg.status === "uploaded" || pkg.status === "sic_review") && (
                   <>
                     <Button
                       size="sm"
                       onClick={() => {
-                        reviewJmsPackage(
-                          pkg.id,
-                          "sic_approved",
-                          sicNote || "Verified vs DPR"
-                        );
+                        reviewJmsPackage(pkg.id, "sic_approved", notes[pkg.id]?.trim() || "Verified vs DPR");
                         setMsg("JMS SIC-approved — Finance notified.");
                       }}
                     >
@@ -211,11 +215,8 @@ FS-01 scaffold,CPP,scaffolding,840,m3,85`
                       size="sm"
                       variant="outline"
                       onClick={() => {
-                        reviewJmsPackage(
-                          pkg.id,
-                          "sic_rejected",
-                          sicNote || "Qty mismatch"
-                        );
+                        if (!notes[pkg.id]?.trim()) return setMsg("Give a reason for rejecting this JMS.");
+                        reviewJmsPackage(pkg.id, "sic_rejected", notes[pkg.id].trim());
                         setMsg("JMS rejected.");
                       }}
                     >
@@ -223,37 +224,60 @@ FS-01 scaffold,CPP,scaffolding,840,m3,85`
                     </Button>
                   </>
                 )}
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => {
-                    computeRatings(pkg.id);
-                    setMsg("Work ratings + incentive drafts computed.");
-                  }}
-                >
-                  Compute ratings
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => {
-                    markJmsPayment(pkg.id, true, "Bank credit noted");
-                    setMsg("Payment marked received.");
-                  }}
-                >
-                  Mark paid
-                </Button>
+                {canApprove && pkg.status === "sic_approved" ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      const r = computeRatings(pkg.id);
+                      setMsg(r.ok ? "Work ratings computed — this package's incentive drafts were replaced, not added again." : r.error ?? "Couldn't compute ratings");
+                    }}
+                  >
+                    Compute ratings
+                  </Button>
+                ) : null}
+                {canPay && pkg.status === "sic_approved" && !pkg.paymentReceived ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setPaying((p) => ({ ...p, [pkg.id]: p[pkg.id] ?? String(pkg.expectedIncome) }))}
+                  >
+                    Mark paid
+                  </Button>
+                ) : null}
               </div>
             </div>
 
-            {(state.currentRole === "sic" || state.currentRole === "owner") && (
+            {paying[pkg.id] != null && !pkg.paymentReceived ? (
+              <form
+                className="mb-3 flex flex-wrap items-end gap-2 rounded-md border border-[var(--sge-line)] p-2"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const r = markJmsPayment(pkg.id, true, { amount: Number(paying[pkg.id]), note: "Bank credit noted" });
+                  setMsg(r.ok ? "Payment recorded." : r.error ?? "Couldn't record the payment");
+                  if (r.ok) setPaying((p) => { const n = { ...p }; delete n[pkg.id]; return n; });
+                }}
+              >
+                <div>
+                  <Label>Amount received ₹</Label>
+                  <Input className="mt-1 w-44" type="number" min="0" step="0.01" value={paying[pkg.id]} onChange={(e) => setPaying((p) => ({ ...p, [pkg.id]: e.target.value }))} />
+                </div>
+                <Button type="submit" size="sm">Save payment</Button>
+                <span className="text-xs text-[var(--sge-ink-3)]">Expected {formatINR(pkg.expectedIncome)}</span>
+              </form>
+            ) : null}
+            {pkg.paymentReceived && pkg.paymentAmount != null ? (
+              <p className="mb-3 text-xs text-[var(--sge-ink-2)]">Received {formatINR(pkg.paymentAmount)} against expected {formatINR(pkg.expectedIncome)}.</p>
+            ) : null}
+
+            {canApprove && (pkg.status === "uploaded" || pkg.status === "sic_review") && (
               <div className="mb-3">
-                <Label>SIC note</Label>
+                <Label>SIC note (required to reject)</Label>
                 <Textarea
                   className="mt-1"
                   rows={2}
-                  value={sicNote}
-                  onChange={(e) => setSicNote(e.target.value)}
+                  value={notes[pkg.id] ?? ""}
+                  onChange={(e) => setNotes((n) => ({ ...n, [pkg.id]: e.target.value }))}
                 />
               </div>
             )}
@@ -273,7 +297,7 @@ FS-01 scaffold,CPP,scaffolding,840,m3,85`
                   <div className="mt-1 font-mono text-[11px] text-[var(--sge-ink-3)]">
                     {line.activity} · {line.plant}
                     {line.matchedDprId
-                      ? ` · matched ${line.matchedDprId} claimed ${line.dprClaimedQty} ratio ${((line.matchRatio ?? 0) * 100).toFixed(0)}%`
+                      ? ` · matched ${line.matchedWorkLineIds?.length ?? 1} DPR line(s) · claimed ${line.dprClaimedQty} · ratio ${((line.matchRatio ?? 0) * 100).toFixed(0)}%`
                       : " · unmatched"}
                   </div>
                 </div>
@@ -323,3 +347,6 @@ FS-01 scaffold,CPP,scaffolding,840,m3,85`
     </div>
   );
 }
+
+// Route guard: only roles that may use this page get past the URL
+export default guarded("jms", JmsPage);

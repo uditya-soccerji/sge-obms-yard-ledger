@@ -1,5 +1,6 @@
 "use client";
 
+import { guarded } from "@/components/shared/require-module";
 import { useMemo, useState } from "react";
 import {
   formatINR,
@@ -22,7 +23,7 @@ import { useStore } from "@/lib/store";
 import { entrySiteId } from "@/lib/site-scope";
 import type { RateCardKind } from "@/lib/types";
 
-export default function CostEstimatePage() {
+function CostEstimatePage() {
   const { state, updateRateCard } = useStore();
   const [kind, setKind] = useState<RateCardKind>("pipeline");
   const [qty, setQty] = useState(500);
@@ -182,3 +183,6 @@ export default function CostEstimatePage() {
     </div>
   );
 }
+
+// Route guard: only roles that may use this page get past the URL
+export default guarded("calculators", CostEstimatePage);

@@ -22,6 +22,7 @@ import type { CatalogItem, MaterialItem } from "@/lib/master/types";
 import type { Labourer, RoleId, Site, UserAccount } from "@/lib/types";
 import { entrySiteId } from "@/lib/site-scope";
 import { checkSeat, checkSites, MIN_PASSWORD } from "@/lib/users";
+import type { StaffMember } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 type ScopeFilter = "site" | "company" | "all";
@@ -282,6 +283,7 @@ function UsersSheet({ showInactive }: { showInactive: boolean }) {
     updateUser,
     setUserPassword,
     startImpersonation,
+    addStaff,
   } = useStore();
   const router = useRouter();
   const isSa =
@@ -294,6 +296,22 @@ function UsersSheet({ showInactive }: { showInactive: boolean }) {
   const [role, setRole] = useState<RoleId>("supervisor");
   const [siteIds, setSiteIds] = useState<string[]>([entrySiteId(state)]);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  // Who this login belongs to: an existing staff record / labourer, or "new" to create the staff record
+  const [link, setLink] = useState<string>("new");
+  const [supType, setSupType] = useState<NonNullable<StaffMember["supervisorType"]>>("painting_blasting");
+  const linkedStaff = new Set(state.users.map((u) => u.staffId).filter(Boolean));
+  const linkedLabourers = new Set(state.users.map((u) => u.labourerId).filter(Boolean));
+  const staffChoices = state.staff.filter(
+    (x) => x.role === role && siteIds.includes(x.siteId) && !linkedStaff.has(x.id)
+  );
+  const labourerChoices = state.labourers.filter(
+    (l) => l.active && siteIds.includes(l.siteId) && !linkedLabourers.has(l.id)
+  );
+  const isLabourerRole = role === "labourer";
+  // Keep the pick valid as role / sites change
+  const linkValue = isLabourerRole
+    ? labourerChoices.some((l) => l.id === link) ? link : ""
+    : link === "new" || staffChoices.some((x) => x.id === link) ? link : "new";
 
   // Supervisors work on one site: picking a role trims the selection to fit
   const pickRole = (r: RoleId) => {
@@ -350,11 +368,52 @@ function UsersSheet({ showInactive }: { showInactive: boolean }) {
             onChange={setSiteIds}
           />
         </div>
+        <div className="sm:col-span-2">
+          <Label>{isLabourerRole ? "Labourer" : "Staff record"}</Label>
+          <select
+            className="mt-1 h-9 w-full rounded-sm border border-[var(--sge-line)] bg-[var(--sge-paper)] px-2 text-sm"
+            value={linkValue}
+            onChange={(e) => setLink(e.target.value)}
+          >
+            {isLabourerRole ? (
+              <>
+                <option value="">Pick the labourer…</option>
+                {labourerChoices.map((l) => (
+                  <option key={l.id} value={l.id}>{l.name} · {l.epNumber}</option>
+                ))}
+              </>
+            ) : (
+              <>
+                <option value="new">Create a new staff record for this person</option>
+                {staffChoices.map((x) => (
+                  <option key={x.id} value={x.id}>{x.name} · {x.designation}</option>
+                ))}
+              </>
+            )}
+          </select>
+          <p className="mt-1 text-[11px] text-[var(--sge-ink-3)]">
+            The login sees this person&apos;s jobs, DPRs and crew.
+          </p>
+        </div>
+        {role === "supervisor" && linkValue === "new" ? (
+          <div>
+            <Label>Supervisor type</Label>
+            <select
+              className="mt-1 h-9 w-full rounded-sm border border-[var(--sge-line)] bg-[var(--sge-paper)] px-2 text-sm"
+              value={supType}
+              onChange={(e) => setSupType(e.target.value as NonNullable<StaffMember["supervisorType"]>)}
+            >
+              <option value="painting_blasting">Painting &amp; blasting</option>
+              <option value="scaffolding">Scaffolding</option>
+            </select>
+          </div>
+        ) : null}
         <div className="sm:col-span-4">
           <Button
             size="sm"
             disabled={!canEdit}
             onClick={async () => {
+              const newStaff = !isLabourerRole && linkValue === "new";
               const input = {
                 username: username.trim().toLowerCase(),
                 password,
@@ -364,16 +423,32 @@ function UsersSheet({ showInactive }: { showInactive: boolean }) {
                 plantIds: [],
                 permissionOverrides: [],
                 active: true,
+                // "pending" stands in for the staff record created just below
+                staffId: isLabourerRole ? undefined : newStaff ? "pending" : linkValue,
+                labourerId: isLabourerRole ? linkValue || undefined : undefined,
               };
               // Check here too: the store's result isn't known until React applies the update
               const invalid = checkSeat(input, state.users);
               if (invalid) return setMsg({ ok: false, text: invalid });
+              if (newStaff) {
+                const meta = ROLES.find((r) => r.id === role);
+                const staffId = addStaff({
+                  name: input.name,
+                  role,
+                  siteId: siteIds[0],
+                  designation: role === "supervisor" ? (supType === "scaffolding" ? "Scaffolding Supervisor" : "Painting & Blasting Supervisor") : meta?.label ?? role,
+                  ...(role === "supervisor" ? { supervisorType: supType } : {}),
+                });
+                if (!staffId) return setMsg({ ok: false, text: "Your role can't create staff records" });
+                input.staffId = staffId;
+              }
               const r = await createUser(input);
               if (!r.ok) return setMsg({ ok: false, text: r.error ?? "Failed" });
               setMsg({ ok: true, text: `Created @${input.username} · ${siteCodes(state, siteIds)}` });
               setUsername("");
               setName("");
               setPassword("");
+              setLink("new");
             }}
           >
             Add seat
@@ -426,6 +501,11 @@ function UsersSheet({ showInactive }: { showInactive: boolean }) {
               onViewAs={() => {
                 const r = startImpersonation(u.id);
                 if (r.ok) router.push(r.home);
+              }}
+              onLink={(staffId) => {
+                void updateUser(u.id, { staffId }).then((r) => {
+                  if (!r.ok) setMsg({ ok: false, text: r.error ?? "Failed" });
+                });
               }}
             />
           ))}
@@ -495,6 +575,7 @@ function UserRow({
   onResetPassword,
   onSites,
   onViewAs,
+  onLink,
 }: {
   user: UserAccount;
   isSa: boolean;
@@ -504,8 +585,17 @@ function UserRow({
   /** Returns an error message, or null when saved */
   onSites: (ids: string[]) => string | null;
   onViewAs: () => void;
+  onLink: (staffId: string) => void;
 }) {
   const { fullState: state } = useStore();
+  const linked = user.staffId
+    ? state.staff.find((x) => x.id === user.staffId)
+    : undefined;
+  const linkedLabourer = user.labourerId ? state.labourers.find((l) => l.id === user.labourerId) : undefined;
+  const takenStaff = new Set(state.users.filter((u) => u.id !== user.id).map((u) => u.staffId).filter(Boolean));
+  const linkChoices = state.staff.filter(
+    (x) => user.roles.includes(x.role) && user.siteIds.includes(x.siteId) && !takenStaff.has(x.id)
+  );
   const [editing, setEditing] = useState(false);
   const [ids, setIds] = useState(user.siteIds);
   const [err, setErr] = useState<string | null>(null);
@@ -515,6 +605,29 @@ function UserRow({
         <div className="font-medium">{user.name || <span className="text-[var(--sge-crit)]">(no name)</span>}</div>
         <div className="font-mono text-[11px] text-[var(--sge-ink-3)]">
           @{user.username}
+        </div>
+        <div className="text-[11px]">
+          {linkedLabourer ? (
+            <span className="text-[var(--sge-ink-3)]">Labourer: {linkedLabourer.name}</span>
+          ) : linked ? (
+            <span className="text-[var(--sge-ink-3)]">Staff: {linked.name}</span>
+          ) : user.roles.includes("labourer") ? (
+            <span className="text-[var(--sge-crit)]">Not linked to a labourer</span>
+          ) : canEdit && linkChoices.length ? (
+            <select
+              aria-label={`Link @${user.username} to a staff record`}
+              className="mt-0.5 h-7 rounded-sm border border-[var(--sge-crit)]/50 bg-[var(--sge-paper)] px-1 text-[11px] text-[var(--sge-crit)]"
+              value=""
+              onChange={(e) => e.target.value && onLink(e.target.value)}
+            >
+              <option value="">Not linked — pick staff record…</option>
+              {linkChoices.map((x) => (
+                <option key={x.id} value={x.id}>{x.name}</option>
+              ))}
+            </select>
+          ) : (
+            <span className="text-[var(--sge-crit)]">Not linked to a staff record</span>
+          )}
         </div>
       </td>
       <td className="py-2 text-xs">{user.roles.join(", ")}</td>

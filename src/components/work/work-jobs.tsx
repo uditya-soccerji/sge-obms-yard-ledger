@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useStore } from "@/lib/store";
-import { canCloseJob, entryArea, finalStage, jobStageAreas, memberArea, monthLabel, round3 } from "@/lib/work/logic";
+import { canCloseJob, effectiveEntries, entryArea, entryDiffs, finalStage, jobStageAreas, memberArea, monthLabel, round3 } from "@/lib/work/logic";
 import { WORK_TODAY } from "@/lib/work/seed";
 import { useWork } from "@/lib/work/store";
 import type { Job, Member, Stage } from "@/lib/work/types";
@@ -59,7 +59,7 @@ export function WorkJobs() {
           </button>
         ))}
         <span className="ml-auto text-xs text-[var(--sge-ink-3)]">
-          Current plan month: <b>{monthLabel(work.currentMonth)}</b> · as of {WORK_TODAY}
+          {s.allSites ? "Each site has its own plan month" : <>Current plan month: <b>{monthLabel(s.monthOf(s.currentSiteId))}</b></>} · as of {WORK_TODAY}
         </span>
       </div>
       <Msg text={msg} />
@@ -76,6 +76,8 @@ export function WorkJobs() {
         const close = canCloseJob(job, work.dprs);
         const entries = work.dprs.filter((d) => d.jobId === job.id).sort((a, b) => a.date.localeCompare(b.date));
         const jms = work.jms.find((x) => x.id === job.jmsId);
+        const diffs = entryDiffs(entries);
+        const counted = new Set(effectiveEntries(entries).map((e) => e.id));
         return (
           <Panel key={job.id}>
             <div className="flex flex-wrap items-start justify-between gap-3">
@@ -85,7 +87,7 @@ export function WorkJobs() {
                   <StatusPill tone={job.status === "open" ? "accent" : job.status === "awaiting_sic" ? "warn" : "ok"}>
                     {job.status === "open" ? "Open" : job.status === "awaiting_sic" ? "Waiting for SIC" : `JMS ${jms?.jmsNo ?? ""}`}
                   </StatusPill>
-                  {line.month !== work.currentMonth ? <StatusPill>{monthLabel(line.month)}</StatusPill> : null}
+                  {line.month !== s.monthOf(line.siteId) ? <StatusPill>{monthLabel(line.month)}</StatusPill> : null}
                 </div>
                 <div className="mt-0.5 text-sm">{lineLabel(line, it)}</div>
                 <div className="text-xs text-[var(--sge-ink-3)]">
@@ -115,7 +117,7 @@ export function WorkJobs() {
                 ) : null}
                 {job.status === "awaiting_sic" && s.canConfirm ? (
                   <>
-                    <Button size="sm" variant="outline" onClick={() => { rejectClose(job.id); setMsg({ ok: true, msg: `${job.jobNo} sent back to the supervisor.` }); }}>
+                    <Button size="sm" variant="outline" onClick={() => { const r = rejectClose(job.id); setMsg(r.ok ? { ok: true, msg: `${job.jobNo} sent back to the supervisor.` } : { ok: false, msg: r.error }); }}>
                       Send back
                     </Button>
                     <Button
@@ -143,6 +145,16 @@ export function WorkJobs() {
                 To close: enter {close.missing.map((m) => STAGES.find((x) => x.id === m)?.label).join(", ")}. JMS qty = {STAGES.find((x) => x.id === fin)?.label} m².
               </p>
             ) : null}
+            {diffs.length ? (
+              <div className="mt-2 rounded-sm border border-[var(--sge-warn)]/40 bg-[var(--sge-warn-wash)] px-2.5 py-1.5 text-[11px] text-[var(--sge-ink-2)]">
+                <b className="text-[var(--sge-warn)]">Admin and supervisor figures differ</b> — Admin&apos;s figure is used (docs §5b).
+                {diffs.map((d) => (
+                  <div key={d.date + d.stage} className="font-mono">
+                    {d.date} · {STAGES.find((x) => x.id === d.stage)?.label}: supervisor {fmtM2(d.supervisorArea)} m² / {d.supervisorLitres} L · Admin {fmtM2(d.adminArea)} m² / {d.adminLitres} L
+                  </div>
+                ))}
+              </div>
+            ) : null}
 
             {showEntries === job.id ? (
               <div className="mt-3 overflow-x-auto rounded-sm border border-[var(--sge-line)]">
@@ -169,7 +181,10 @@ export function WorkJobs() {
                         <td className="px-2 py-1.5 text-right font-mono">{e.litres || "—"}</td>
                         <td className="px-2 py-1.5 text-right font-mono">{e.dft ?? "—"}</td>
                         <td className="px-2 py-1.5 text-right font-mono">{e.crew?.length ?? "—"}</td>
-                        <td className="px-2 py-1.5">{e.enteredBy === "admin" ? "Admin (data operator)" : "Supervisor"}</td>
+                        <td className="px-2 py-1.5">
+                          {e.enteredBy === "admin" ? "Admin (data operator)" : "Supervisor"}
+                          {counted.has(e.id) ? null : <span className="ml-1 text-[var(--sge-ink-3)]">· not counted (Admin&apos;s figure used)</span>}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -346,9 +361,11 @@ function StartJob({ onDone }: { onDone: (m: { ok: boolean; msg: string }) => voi
   const { startJob } = useWork();
   const s = useWorkScope();
   const lines = s.work.planLines.filter(
-    (l) => l.month === s.work.currentMonth && s.lineIds.has(l.id) && (s.role !== "supervisor" || l.supervisorId === state.currentUserId)
+    (l) => l.month === s.monthOf(l.siteId) && s.lineIds.has(l.id) && (s.role !== "supervisor" || l.supervisorId === state.currentUserId)
   );
-  const [lineId, setLineId] = useState(lines[0]?.id ?? "");
+  const [picked, setLineId] = useState(lines[0]?.id ?? "");
+  // The pick only counts while it is still in the list (e.g. after a site switch)
+  const lineId = lines.some((l) => l.id === picked) ? picked : lines[0]?.id ?? "";
   const line = s.line(lineId);
   const it = line ? s.item(line.serviceCode) : undefined;
   const [location, setLocation] = useState("");

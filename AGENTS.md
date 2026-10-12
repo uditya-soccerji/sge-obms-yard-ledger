@@ -60,16 +60,21 @@ src/
     work/*                   Work module screens
     owner/site-comparison.tsx All-sites table on the owner dashboard
     shared/ui-bits.tsx       KpiTile, Panel, StatusPill, SectionHeader, EmptyState, formatINR
+    shared/require-module.tsx route guard: every signed-in page is wrapped in guarded("<module>", Page)
     ui/*                     shadcn primitives — don't restyle, compose
   lib/
     store.tsx                main app store (users, sites, labourers, finance, legacy DPR…)
     seed.ts, seed-sites.ts   main demo data (six sites)
     site-scope.ts            ALL_SITES, scopeState(), entrySiteId()
-    desk.ts, roles.ts, permissions.ts  nav + role access
+    desk.ts, roles.ts, permissions.ts  nav + role access (store actions check can(s, module, action) too)
+    dpr-validate.ts          DPR submit checks (permit, TBT, crew marked, qty or reason), used by form + store
+    ep.ts                    EP numbers: PP + 10 digits, normalizeEp(), name fallback
+    acpl.ts                  ACPL parse + DPR vs gate match
     work/types.ts            Work data model
     work/logic.ts            ALL Work calculations (pure functions)
     work/seed.ts             Work demo data from real DTA documents
-    work/store.tsx           WorkProvider: actions + localStorage (key sge-work-v3)
+    work/store.tsx           WorkProvider: actions + localStorage (key sge-work-v5); checks workRights() itself
+    work/permissions.ts      workRights(role): who may plan / enter / confirm / issue paint / see money
     work/scenarios.ts        test scenarios (pure WorkState transforms)
 docs/
   rules-decisions.md         agreed business rules (owner's answers)
@@ -88,6 +93,10 @@ docs/
 - Screens read `useStore().state`, already filtered to the active site by `scopeState()`. Use `fullState` only for admin views (Master Data).
 - `currentSiteId === "all"` (ALL_SITES) is Owner / Super Admin only. New records in All sites go to `entrySiteId(state)`.
 - Work module: filter by site with `useWorkScope().inSite(siteId)` / `lineIds`.
+- Each site has its own plan month: `currentMonthOf(work, siteId)` / `isMonthClosed(...)` (`useWorkScope().monthOf`). Never assume one global month.
+- Areas, litres and crew go through `effectiveEntries()`: when Admin re-enters a DPR day, Admin's entry counts and the supervisor's is kept only for comparison (docs §5b).
+- New page? Wrap its default export in `guarded("<module>", Page)`. New store action? Check `can(s, module, action)` (main store) or `workRights()` (Work store).
+- Every login is linked to a staff record (`staffId`) or a labourer (`labourerId`); `checkSeat` enforces it.
 
 **UI (Vendor Desk livery — keep it)**
 - Colours only via CSS variables in `globals.css`: `--sge-night` (ink header #14181d), `--sge-brass` (amber #e8851e, fills only), `--sge-brass-ink` (#9a5a06, amber **text** — amber text on white fails contrast), `--sge-linen` (page #e9ecef), `--sge-paper` (cards), `--sge-ok / warn / crit` (+ `-wash`). No new hex values in components.

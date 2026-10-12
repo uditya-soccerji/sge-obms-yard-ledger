@@ -1,5 +1,6 @@
 "use client";
 
+import { guarded } from "@/components/shared/require-module";
 import { useState } from "react";
 import {
   EmptyState,
@@ -33,7 +34,7 @@ const ENTITY_MAP: {
     messageType: "text",
     entity: "attendance",
     hint: "Check-in / out → attendance punch",
-    sample: "IN EP-88421 pipe rack B-12",
+    sample: "IN PP5920188421 pipe rack B-12",
   },
   {
     role: "supervisor",
@@ -100,7 +101,7 @@ const ENTITY_MAP: {
   },
 ];
 
-export default function TelegramPage() {
+function TelegramPage() {
   const { state, currentAccount, applyTelegram } = useStore();
   const allowed =
     state.currentRole === "super_admin" ||
@@ -320,3 +321,6 @@ export default function TelegramPage() {
     </div>
   );
 }
+
+// Route guard: only roles that may use this page get past the URL
+export default guarded("telegram", TelegramPage);

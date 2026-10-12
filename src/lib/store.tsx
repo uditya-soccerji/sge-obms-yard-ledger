@@ -13,7 +13,9 @@ import {
   matchAcplAgainstApproved,
   parseAcplCsv,
 } from "./acpl";
+import { dprCrew, validateDprForSubmit } from "./dpr-validate";
 import { scoreFromMatchRatio } from "./estimate";
+import { effectivePermission } from "./permissions";
 import { PAINT_STAGE_ORDER } from "./paint-lifecycle";
 import { resolveActivityRate, withSupersession } from "./rate-book";
 import { roleMeta } from "./roles";
@@ -55,6 +57,8 @@ import type {
   MessageType,
   ModuleId,
   PaintStockLine,
+  PermissionAction,
+  StaffMember,
   RateCard,
   RateLine,
   RoleId,
@@ -114,7 +118,7 @@ interface StoreApi {
   ) => void;
   saveDpr: (doc: DprDocument) => { ok: boolean; error?: string };
   submitDpr: (id: string) => void;
-  reviewDpr: (id: string, decision: "sic_approved" | "sic_rejected", note: string) => void;
+  reviewDpr: (id: string, decision: "sic_approved" | "sic_rejected", note: string) => { ok: boolean; error?: string };
   uploadAcplText: (text: string, date: string, source: "upload" | "paste") => number;
   runAcplMatch: (date: string) => number;
   resolveAcplFlag: (
@@ -126,8 +130,13 @@ interface StoreApi {
   uploadJmsPackage: (pkg: Omit<JmsPackage, "id" | "financeNotified" | "expectedIncome" | "paymentReceived"> & { lines: JmsLine[] }) => string;
   reviewJmsPackage: (id: string, decision: "sic_approved" | "sic_rejected", note: string) => void;
   matchJmsLines: (packageId: string) => void;
-  computeRatings: (packageId: string) => void;
-  markJmsPayment: (packageId: string, received: boolean, note?: string) => void;
+  computeRatings: (packageId: string) => { ok: boolean; error?: string };
+  /** received=true records the payment (amount defaults to expected income); false flags it as due to SIC */
+  markJmsPayment: (
+    packageId: string,
+    received: boolean,
+    opts?: { amount?: number; note?: string }
+  ) => { ok: boolean; error?: string };
   updateRateCard: (id: string, patch: Partial<RateCard>) => void;
   /** siteId may be ALL_SITES ("all") for Owner / Super Admin. */
   switchSite: (siteId: string) => { ok: boolean; error?: string };
@@ -168,6 +177,8 @@ interface StoreApi {
     active: boolean
   ) => void;
   upsertSite: (site: AppState["sites"][number]) => void;
+  /** New staff record (to link a login to); returns its id, or "" if not allowed */
+  addStaff: (input: Omit<StaffMember, "id">) => string;
   addLabourer: (row: Omit<Labourer, "id"> & { id?: string }) => string;
   addWageEntry: (entry: Omit<WageLedgerEntry, "id">) => void;
   acknowledgeFinanceAlert: (id: string) => void;
@@ -231,6 +242,18 @@ function makeAudit(
     impersonatedBy: impersonator?.username ?? null,
   };
 }
+
+/**
+ * Does the signed-in account's active role have this right? (lib/permissions.ts)
+ * Every write action checks this, so a page or button that slips through
+ * still can't change data the role isn't allowed to touch.
+ */
+function can(s: AppState, module: ModuleId, action: PermissionAction): boolean {
+  const account = s.users.find((u) => u.id === s.currentAccountId);
+  return effectivePermission(account, s.currentRole, module, action);
+}
+
+const DENIED = { ok: false as const, error: "Your role can't do this" };
 
 function migratePaintStock(
   lines: PaintStockLine[] | undefined,
@@ -626,6 +649,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const markAttendance = useCallback(
     (labourerId: string, status: AttendanceStatus, note?: string) => {
       setState((s) => {
+        if (!can(s, "hr", "update") && !can(s, "supervisor", "update")) return s;
         const today = "2026-10-05";
         const existing = s.attendance.find(
           (a) => a.labourerId === labourerId && a.date === today
@@ -651,7 +675,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const addFinance = useCallback(
     (entry: Omit<FinanceEntry, "id" | "siteId" | "enteredBy"> & { siteId?: string }) => {
-      setState((s) => ({
+      setState((s) => !can(s, "finance", "create") || !(entry.amount > 0) ? s : ({
         ...s,
         finance: [
           {
@@ -668,10 +692,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   );
 
   const toggleSafetyItem = useCallback((dayId: string, itemId: number) => {
-    setState((s) => ({
+    setState((s) => !can(s, "safety", "update") ? s : ({
       ...s,
       safetyDays: s.safetyDays.map((d) =>
-        d.id !== dayId
+        // A signed-off checklist is final
+        d.id !== dayId || d.signed
           ? d
           : {
               ...d,
@@ -684,7 +709,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const signSafetyDay = useCallback((dayId: string) => {
-    setState((s) => ({
+    setState((s) => !can(s, "safety", "update") ? s : ({
       ...s,
       safetyDays: s.safetyDays.map((d) =>
         d.id === dayId ? { ...d, signed: true } : d
@@ -694,6 +719,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const advancePaintStage = useCallback((lineId: string) => {
     setState((s) => {
+      if (!can(s, "store", "update")) return s;
       const current = s.paintStock.find((l) => l.id === lineId);
       if (!current) return s;
       const idx = PAINT_STAGE_ORDER.indexOf(current.stage);
@@ -742,6 +768,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       >
     ) => {
       setState((s) => {
+        if (!can(s, "store", "update")) return s;
         const paintStock = s.paintStock.map((line) =>
           line.id === lineId
             ? {
@@ -782,6 +809,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const saveDpr = useCallback((doc: DprDocument) => {
     let result: { ok: boolean; error?: string } = { ok: true };
     setState((s) => {
+      if (!can(s, "dpr", "create") && !can(s, "dpr", "update")) {
+        result = DENIED;
+        return s;
+      }
       const existing = s.dprDocuments.find((d) => d.id === doc.id);
       // Freeze on submit until SIC reject (6A)
       if (
@@ -833,9 +864,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const submitDpr = useCallback((id: string) => {
     setState((s) => {
+      if (!can(s, "dpr", "submit")) return s;
       const doc = s.dprDocuments.find((d) => d.id === id);
       if (!doc) return s;
       if (doc.status !== "draft" && doc.status !== "sic_rejected") return s;
+      // Same checks the form shows (docs §5); the store refuses an incomplete DPR too
+      const plants = s.sites.find((x) => x.id === doc.siteId)?.plants ?? [];
+      if (validateDprForSubmit(doc, dprCrew(doc, s.labourers), plants).length) return s;
       const dprDocuments = s.dprDocuments.map((d) =>
         d.id === id
           ? {
@@ -889,9 +924,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const reviewDpr = useCallback(
     (id: string, decision: "sic_approved" | "sic_rejected", note: string) => {
+      const cur = stateRef.current;
+      if (!can(cur, "approvals", "approve")) return DENIED;
+      const target = cur.dprDocuments.find((d) => d.id === id);
+      if (!target || target.status !== "submitted") return { ok: false, error: "This DPR isn't waiting for review" };
+      if (decision === "sic_rejected" && !note.trim()) return { ok: false, error: "Give a reason so the supervisor can fix it" };
       setState((s) => {
         const doc = s.dprDocuments.find((d) => d.id === id);
-        if (!doc) return s;
+        if (!doc || doc.status !== "submitted") return s;
         const now = new Date().toISOString();
         const dprDocuments = s.dprDocuments.map((d) =>
           d.id === id
@@ -938,12 +978,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           ],
         };
       });
+      return { ok: true };
     },
     []
   );
 
   const uploadAcplText = useCallback(
     (text: string, date: string, source: "upload" | "paste") => {
+      if (!can(stateRef.current, "acpl", "upload")) return 0;
       const parsed = parseAcplCsv(text, date);
       setState((s) => {
         const punches: AcplPunchRow[] = parsed.map((p) => ({
@@ -960,6 +1002,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const runAcplMatch = useCallback((date: string) => {
     let count = 0;
+    if (!can(stateRef.current, "acpl", "upload") && !can(stateRef.current, "acpl", "approve")) return 0;
     setState((s) => {
       const matches = matchAcplAgainstApproved(s, s.acplPunches, date);
       count = matches.length;
@@ -1058,10 +1101,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       > & { lines: JmsLine[] }
     ) => {
       const id = uid("jms");
+      if (!can(stateRef.current, "jms", "upload")) return "";
       setState((s) => {
         const lines = pkg.lines.map((line) => {
           if (line.rateInr > 0) {
-            return { ...line, amountInr: line.qty * line.rateInr };
+            return { ...line, amountInr: Math.round(line.qty * line.rateInr * 100) / 100 };
           }
           const book = resolveActivityRate(
             s.rateLines,
@@ -1109,58 +1153,67 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     []
   );
 
+  /**
+   * Tie each JMS line to the SIC-approved DPR work it measures (docs §10):
+   * same site, same plant, same activity, inside the JMS period. A JMS covers
+   * many DPRs, so their quantities are summed; each DPR work line counts toward
+   * one JMS line only.
+   */
   const matchJmsLines = useCallback((packageId: string) => {
+    if (!can(stateRef.current, "jms", "upload") && !can(stateRef.current, "jms", "approve")) return;
     setState((s) => {
       const pkg = s.jmsPackages.find((p) => p.id === packageId);
       if (!pkg) return s;
+      // Period: a "YYYY-MM…" label means that month; otherwise the 31 days up to upload
+      const monthMatch = /^(\d{4}-\d{2})/.exec(pkg.period);
+      const upTo = pkg.uploadedAt.slice(0, 10);
+      const fromDate = new Date(Date.parse(upTo) - 30 * 86_400_000).toISOString().slice(0, 10);
+      const inPeriod = (date: string) =>
+        monthMatch ? date.startsWith(monthMatch[1]) : date >= fromDate && date <= upTo;
       const approved = s.dprDocuments.filter(
-        (d) => d.status === "sic_approved" || d.status === "submitted"
+        (d) =>
+          d.status === "sic_approved" &&
+          (!pkg.siteId || d.siteId === pkg.siteId) &&
+          inPeriod(d.date)
       );
+      const used = new Set<string>();
       const lines = pkg.lines.map((line) => {
-        let best:
-          | { dprId: string; workId: string; claimed: number; ratio: number }
-          | undefined;
+        const hits: { dprId: string; workId: string; qty: number }[] = [];
         for (const dpr of approved) {
-          if (line.activity === "scaffolding" && dpr.scaffoldWork) {
-            for (const w of dpr.scaffoldWork) {
-              const claimed = w.standingM3 || w.erectM3;
-              if (!claimed) continue;
-              const ratio = Math.min(line.qty, claimed) / Math.max(line.qty, claimed);
-              if (!best || ratio > best.ratio) {
-                best = { dprId: dpr.id, workId: w.id, claimed, ratio };
-              }
+          if (line.activity === "scaffolding") {
+            for (const w of dpr.scaffoldWork ?? []) {
+              const qty = w.standingM3 || w.erectM3;
+              if (!qty || used.has(w.id) || (w.plant || dpr.plant) !== line.plant) continue;
+              hits.push({ dprId: dpr.id, workId: w.id, qty });
             }
-          }
-          if (
-            (line.activity === "painting" || line.activity === "blasting") &&
-            dpr.paintWork
-          ) {
-            for (const w of dpr.paintWork) {
-              if (w.activity !== line.activity && line.activity !== "painting") {
-                // allow painting JMS to match painting lines; blasting to blasting
-              }
-              if (w.activity !== line.activity) continue;
-              const claimed = w.areaM2;
-              const ratio = Math.min(line.qty, claimed) / Math.max(line.qty, claimed);
-              if (!best || ratio > best.ratio) {
-                best = { dprId: dpr.id, workId: w.id, claimed, ratio };
-              }
+          } else {
+            for (const w of dpr.paintWork ?? []) {
+              if (w.activity !== line.activity || !w.areaM2 || used.has(w.id) || (w.plant || dpr.plant) !== line.plant) continue;
+              hits.push({ dprId: dpr.id, workId: w.id, qty: w.areaM2 });
             }
           }
         }
-        if (!best) return line;
+        if (!hits.length) {
+          return { ...line, matchedDprId: undefined, matchedWorkLineId: undefined, matchedWorkLineIds: undefined, dprClaimedQty: undefined, matchRatio: undefined };
+        }
+        hits.forEach((h) => used.add(h.workId));
+        const claimed = Math.round(hits.reduce((t, h) => t + h.qty, 0) * 1000) / 1000;
+        const ratio = Math.min(line.qty, claimed) / Math.max(line.qty, claimed);
         return {
           ...line,
-          matchedDprId: best.dprId,
-          matchedWorkLineId: best.workId,
-          dprClaimedQty: best.claimed,
-          matchRatio: Math.round(best.ratio * 100) / 100,
+          matchedDprId: hits[0].dprId,
+          matchedWorkLineId: hits[0].workId,
+          matchedWorkLineIds: hits.map((h) => h.workId),
+          dprClaimedQty: claimed,
+          matchRatio: Math.round(ratio * 100) / 100,
         };
       });
+      // Matching never undoes an SIC decision
+      const status = pkg.status === "uploaded" ? "sic_review" : pkg.status;
       return {
         ...s,
         jmsPackages: s.jmsPackages.map((p) =>
-          p.id === packageId ? { ...p, lines, status: "sic_review" } : p
+          p.id === packageId ? { ...p, lines, status } : p
         ),
       };
     });
@@ -1169,6 +1222,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const reviewJmsPackage = useCallback(
     (id: string, decision: "sic_approved" | "sic_rejected", note: string) => {
       setState((s) => {
+        if (!can(s, "jms", "approve")) return s;
         const pkg = s.jmsPackages.find((p) => p.id === id);
         if (!pkg) return s;
         const alert: FinanceAlert = {
@@ -1199,9 +1253,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   );
 
   const computeRatings = useCallback((packageId: string) => {
+    const cur = stateRef.current;
+    if (!can(cur, "jms", "approve")) return DENIED;
+    const target = cur.jmsPackages.find((p) => p.id === packageId);
+    if (!target) return { ok: false, error: "JMS package not found" };
+    if (target.status !== "sic_approved") return { ok: false, error: "Approve the JMS first — ratings are worked out from an approved JMS" };
     setState((s) => {
       const pkg = s.jmsPackages.find((p) => p.id === packageId);
-      if (!pkg) return s;
+      if (!pkg || pkg.status !== "sic_approved") return s;
       const bySup = new Map<
         string,
         { jms: number; dpr: number; ratios: number[] }
@@ -1278,8 +1337,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           date: "2026-10-05",
           kind: "incentive" as const,
           amount: r.suggestedSupervisorIncentive,
-          note: `JMS rating incentive · score ${r.score}`,
+          note: `JMS rating incentive · score ${r.score} · ${pkg.label}`,
           flaggedToSic: false,
+          jmsPackageId: packageId,
         },
       ]);
 
@@ -1289,67 +1349,93 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           ...ratings,
           ...s.workRatings.filter((r) => r.jmsPackageId !== packageId),
         ],
-        wageLedger: [...wageAdds, ...s.wageLedger],
+        // Re-running replaces this package's incentive drafts instead of adding more
+        wageLedger: [
+          ...wageAdds,
+          ...s.wageLedger.filter((w) => !(w.kind === "incentive" && w.jmsPackageId === packageId)),
+        ],
       };
     });
+    return { ok: true };
   }, []);
 
+  /**
+   * Record money received against an approved JMS package, once; or flag it as
+   * still due to SIC (once while the earlier flag is open).
+   */
   const markJmsPayment = useCallback(
-    (packageId: string, received: boolean, note?: string) => {
-      setState((s) => {
-        const pkg = s.jmsPackages.find((p) => p.id === packageId);
-        if (!pkg) return s;
-        const jmsPackages = s.jmsPackages.map((p) =>
-          p.id === packageId
-            ? {
-                ...p,
-                paymentReceived: received,
-                paymentReceivedAt: received
-                  ? new Date().toISOString()
-                  : undefined,
-                paymentNote: note,
-              }
-            : p
-        );
-        let finance = s.finance;
-        let financeAlerts = s.financeAlerts;
-        if (received) {
-          finance = [
-            {
-              id: uid("fin"),
-              date: "2026-10-05",
-              kind: "income",
-              category: "JMS payment",
-              amount: pkg.expectedIncome,
-              description: `Payment received — ${pkg.label}`,
-              siteId: pkg.siteId ?? entrySiteId(s),
-              enteredBy: s.currentUserId ?? "finance",
-            },
-            ...finance,
-          ];
-        } else {
-          financeAlerts = [
-            {
-              id: uid("fa"),
-              createdAt: new Date().toISOString(),
-              kind: "payment_due",
-              title: "JMS payment not received",
-              detail: `${pkg.label} · expected ₹${pkg.expectedIncome.toLocaleString("en-IN")}`,
-              jmsPackageId: packageId,
-              acknowledged: false,
-              flaggedToSic: true,
-            },
-            ...financeAlerts,
-          ];
-        }
-        return { ...s, jmsPackages, finance, financeAlerts };
-      });
+    (packageId: string, received: boolean, opts?: { amount?: number; note?: string }) => {
+      const cur = stateRef.current;
+      if (!can(cur, "finance", "create")) return DENIED;
+      const pkg = cur.jmsPackages.find((p) => p.id === packageId);
+      if (!pkg) return { ok: false, error: "JMS package not found" };
+      if (pkg.status !== "sic_approved") return { ok: false, error: "Only an SIC-approved JMS can be paid or chased" };
+      if (pkg.paymentReceived) return { ok: false, error: "Payment is already recorded for this JMS" };
+      if (received) {
+        const amount = opts?.amount ?? pkg.expectedIncome;
+        if (!(amount > 0)) return { ok: false, error: "Amount received must be above zero" };
+        const now = new Date().toISOString();
+        setState((s) => {
+          const p = s.jmsPackages.find((x) => x.id === packageId);
+          if (!p || p.paymentReceived) return s;
+          const next = {
+            ...s,
+            jmsPackages: s.jmsPackages.map((x) =>
+              x.id === packageId
+                ? { ...x, paymentReceived: true, paymentReceivedAt: now, paymentAmount: amount, paymentNote: opts?.note }
+                : x
+            ),
+            finance: [
+              {
+                id: uid("fin"),
+                date: now.slice(0, 10),
+                kind: "income" as const,
+                category: "JMS payment",
+                amount,
+                description: `Payment received — ${p.label}${opts?.note ? ` · ${opts.note}` : ""}`,
+                siteId: p.siteId ?? entrySiteId(s),
+                enteredBy: s.currentUserId ?? "finance",
+              },
+              ...s.finance,
+            ],
+          };
+          return {
+            ...next,
+            auditLog: [
+              makeAudit(next, "finance", "update", `JMS paid ${p.label}: ₹${amount.toLocaleString("en-IN")} (expected ₹${p.expectedIncome.toLocaleString("en-IN")})`),
+              ...s.auditLog,
+            ],
+          };
+        });
+        return { ok: true };
+      }
+      const openFlag = cur.financeAlerts.some(
+        (a) => a.jmsPackageId === packageId && a.kind === "payment_due" && !a.acknowledged
+      );
+      if (openFlag) return { ok: false, error: "Already flagged to SIC — acknowledge that alert first" };
+      setState((s) => ({
+        ...s,
+        financeAlerts: [
+          {
+            id: uid("fa"),
+            createdAt: new Date().toISOString(),
+            kind: "payment_due",
+            title: "JMS payment not received",
+            detail: `${pkg.label} · expected ₹${pkg.expectedIncome.toLocaleString("en-IN")}`,
+            jmsPackageId: packageId,
+            acknowledged: false,
+            flaggedToSic: true,
+          },
+          ...s.financeAlerts,
+        ],
+      }));
+      return { ok: true };
     },
     []
   );
 
   const updateRateCard = useCallback((id: string, patch: Partial<RateCard>) => {
-    setState((s) => ({
+    setState((s) => !can(s, "rates", "update") && !can(s, "master", "update") ? s : ({
       ...s,
       rateCards: s.rateCards.map((c) => (c.id === id ? { ...c, ...patch } : c)),
     }));
@@ -1421,6 +1507,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     ) => {
       const id = input.id ?? uid("rl");
       setState((s) => {
+        if (!can(s, "rates", input.id ? "update" : "create") && !can(s, "master", "update")) return s;
         const line: RateLine = {
           ...input,
           id,
@@ -1448,7 +1535,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   );
 
   const updateTrade = useCallback((id: string, patch: Partial<TradeDefinition>) => {
-    setState((s) => ({
+    setState((s) => !can(s, "trades", "update") && !can(s, "master", "update") ? s : ({
       ...s,
       tradeCatalogue: s.tradeCatalogue.map((t) =>
         t.id === id ? { ...t, ...patch } : t
@@ -1463,6 +1550,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         .replace(/[^a-z0-9]+/g, "_")
         .replace(/^_|_$/g, "");
       const id = input.id ?? (slug || uid("trade"));
+      if (!can(stateRef.current, "trades", "create") && !can(stateRef.current, "master", "update")) return "";
       setState((s) => ({
         ...s,
         tradeCatalogue: [
@@ -1498,7 +1586,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         >
       >
     ) => {
-      setState((s) => ({
+      setState((s) => !can(s, "labourer", "update") && !can(s, "master", "update") ? s : ({
         ...s,
         labourers: s.labourers.map((l) =>
           l.id === id ? { ...l, ...patch } : l
@@ -1511,6 +1599,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const addLabourer = useCallback(
     (row: Omit<Labourer, "id"> & { id?: string }) => {
       const id = row.id ?? uid("lb");
+      if (!can(stateRef.current, "labourer", "create") && !can(stateRef.current, "master", "update")) return "";
       setState((s) => ({
         ...s,
         labourers: [{ ...row, id }, ...s.labourers],
@@ -1526,6 +1615,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const upsertContractor = useCallback((row: Contractor) => {
     const id = row.id || uid("con");
+    if (!can(stateRef.current, "master", "update")) return id;
     const next = { ...row, id };
     void remoteSaveMaster("contractors", next);
     setState((s) => {
@@ -1553,6 +1643,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const setContractorActive = useCallback((id: string, active: boolean) => {
+    if (!can(stateRef.current, "master", "update")) return;
     const row = stateRef.current.masterCatalog.contractors.find((c) => c.id === id);
     if (row) void remoteSaveMaster("contractors", { ...row, active });
     setState((s) => ({
@@ -1572,6 +1663,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       row: CatalogItem
     ) => {
       const id = row.id || uid("cat");
+      if (!can(stateRef.current, "master", "update")) return id;
       const next = { ...row, id };
       void remoteSaveMaster(sheet, next);
       setState((s) => {
@@ -1603,6 +1695,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const upsertMaterial = useCallback((row: MaterialItem) => {
     const id = row.id || uid("mat");
+    if (!can(stateRef.current, "master", "update")) return id;
     const next = { ...row, id };
     void remoteSaveMaster("materials", next);
     setState((s) => {
@@ -1631,6 +1724,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const setCatalogActive = useCallback(
     (sheet: keyof MasterCatalog, id: string, active: boolean) => {
+      if (!can(stateRef.current, "master", "update")) return;
       const row = (
         stateRef.current.masterCatalog[sheet] as (CatalogItem | Contractor | MaterialItem)[]
       ).find((r) => r.id === id);
@@ -1650,6 +1744,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   );
 
   const upsertSite = useCallback((site: AppState["sites"][number]) => {
+    if (!can(stateRef.current, "master", "update")) return;
     void remoteSaveSite(site);
     setState((s) => {
       const exists = s.sites.some((x) => x.id === site.id);
@@ -1666,8 +1761,26 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
+  const addStaff = useCallback((input: Omit<StaffMember, "id">) => {
+    const cur = stateRef.current;
+    if (!can(cur, "users", "create") && !can(cur, "master", "update")) return "";
+    const id = uid("st");
+    setState((s) => {
+      const next = { ...s, staff: [...s.staff, { ...input, id }] };
+      return {
+        ...next,
+        auditLog: [
+          makeAudit(next, "users", "create", `Staff record ${input.name} (${input.role}) · ${input.siteId}`),
+          ...s.auditLog,
+        ],
+      };
+    });
+    return id;
+  }, []);
+
   const addWageEntry = useCallback((entry: Omit<WageLedgerEntry, "id">) => {
     setState((s) => {
+      if (!can(s, "finance", "create") || !(entry.amount > 0)) return s;
       const full: WageLedgerEntry = { ...entry, id: uid("wg") };
       let financeAlerts = s.financeAlerts;
       if (entry.flaggedToSic) {
@@ -1693,7 +1806,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const acknowledgeFinanceAlert = useCallback((id: string) => {
-    setState((s) => ({
+    setState((s) => !can(s, "finance", "update") ? s : ({
       ...s,
       financeAlerts: s.financeAlerts.map((a) =>
         a.id === id ? { ...a, acknowledged: true } : a
@@ -1702,7 +1815,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const flagFinanceAlertToSic = useCallback((id: string) => {
-    setState((s) => ({
+    setState((s) => !can(s, "finance", "update") ? s : ({
       ...s,
       financeAlerts: s.financeAlerts.map((a) =>
         a.id === id ? { ...a, flaggedToSic: true } : a
@@ -1861,6 +1974,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const id = uid("er");
       const now = new Date().toISOString();
       setState((s) => {
+        if (!can(s, "requests", "create")) return s;
         const req: EquipmentRequest = {
           ...input,
           id,
@@ -1903,6 +2017,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       >
     ) => {
       setState((s) => {
+        if (!can(s, "requests", "update") && !can(s, "requests", "approve")) return s;
         const existing = s.equipmentRequests.find((r) => r.id === id);
         if (!existing) return s;
         const now = new Date().toISOString();
@@ -1952,6 +2067,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       };
 
       setState((s) => {
+        if (!can(s, "telegram", "create")) return s;
         let next = { ...s, telegramDrafts: [draft, ...s.telegramDrafts] };
         const today = "2026-10-05";
 
@@ -2211,6 +2327,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       upsertMaterial,
       setCatalogActive,
       upsertSite,
+      addStaff,
       addWageEntry,
       acknowledgeFinanceAlert,
       flagFinanceAlertToSic,
@@ -2263,6 +2380,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       upsertMaterial,
       setCatalogActive,
       upsertSite,
+      addStaff,
       addWageEntry,
       acknowledgeFinanceAlert,
       flagFinanceAlertToSic,

@@ -1,5 +1,6 @@
 "use client";
 
+import { guarded } from "@/components/shared/require-module";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
@@ -12,10 +13,11 @@ import {
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { dprCrew, validateDprForSubmit } from "@/lib/dpr-validate";
 import { useStore } from "@/lib/store";
 import type { DprDocument } from "@/lib/types";
 
-export default function DprDetailPage() {
+function DprDetailPage() {
   const params = useParams();
   const id = String(params.id);
   const router = useRouter();
@@ -24,6 +26,7 @@ export default function DprDetailPage() {
   const [draft, setDraft] = useState<DprDocument | null>(null);
   const [sicNote, setSicNote] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
+  const [problems, setProblems] = useState<string[]>([]);
 
   const doc = draft ?? original;
 
@@ -72,6 +75,11 @@ export default function DprDetailPage() {
 
   function handleSubmit() {
     if (!doc) return;
+    // docs §5: permit + TBT, every crew member marked, quantity or a reason
+    const plants = state.sites.find((x) => x.id === doc.siteId)?.plants ?? [];
+    const found = validateDprForSubmit(doc, dprCrew(doc, state.labourers), plants);
+    setProblems(found);
+    if (found.length) return;
     const r = saveDpr({ ...doc, status: "draft" });
     if (!r.ok) {
       setMsg(r.error ?? "Save blocked");
@@ -84,7 +92,11 @@ export default function DprDetailPage() {
 
   function handleReview(decision: "sic_approved" | "sic_rejected") {
     if (!doc) return;
-    reviewDpr(doc.id, decision, sicNote);
+    const r = reviewDpr(doc.id, decision, sicNote);
+    if (!r.ok) {
+      setMsg(r.error ?? "Review blocked");
+      return;
+    }
     setMsg(
       decision === "sic_approved"
         ? "Approved — attendance derived for ACPL match."
@@ -143,6 +155,15 @@ export default function DprDetailPage() {
         readOnly={!canEdit}
       />
 
+      {problems.length ? (
+        <div className="rounded-md border border-[var(--sge-crit)]/30 bg-[var(--sge-crit-wash)] px-3 py-2 text-sm text-[var(--sge-crit)]">
+          <div className="font-semibold">Fix these before submitting to SIC:</div>
+          <ul className="mt-1 list-inside list-disc">
+            {problems.map((p) => <li key={p}>{p}</li>)}
+          </ul>
+        </div>
+      ) : null}
+
       {canEdit || canSubmit ? (
         <div className="flex flex-wrap gap-2">
           <Button type="button" variant="outline" onClick={handleSave}>
@@ -159,7 +180,7 @@ export default function DprDetailPage() {
       {canReview ? (
         <Panel>
           <h3 className="mb-2 font-heading text-sm font-bold">SIC review</h3>
-          <Label>Approval / rejection note</Label>
+          <Label>Approval / rejection note (a reason is required to reject)</Label>
           <Textarea
             className="mt-1 mb-3"
             value={sicNote}
@@ -183,3 +204,6 @@ export default function DprDetailPage() {
     </div>
   );
 }
+
+// Route guard: only roles that may use this page get past the URL
+export default guarded("dpr", DprDetailPage);

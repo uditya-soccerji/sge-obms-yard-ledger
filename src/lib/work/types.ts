@@ -75,7 +75,10 @@ export interface Job {
   stages: Stage[];
   status: JobStatus;
   closedAt?: string;
+  /** ISO timestamp (date-only on older rows) — approvals escalate after 24 h */
   closeRequestedAt?: string;
+  /** Account that asked to close, so they can't confirm their own JMS */
+  closeRequestedBy?: string;
   jmsId?: string;
   supervisorId: string;
   /** Jobs imported as history (no DPR crew): labour-days and cost brought in */
@@ -162,10 +165,20 @@ export interface WorkState {
   events: WorkEvent[];
   /** Last event seq each account has seen (keyed by account id) */
   lastSeen: Record<string, number>;
-  /** Months whose plan is closed and carried forward (YYYY-MM) */
-  closedMonths: string[];
-  /** The month new plan lines and jobs go into */
-  currentMonth: string;
+  /**
+   * Plan months per site (docs §15): each site closes and carries forward its
+   * own month. A site with no entry is on `defaultMonth` with nothing closed.
+   */
+  siteMonths: Record<string, SiteMonths>;
+  /** Current month for sites that have never closed a month */
+  defaultMonth: string;
+}
+
+export interface SiteMonths {
+  /** The month new plan lines and jobs go into (YYYY-MM) */
+  current: string;
+  /** Months whose plan is closed and carried forward */
+  closed: string[];
 }
 
 /** Money actually received against a JMS (docs §18: income counts when paid). */

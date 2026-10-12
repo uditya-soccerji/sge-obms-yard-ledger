@@ -1,5 +1,6 @@
 "use client";
 
+import { guarded } from "@/components/shared/require-module";
 import Link from "next/link";
 import { useMemo, useState } from "react";
 import {
@@ -21,7 +22,7 @@ import {
   allowedDprSubmitterTypes,
   defaultDprSubmitterType,
 } from "@/lib/paint-lifecycle";
-import { plantScopeFor } from "@/lib/permissions";
+import { effectivePermission, plantScopeFor } from "@/lib/permissions";
 import { useStore } from "@/lib/store";
 import type { DprStatus, DprSubmitterType } from "@/lib/types";
 
@@ -43,7 +44,7 @@ const TYPE_LABEL: Record<DprSubmitterType, string> = {
   store: "Store",
 };
 
-export default function DprDeskPage() {
+function DprDeskPage() {
   const { state, currentAccount } = useStore();
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
@@ -96,13 +97,7 @@ export default function DprDeskPage() {
     (d) => d.status === "sic_approved"
   ).length;
 
-  const canCreate =
-    role === "supervisor" ||
-    role === "store" ||
-    role === "safety" ||
-    role === "admin" ||
-    role === "owner" ||
-    role === "super_admin";
+  const canCreate = effectivePermission(currentAccount, role, "dpr", "create");
 
   const typeOptions: DprSubmitterType[] =
     allowedTypes === "all"
@@ -224,3 +219,6 @@ export default function DprDeskPage() {
     </div>
   );
 }
+
+// Route guard: only roles that may use this page get past the URL
+export default guarded("dpr", DprDeskPage);

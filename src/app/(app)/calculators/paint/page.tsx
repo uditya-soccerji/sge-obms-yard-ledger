@@ -1,5 +1,6 @@
 "use client";
 
+import { guarded } from "@/components/shared/require-module";
 import { useMemo, useState } from "react";
 import {
   Panel,
@@ -21,7 +22,7 @@ import { calculatePaint } from "@/lib/paint-calc";
 import { PAINT_SCHEMES } from "@/lib/paint-schemes";
 import type { AppMethod } from "@/lib/paint-types";
 
-export default function PaintCalculatorPage() {
+function PaintCalculatorPage() {
   const [schemeId, setSchemeId] = useState(2);
   const [area, setArea] = useState(1000);
   const [method, setMethod] = useState<AppMethod>("brush");
@@ -206,3 +207,6 @@ export default function PaintCalculatorPage() {
     </div>
   );
 }
+
+// Route guard: only roles that may use this page get past the URL
+export default guarded("calculators", PaintCalculatorPage);

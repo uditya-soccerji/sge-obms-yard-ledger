@@ -1,5 +1,6 @@
 "use client";
 
+import { guarded } from "@/components/shared/require-module";
 import Link from "next/link";
 import { useState } from "react";
 import {
@@ -14,7 +15,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useStore } from "@/lib/store";
 
-export default function SicApprovalsPage() {
+function SicApprovalsPage() {
   const { state, reviewDpr } = useStore();
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [msg, setMsg] = useState<string | null>(null);
@@ -25,11 +26,15 @@ export default function SicApprovalsPage() {
     .slice(0, 8);
 
   function act(id: string, decision: "sic_approved" | "sic_rejected") {
-    reviewDpr(id, decision, notes[id] ?? "");
+    const r = reviewDpr(id, decision, notes[id] ?? "");
+    if (!r.ok) {
+      setMsg(r.error ?? "Review blocked");
+      return;
+    }
     setMsg(
       decision === "sic_approved"
         ? "Approved — labour attendance derived for ACPL."
-        : "Rejected."
+        : "Rejected — sent back to the supervisor with your reason."
     );
   }
 
@@ -118,7 +123,7 @@ export default function SicApprovalsPage() {
                       onChange={(e) =>
                         setNotes((n) => ({ ...n, [d.id]: e.target.value }))
                       }
-                      placeholder="Approval / reject note"
+                      placeholder="Approval note, or the reason for rejecting (required)"
                     />
                     <div className="flex gap-2">
                       <Button size="sm" onClick={() => act(d.id, "sic_approved")}>
@@ -166,3 +171,6 @@ export default function SicApprovalsPage() {
     </div>
   );
 }
+
+// Route guard: only roles that may use this page get past the URL
+export default guarded("approvals", SicApprovalsPage);

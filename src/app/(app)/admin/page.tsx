@@ -1,5 +1,6 @@
 "use client";
 
+import { guarded } from "@/components/shared/require-module";
 import Link from "next/link";
 import {
   EmptyState,
@@ -12,7 +13,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { useStore } from "@/lib/store";
 
-export default function AdminHomePage() {
+function AdminHomePage() {
   const { state } = useStore();
   const pendingDpr = state.dprDocuments.filter((d) => d.status === "submitted")
     .length;
@@ -143,3 +144,6 @@ export default function AdminHomePage() {
     </div>
   );
 }
+
+// Route guard: only roles that may use this page get past the URL
+export default guarded("admin", AdminHomePage);
