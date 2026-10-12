@@ -13,10 +13,10 @@ Screenshots, when saved as files, go in `docs/bugs/` as `B<nn>-<n>.png`. Never i
 | B02 | 2026-10-13 | Super Admin · MTF · Master Data → Sites | Feature: plants need locations under them, and each plant/location needs an RP (MTF runs RP2 and RP5) | open (ready to build) |
 | B03 | 2026-10-13 | Supervisor (Prasan Da, viewed as) · MTF · DPR → New | New supervisor's DPR shows an empty Labour attendance, and there's no way to give them labourers | open (rules agreed, §20) |
 | B04 | 2026-10-13 | Admin · DPR approvals | Admin approves DPR work quantities on SIC's behalf; both logged | open (rule agreed) |
-| B05 | 2026-10-13 | Supervisor · DPR → Equipment assigned | Equipment needs a detailed per-supervisor "setup" list (kinds, expiry, FEFO/FIFO), with expiry added by the supervisor | open (questions) |
-| B06 | 2026-10-13 | Store / Central store · dashboard | Equipment status changes reach SIC + site store + central store; requests board with urgent first and status buttons | open (questions) |
+| B05 | 2026-10-13 | Supervisor · DPR → Equipment assigned | Equipment needs a detailed per-supervisor "setup" list (kinds, expiry, FEFO/FIFO), with expiry added by the supervisor | open (ready to build) |
+| B06 | 2026-10-13 | Store / Central store · dashboard | Equipment status changes reach SIC + site store + central store; requests board with urgent first and status buttons | open (ready to build) |
 | B07 | 2026-10-13 | Supervisor (Prasan Da) · MTF · DPR → Painting/blasting work | Line needs plant, location, activity, area m², MPS, paint type and litres per paint type | open |
-| B08 | 2026-10-13 | Supervisor · DPR → Save / Submit | Save and Submit should notify SIC and Admin | open (question) |
+| B08 | 2026-10-13 | Supervisor · DPR → Save / Submit | Save and Submit should notify SIC and Admin | open (ready to build) |
 
 ## Details
 <!-- One section per bug:
@@ -117,13 +117,14 @@ Screenshots, when saved as files, go in `docs/bugs/` as `B<nn>-<n>.png`. Never i
 - Screenshot (Prasan Da, MTF, DPR → New): "Equipment assigned" shows a flat tick list of the site's items (AIR-MTF-01 airless, COM-MTF-02 compressor, HAR-MTF-03 harness) with status and expiry. Nothing is per supervisor, there's no detail view, and expiry can't be edited.
 - Today: `EquipmentItem` (`src/lib/types.ts`) knows only 4 kinds (hopper, compressor, airless, harness), one optional `expiryDate`, status ok/due/fault and `assignedTo`. The DPR lists every item on the site (`dpr-form.tsx`: `state.equipment.filter(e => e.siteId === value.siteId)`).
 - Fix plan: kinds list in Master Data (the 9 above, extendable). Item fields: tag (§7 `TYPE-SITE-##`), kind, assigned supervisor, issued on, expiry, status, qty for consumables (gloves, PPE kits), and a history of status/expiry changes. Setup view per supervisor with a FEFO/FIFO toggle and expiry badges (§7: warn 15 days before). The DPR lists only the supervisor's own setup. The supervisor can set or adjust an expiry; that's logged and the store is notified (B06).
-- Questions: what is **IFR**? Are gloves / PPE kits tracked by **quantity** (consumables) rather than one tag each?
+- Answers (2026-10-13): **IFR** is a protective **body suit**, about **₹5,000** each, so it's tracked per item, with its value. **Gloves and PPE kits** are counted **separately**: each is its own line with its own quantity (and expiry), not one tag per pair.
+- Added to the fix plan: an optional **unit value (₹)** per kind (IFR ₹5,000) so the setup shows what a supervisor holds in rupees. Kinds are either **tagged** (one record each: compressor, hopper, airless, harness, IFR, helmet, rope access) or **counted** (quantity + expiry per batch: gloves, PPE kits).
 
 ### B06: Equipment status → SIC + site store + central store; store requests board
 - Ask: any change in equipment status is shown to the **SIC**, the **Store manager of that site** and a **Central store manager** who sees all sites. Requests for **issue or exchange** appear on the store dashboard, **urgent first**, with buttons/filters: **SIC approval pending, fulfilled, not fulfilled, rejected**.
 - Today: there's one `store` role (site-scoped) and no central store. `EquipmentRequestStatus` is open / fulfilling / fulfilled / cancelled, with no SIC-approval or reject step, although §9 says "Open → SIC approves → store fulfils → requester confirms". Requests have `kind` spare/equipment/material/other, with no "exchange".
 - Fix plan: request statuses `sic_pending → approved → fulfilled | not_fulfilled | rejected` (reason required for reject / not fulfilled, §9), kind + `issue | exchange`. A store dashboard board sorted urgent-first with those filters. Events `equipment_status` (to SIC + site store + central store) and `request_*` (to requester, SIC, store).
-- Question: is the **Central store manager** a Store login with access to all sites (like HR / Finance, §2), or a separate role?
+- Answer (2026-10-13): the **Central store manager is a Store login with access to all sites** (one site at a time, like HR / Finance, §2). No new role. Notifications go to every Store login whose sites include the item's site, so the central one hears about all sites.
 
 ### B07: Painting/blasting line fields
 - Ask: each painting & blasting work line has **Plant name, Location, Activity, Area m², MPS, Paint type, and litres consumed per paint type**.
@@ -135,5 +136,5 @@ Screenshots, when saved as files, go in `docs/bugs/` as `B<nn>-<n>.png`. Never i
 - Ask: when a supervisor **saves** or **submits** a DPR, the **SIC and Admin** are notified. (Screenshot buttons: "Save draft" and "Save & submit to SIC".)
 - Today: the old DPR desk writes no notification events; Work events cover jobs, JMS and paint only.
 - Fix plan: events `dpr_saved` and `dpr_submitted` for the site's SIC and Admin(s). Submit is instant (§19). Rename the button "Save & submit" (it goes to SIC and Admin).
-- Question: should a **draft save** also be instant, or go into the daily summary? Suggested: daily summary, so the bell isn't flooded by every save.
+- Answer (2026-10-13): a **draft save** goes into the **daily summary**; **submit** is instant.
 

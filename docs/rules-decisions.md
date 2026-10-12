@@ -40,7 +40,7 @@ Answers from the module-by-module review. Not built yet; implemented together at
 - **SIC review:** approve, or reject with a reason; a rejected DPR goes back to the supervisor to fix and resubmit.
 - **Admin on behalf of SIC (decided 2026-10-13):** Admin may approve a DPR's work quantities on the SIC's behalf. The log records both: who approved, and on whose behalf. The SIC is notified.
 - **Painting & blasting line (decided 2026-10-13):** plant, location, activity, area m², MPS, paint type, and litres consumed **per paint type** (one or more paints per line).
-- **Notifications (decided 2026-10-13):** saving or submitting a DPR notifies the site's SIC and Admin.
+- **Notifications (decided 2026-10-13):** submitting a DPR notifies the site's SIC and Admin at once; draft saves go into the daily summary (§19).
 - **After approval:** locked. Owner / Super Admin can unlock, with a logged reason.
 - **Types:** Painting & blasting, Scaffolding, Safety, Store — plus new DPRs for HR, Admin and other logins (contents to define).
 - **Painting line:** plant, location / bay, MPS scheme, job start date and end date all required (start/end are used to check the JMS). Max 2,000 m² per line. Warn when litres are far off the MPS norm for the area.
@@ -70,8 +70,8 @@ Answers from the module-by-module review. Not built yet; implemented together at
 - **Expiry:** warn 15 days before. (Expired kit is not blocked — not chosen.)
 - **Checklist:** ticked on the DPR every day the item is used.
 - **Status:** supervisor flags a fault; the store manager repairs it and changes the status back.
-- **Supervisor setup (decided 2026-10-13):** each supervisor has a setup of assigned items (compressor, hopper, airless spray painting machine, harness, PPE kit, IFR, helmet, gloves, rope access, …), each with expiry, listed FEFO or FIFO. The supervisor can add the expiry himself (logged).
-- **Who is told (decided 2026-10-13):** any equipment status change goes to the SIC, the site's store manager and the central store manager (all sites).
+- **Supervisor setup (decided 2026-10-13):** each supervisor has a setup of assigned items (compressor, hopper, airless spray painting machine, harness, PPE kit, IFR, helmet, gloves, rope access, …), each with expiry, listed FEFO or FIFO. The supervisor can add the expiry himself (logged). IFR = protective body suit (~₹5,000 each, tracked per item with value). Gloves and PPE kits are counted separately, by quantity.
+- **Who is told (decided 2026-10-13):** any equipment status change goes to the SIC, the site's store manager and the central store manager (all sites). The central store manager is a Store login with access to all sites (§2), not a separate role.
 
 ## 8. Finance
 - **Who adds entries:** Owner / Super Admin only (Finance, SIC, Admin, Store not chosen).
