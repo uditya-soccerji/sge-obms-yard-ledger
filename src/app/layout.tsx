@@ -22,7 +22,7 @@ const jetbrains = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "SGE OBMS — Yard Ledger",
+  title: "SGE Operations Hub",
   description:
     "Operations & Business Management System for Shree Gayatri Enterprise · RIL Jamnagar",
 };
