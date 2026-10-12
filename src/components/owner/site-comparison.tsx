@@ -1,10 +1,10 @@
 "use client";
 
 import { formatINR, Panel, StatusPill } from "@/components/shared/ui-bits";
+import { today as todayDate } from "@/lib/today";
 import { useStore } from "@/lib/store";
 import type { AppState } from "@/lib/types";
 
-const TODAY = "2026-10-05";
 
 export interface SiteRow {
   siteId: string;
@@ -28,7 +28,7 @@ export function siteRows(s: AppState): SiteRow[] {
     .filter((x) => x.enabled)
     .map((site) => {
       const id = site.id;
-      const today = s.dprs.filter((d) => d.siteId === id && d.date === TODAY);
+      const today = s.dprs.filter((d) => d.siteId === id && d.date === todayDate());
       return {
         siteId: id,
         code: site.code,
@@ -37,7 +37,7 @@ export function siteRows(s: AppState): SiteRow[] {
         present: s.attendance.filter(
           (a) =>
             a.siteId === id &&
-            a.date === TODAY &&
+            a.date === todayDate() &&
             (a.status === "present" || a.status === "half")
         ).length,
         paintedM2: today
@@ -58,7 +58,7 @@ export function siteRows(s: AppState): SiteRow[] {
         kitIssues: s.equipment.filter((e) => e.siteId === id && e.status !== "ok")
           .length,
         expenseToday: s.finance
-          .filter((f) => f.siteId === id && f.date === TODAY && f.kind === "expense")
+          .filter((f) => f.siteId === id && f.date === todayDate() && f.kind === "expense")
           .reduce((n, f) => n + f.amount, 0),
         billed: s.billing
           .filter((b) => b.siteId === id && b.status !== "draft")

@@ -30,6 +30,8 @@ export interface ServiceItem {
   rate: number;
   /** Rate not yet taken from the ARC list — placeholder for the demo */
   ratePending?: boolean;
+  /** Paint list / norms not yet received for this item (litres recorded against a placeholder) */
+  paintsPending?: boolean;
   paints: PaintNorm[];
   /** Stages a new job starts with (supervisor can change at job start) */
   defaultStages: Stage[];
@@ -107,7 +109,12 @@ export interface DprEntry {
   /** Actual DFT (microns), typed at final shade */
   dft?: number;
   supervisorId: string;
-  enteredBy: "supervisor" | "admin";
+  /**
+   * Who keyed it in. "admin" is the data operator's double entry (docs §5b):
+   * when present it wins over the supervisor's entry for that job · date · stage.
+   */
+  enteredBy: "supervisor" | "admin" | "sic" | "owner" | "super_admin";
+  enteredByName?: string;
   note?: string;
   /** Labourer ids who worked on this job this day (labour cost, docs §18) */
   crew?: string[];
@@ -138,6 +145,10 @@ export interface Jms {
   /** When SIC confirmed it (approved value fixed here) */
   confirmedOn: string;
   payment?: JmsPayment;
+  /** Valued at a placeholder rate (service item rate pending the ARC list) */
+  ratePending?: boolean;
+  /** Every status change: who, when, from → to */
+  statusLog?: { at: string; by: string; from: JmsStatus; to: JmsStatus; note?: string }[];
 }
 
 /** Paint batch: in the SGE store (supervisorId null) or issued to a supervisor. */
@@ -224,6 +235,8 @@ export interface Expense {
   enteredBy?: string;
   enteredByName?: string;
   enteredAt?: string;
+  /** Voided entries stay on record (docs §8: all edits logged) but leave the P&L */
+  voided?: { by: string; at: string; reason: string };
 }
 
 export type PaymentMode = "cash" | "upi" | "bank" | "credit";

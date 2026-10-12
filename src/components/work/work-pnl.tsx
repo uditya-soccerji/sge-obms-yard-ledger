@@ -1,14 +1,14 @@
 "use client";
 
-import { useState } from "react";
+import React, { useState } from "react";
 import { Trash2 } from "lucide-react";
 import { formatINR, KpiTile, Panel, StatusPill } from "@/components/shared/ui-bits";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { EXPENSE_CATEGORIES, monthLabel, PAYMENT_MODES, perUnit, pnlRows, rollUp, type JobPnl, type PnlTotals } from "@/lib/work/logic";
+import { canVoidExpense, EXPENSE_CATEGORIES, monthLabel, PAYMENT_MODES, perUnit, pnlRows, rollUp, type JobPnl, type PnlTotals } from "@/lib/work/logic";
 import { useStore } from "@/lib/store";
-import { WORK_TODAY } from "@/lib/work/seed";
+import { today } from "@/lib/today";
 import { useWork } from "@/lib/work/store";
 import type { ExpenseKind, PaymentMode } from "@/lib/work/types";
 import { cn } from "@/lib/utils";
@@ -200,10 +200,12 @@ function Expenses() {
   const { addExpense, removeExpense } = useWork();
   const s = useWorkScope();
   const { work } = s;
-  const { fullState } = useStore();
+  const { fullState, currentAccount } = useStore();
+  // Cost being voided, and the reason typed for it
+  const [voiding, setVoiding] = useState<{ id: string; reason: string } | null>(null);
   const vendors = fullState.vendors.filter((v) => v.status === "active").map((v) => v.name);
   const nowTime = () => new Date().toTimeString().slice(0, 5);
-  const blank = { kind: "fixed" as ExpenseKind, siteId: "", month: "", date: WORK_TODAY, time: nowTime(), category: "", amount: "", jobId: "", vendor: "", paymentMode: "" as PaymentMode | "", note: "", billFile: "", billPending: false };
+  const blank = { kind: "fixed" as ExpenseKind, siteId: "", month: "", date: today(), time: nowTime(), category: "", amount: "", jobId: "", vendor: "", paymentMode: "" as PaymentMode | "", note: "", billFile: "", billPending: false };
   const [f, setF] = useState(blank);
   // A new file input after each save, so the last bill's name doesn't carry over
   const [fileKey, setFileKey] = useState(0);
@@ -278,7 +280,7 @@ function Expenses() {
           )}
           <div>
             <Label>Date</Label>
-            <Input type="date" className="mt-1" max={WORK_TODAY} value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} />
+            <Input type="date" className="mt-1" max={today()} value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} />
           </div>
           <div>
             <Label>Time</Label>
@@ -348,7 +350,8 @@ function Expenses() {
             {list.map((x) => {
               const job = x.jobId ? work.jobs.find((j) => j.id === x.jobId) : undefined;
               return (
-                <tr key={x.id} className="border-b border-[var(--sge-line)]">
+                <React.Fragment key={x.id}>
+                <tr className={cn("border-b border-[var(--sge-line)]", x.voided && "text-[var(--sge-ink-3)] line-through")}>
                   <td className={tdCls}><StatusPill tone={x.kind === "fixed" ? "default" : "accent"}>{x.kind}</StatusPill></td>
                   <td className={tdCls}>{x.category}{x.note ? <div className="text-[10px] text-[var(--sge-ink-3)]">{x.note}</div> : null}</td>
                   <td className={tdCls + " text-xs"}>
@@ -362,13 +365,38 @@ function Expenses() {
                   <td className={tdCls + " text-xs"}>{job ? `${job.jobNo} · ${job.location}` : `${s.siteCode(x.siteId)} · ${monthLabel(x.month)}`}</td>
                   <td className={tdCls + " text-right tabular-nums"}>{formatINR(x.amount)}</td>
                   <td className={tdCls}>
-                    {s.canMoney ? (
-                      <button type="button" aria-label="Remove cost" onClick={() => removeExpense(x.id)}>
+                    {x.voided ? (
+                      <span className="text-[10px] no-underline" title={x.voided.reason}>voided by {x.voided.by}</span>
+                    ) : s.canMoney && canVoidExpense(x, { accountId: currentAccount?.id ?? "", role: s.role }, today()) ? (
+                      <button type="button" aria-label="Void cost" title="Void (kept on record, leaves the P&L)" onClick={() => setVoiding({ id: x.id, reason: "" })}>
                         <Trash2 className="h-3.5 w-3.5 text-[var(--sge-ink-3)]" />
                       </button>
                     ) : null}
                   </td>
                 </tr>
+                {voiding?.id === x.id ? (
+                  <tr className="border-b border-[var(--sge-line)] bg-[var(--sge-crit-wash)]/40">
+                    <td colSpan={6} className="px-2.5 py-2">
+                      <form
+                        className="flex flex-wrap items-end gap-2"
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          const r = removeExpense(x.id, voiding.reason);
+                          setMsg(r.ok ? { ok: true, msg: "Cost voided — it stays on record and leaves the P&L." } : { ok: false, msg: r.error });
+                          if (r.ok) setVoiding(null);
+                        }}
+                      >
+                        <label className="min-w-[240px] flex-1 text-xs">
+                          Why void this cost? (logged)
+                          <Input className="mt-1" value={voiding.reason} onChange={(e) => setVoiding({ id: x.id, reason: e.target.value })} placeholder="e.g. entered twice" />
+                        </label>
+                        <Button type="submit" size="sm" variant="outline">Void cost</Button>
+                        <Button type="button" size="sm" variant="ghost" onClick={() => setVoiding(null)}>Keep</Button>
+                      </form>
+                    </td>
+                  </tr>
+                ) : null}
+                </React.Fragment>
               );
             })}
           </tbody>

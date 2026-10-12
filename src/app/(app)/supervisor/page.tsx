@@ -1,6 +1,7 @@
 "use client";
 
 import { guarded } from "@/components/shared/require-module";
+import { today as todayDate } from "@/lib/today";
 import Link from "next/link";
 import { useMemo } from "react";
 import {
@@ -23,7 +24,7 @@ import type { AttendanceStatus } from "@/lib/types";
 
 function SupervisorHomePage() {
   const { state, markAttendance } = useStore();
-  const today = "2026-10-05";
+  const today = todayDate();
 
   const supervisorId =
     state.currentUserId &&

@@ -1,11 +1,14 @@
 import type {
+  Expense,
   Jms,
+  JmsStatus,
   DprEntry,
   Job,
   Member,
   PaintBatch,
   PlanLine,
   Stage,
+  WorkOrder,
   WorkState,
 } from "./types";
 import { STAGES } from "./types";
@@ -24,8 +27,36 @@ export function memberArea(m: Member): number {
   return round3(m.nos * m.side * m.length * m.cf);
 }
 
+/**
+ * Area of one DPR entry. The RIL measurement sheet adds the raw NOS × SIDE ×
+ * LENGTH × CF products and rounds the page total once, so this does too
+ * (rounding each member first gave 193.912 for the signed 193.911 sheet).
+ */
 export function entryArea(e: DprEntry): number {
-  return round3(e.members.reduce((s, m) => s + memberArea(m), 0));
+  return round3(e.members.reduce((s, m) => s + m.nos * m.side * m.length * m.cf, 0));
+}
+
+/** A member row is blank when it has no name, length or CF (NOS and SIDE default to 1); blank rows are ignored. */
+const blankMember = (m: Member) => !m.name.trim() && !(m.length > 0) && !(m.cf > 0);
+
+/**
+ * Check measured members before saving (form and store use the same rule):
+ * blank rows are dropped, a half-filled row is an error naming the row.
+ */
+export function validMembers(members: Member[]): { members: Member[]; error?: string } {
+  const out: Member[] = [];
+  for (let i = 0; i < members.length; i++) {
+    const m = members[i];
+    if (blankMember(m)) continue;
+    const row = `Row ${i + 1}`;
+    if (!m.name.trim()) return { members: out, error: `${row}: give the member a name` };
+    for (const [k, label] of [["nos", "NOS"], ["side", "SIDE"], ["length", "LENGTH"], ["cf", "CF"]] as const) {
+      if (!(m[k] > 0)) return { members: out, error: `${row}: ${label} must be above 0` };
+    }
+    out.push(m);
+  }
+  if (!out.length) return { members: out, error: "Add at least one measured member (NOS, SIDE, LENGTH, CF all above 0)" };
+  return { members: out };
 }
 
 const entryKey = (e: DprEntry) => `${e.jobId}|${e.date}|${e.stage}`;
@@ -36,6 +67,8 @@ const entryKey = (e: DprEntry) => `${e.jobId}|${e.date}|${e.stage}`;
  * entries are kept for comparison only and never counted.
  */
 export function effectiveEntries(dprs: DprEntry[]): DprEntry[] {
+  // Only the data operator's (Admin) entry replaces the supervisor's; SIC /
+  // Owner entries are ordinary entries, not a second copy
   const admin = new Set(dprs.filter((e) => e.enteredBy === "admin").map(entryKey));
   return dprs.filter((e) => e.enteredBy === "admin" || !admin.has(entryKey(e)));
 }
@@ -132,7 +165,8 @@ export function lineStatus(line: PlanLine, w: WorkState): LineStatus {
     const a = jobStageAreas(job, w.dprs);
     for (const s of job.stages) inProgress[s] = round3(inProgress[s] + a[s]);
   }
-  const variance = plan > 0 ? actual / plan - 1 : 0;
+  // A line with no plan left (carried at 0 m²) that still gets JMS is over by definition
+  const variance = plan > 0 ? actual / plan - 1 : actual > 0 ? Infinity : 0;
   const closed = isMonthClosed(w, line.siteId, line.month);
   let flag: LineStatus["flag"] = "running";
   if (variance > OVER_TOLERANCE) flag = "over";
@@ -146,6 +180,53 @@ export function lineStatus(line: PlanLine, w: WorkState): LineStatus {
     variance,
     flag,
   };
+}
+
+/** In-progress m² at the furthest stage reached (final back to prep), not the largest stage. */
+export function furthestStageArea(inProgress: Record<Stage, number>): number {
+  for (const s of [...STAGES].reverse()) if (inProgress[s.id] > 0) return inProgress[s.id];
+  return 0;
+}
+
+/** Next job number for a site: J-<SITE>-0001, 0002… numbered per site. */
+export function nextJobNo(jobs: Job[], siteCode: string): string {
+  const prefix = `J-${siteCode}-`;
+  const top = Math.max(0, ...jobs.filter((j) => j.jobNo.startsWith(prefix)).map((j) => Number(j.jobNo.slice(prefix.length)) || 0));
+  return `${prefix}${String(top + 1).padStart(4, "0")}`;
+}
+
+/**
+ * The work order a JMS bills against: same site, service code in scope, and
+ * valid on the JMS date. The latest-starting one wins when several match.
+ */
+export function pickWorkOrder(w: WorkState, siteId: string, serviceCode: string, onDate: string): WorkOrder | null {
+  const fits = w.workOrders.filter(
+    (o) => o.siteId === siteId && o.scope[serviceCode] != null && o.validFrom <= onDate && onDate <= o.validTo
+  );
+  return fits.sort((a, b) => b.validFrom.localeCompare(a.validFrom))[0] ?? null;
+}
+
+/** RIL JMS stages in order (docs §14). PAID is set only by recording a payment. */
+export const JMS_FLOW: JmsStatus[] = ["JMS SUBMITTED", "QSD APR", "A1 APR", "A2 APR", "A3 APR", "INVOICE UPLOADED", "PAID"];
+
+/** Statuses a JMS may move to: the next stage; Owner / Super Admin may also step back one. */
+export function nextJmsStatuses(current: JmsStatus, canStepBack: boolean): JmsStatus[] {
+  const i = JMS_FLOW.indexOf(current);
+  const out: JmsStatus[] = [];
+  if (canStepBack && i > 0 && current !== "PAID") out.push(JMS_FLOW[i - 1]);
+  const next = JMS_FLOW[i + 1];
+  if (next && next !== "PAID") out.push(next);
+  return out;
+}
+
+/**
+ * Who may void a cost (docs §8): the person who entered it, on the same day;
+ * after that only Owner / Super Admin.
+ */
+export function canVoidExpense(x: Expense, viewer: { accountId: string; role: string | null }, today: string): boolean {
+  if (x.voided) return false;
+  if (viewer.role === "owner" || viewer.role === "super_admin") return true;
+  return !!x.enteredBy && x.enteredBy === viewer.accountId && (x.enteredAt ?? "").slice(0, 10) === today;
 }
 
 export function nextMonth(month: string): string {
@@ -164,6 +245,8 @@ export function woUsage(woId: string, w: WorkState) {
   const wo = w.workOrders.find((x) => x.id === woId);
   if (!wo) return null;
   const jms = w.jms.filter((j) => j.woId === woId);
+  // Part of the billed value is at placeholder rates (ARC list not in yet)
+  const billedEstimate = Math.round(jms.filter((j) => j.ratePending).reduce((s, j) => s + j.amount, 0) * 100) / 100;
   const items = Object.entries(wo.scope).map(([code, scope]) => {
     const used = round3(jms.filter((j) => j.serviceCode === code).reduce((s, j) => s + j.qty, 0));
     return { code, scope, used, balance: round3(scope - used), pct: scope ? used / scope : 0 };
@@ -175,10 +258,23 @@ export function woUsage(woId: string, w: WorkState) {
     wo,
     items,
     billed,
+    billedEstimate,
     capPct: wo.capInr ? billed / wo.capInr : 0,
     scopeM2,
     usedM2,
     m2Pct: scopeM2 ? usedM2 / scopeM2 : 0,
+  };
+}
+
+/**
+ * Warnings for one work order: the WO itself is judged on overall m² and ₹ cap;
+ * single service items are reported separately (one item at 82% doesn't mean
+ * the WO is nearly used up).
+ */
+export function woWarnings(u: NonNullable<ReturnType<typeof woUsage>>) {
+  return {
+    wo: warnLevel(Math.max(u.m2Pct, u.capPct)),
+    items: u.items.map((i) => ({ code: i.code, level: warnLevel(i.pct) })).filter((i) => i.level !== "ok"),
   };
 }
 
@@ -239,7 +335,8 @@ export interface SupervisorPaint {
   balance: number;
   /** Litres still needed to finish the open work on this paint */
   needed: number;
-  flag: "ok" | "low" | "negative" | "none";
+  /** none = nothing issued or needed; no_stock = needed but nothing issued (docs §6) */
+  flag: "ok" | "low" | "negative" | "none" | "no_stock";
 }
 
 /**
@@ -269,7 +366,16 @@ export function supervisorPaint(w: WorkState): SupervisorPaint[] {
   for (const r of rows.values()) {
     r.used = paintUsed(r.supervisorId, r.sap, w.dprs);
     r.balance = round3(r.issued - r.used);
-    r.flag = r.issued === 0 && r.used === 0 ? "none" : r.balance < 0 ? "negative" : r.balance < r.needed ? "low" : "ok";
+    r.flag =
+      r.issued === 0 && r.used === 0
+        ? r.needed > 0
+          ? "no_stock"
+          : "none"
+        : r.balance < 0
+          ? "negative"
+          : r.balance < r.needed
+            ? "low"
+            : "ok";
   }
   return [...rows.values()].filter((r) => r.issued > 0 || r.used > 0 || r.needed > 0);
 }
@@ -305,6 +411,13 @@ export function paymentRows(jms: Jms[], today: string): PaymentRow[] {
   });
 }
 
+/** Payments to look at first: biggest shortfalls, then the longest unpaid. */
+export function worstPayments(rows: PaymentRow[], limit = 4): PaymentRow[] {
+  const short = rows.filter((r) => (r.gap ?? 0) <= -1).sort((a, b) => (a.gap ?? 0) - (b.gap ?? 0));
+  const unpaid = rows.filter((r) => r.received == null && (r.waiting ?? 0) > 45).sort((a, b) => (b.waiting ?? 0) - (a.waiting ?? 0));
+  return [...short, ...unpaid].slice(0, limit);
+}
+
 export function paymentSummary(rows: PaymentRow[]) {
   const paid = rows.filter((r) => r.received != null);
   const approved = rows.reduce((s, r) => s + r.approved, 0);
@@ -312,6 +425,8 @@ export function paymentSummary(rows: PaymentRow[]) {
   const received = paid.reduce((s, r) => s + (r.received ?? 0), 0);
   return {
     approved,
+    /** Approved value that is at placeholder rates (ARC list pending) */
+    approvedEstimate: rows.filter((r) => r.jms.ratePending).reduce((s, r) => s + r.approved, 0),
     received,
     /** Difference on paid JMS only (negative = got less than approved) */
     gap: Math.round((received - approvedPaid) * 100) / 100,
@@ -443,7 +558,7 @@ function siteLabourDays(w: WorkState, labour: Map<string, JobLabour>): Map<strin
 function fixedBySiteMonth(w: WorkState): Map<string, number> {
   const out = new Map<string, number>();
   for (const x of w.expenses) {
-    if (x.kind !== "fixed") continue;
+    if (x.kind !== "fixed" || x.voided) continue;
     out.set(`${x.siteId}|${x.month}`, (out.get(`${x.siteId}|${x.month}`) ?? 0) + x.amount);
   }
   return out;
@@ -481,7 +596,7 @@ export function pnlRows(w: WorkState, wageOf: (labourerId: string) => number, mo
       if (total > 0) overhead += (fixed.get(`${line.siteId}|${m}`) ?? 0) * (d / total);
     }
     const direct = w.expenses
-      .filter((x) => x.kind === "direct" && x.jobId === job.id && inMonth(x.month || x.date, month))
+      .filter((x) => x.kind === "direct" && !x.voided && x.jobId === job.id && inMonth(x.month || x.date, month))
       .reduce((s, x) => s + x.amount, 0);
     const jms = w.jms.find((j) => j.id === job.jmsId);
     const approvedNow = !!jms && inMonth(jms.confirmedOn, month);

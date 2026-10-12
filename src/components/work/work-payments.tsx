@@ -5,7 +5,7 @@ import { formatINR, KpiTile, Panel, StatusPill } from "@/components/shared/ui-bi
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { monthLabel, paymentRows, paymentSummary, type PaymentRow } from "@/lib/work/logic";
-import { WORK_TODAY } from "@/lib/work/seed";
+import { today } from "@/lib/today";
 import { useWork } from "@/lib/work/store";
 import type { JmsPayment } from "@/lib/work/types";
 import { cn } from "@/lib/utils";
@@ -29,7 +29,7 @@ export function WorkPayments() {
   const [filter, setFilter] = useState<Filter>("all");
   const [editing, setEditing] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ ok: boolean; msg: string } | null>(null);
-  const all = paymentRows(work.jms.filter((j) => s.lineIds.has(j.planLineId)), WORK_TODAY);
+  const all = paymentRows(work.jms.filter((j) => s.lineIds.has(j.planLineId)), today());
   const sum = paymentSummary(all);
   const rows = all
     .filter((r) =>
@@ -40,7 +40,11 @@ export function WorkPayments() {
   return (
     <div className="space-y-4">
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
-        <KpiTile label="Approved by SIC" value={formatINR(sum.approved)} hint={`${all.length} JMS`} />
+        <KpiTile
+          label="Approved by SIC"
+          value={formatINR(sum.approved)}
+          hint={sum.approvedEstimate > 0 ? `${all.length} JMS · ${formatINR(sum.approvedEstimate)} at placeholder rates` : `${all.length} JMS`}
+        />
         <KpiTile label="Received in bank" value={formatINR(sum.received)} tone="ok" hint={`${all.length - sum.unpaidCount} paid`} />
         <KpiTile label="Gap on paid JMS" value={formatINR(sum.gap)} tone={sum.gap < -0.5 ? "crit" : "default"} hint={`${sum.shortCount} short`} />
         <KpiTile label="Approved, not yet received" value={formatINR(sum.unpaidValue)} tone="warn" hint={`${sum.unpaidCount} JMS`} />
@@ -114,10 +118,11 @@ function PayRow({
   const s = useWorkScope();
   const line = s.line(r.jms.planLineId);
   const it = s.item(r.jms.serviceCode);
-  const [on, setOn] = useState(r.jms.payment?.receivedOn ?? WORK_TODAY);
+  const [on, setOn] = useState(r.jms.payment?.receivedOn ?? today());
   const [amt, setAmt] = useState(String(r.jms.payment?.amount ?? r.jms.amount));
   const [reason, setReason] = useState<JmsPayment["reason"] | "">(r.jms.payment?.reason ?? "");
   const [note, setNote] = useState(r.jms.payment?.note ?? "");
+  const [clearing, setClearing] = useState<string | null>(null);
   const diff = (Number(amt) || 0) - r.jms.amount;
 
   return (
@@ -129,6 +134,7 @@ function PayRow({
         </td>
         <td className={tdCls + " text-xs"}>
           <b>{line?.plant}</b> · {it?.mps}
+          {r.jms.ratePending ? <span className="ml-1"><StatusPill tone="warn">rate pending</StatusPill></span> : null}
           {s.allSites && line ? <div className="text-[10px] text-[var(--sge-ink-3)]">{s.siteCode(line.siteId)}</div> : null}
         </td>
         <td className={tdCls + " text-xs"}>{r.jms.confirmedOn}</td>
@@ -179,7 +185,7 @@ function PayRow({
             >
               <label className="text-xs">
                 Date received
-                <Input type="date" className="mt-1" value={on} onChange={(e) => setOn(e.target.value)} />
+                <Input type="date" className="mt-1" max={today()} value={on} onChange={(e) => setOn(e.target.value)} />
               </label>
               <label className="text-xs">
                 Amount received ₹
@@ -203,19 +209,32 @@ function PayRow({
               <div className="flex gap-2">
                 <Button type="submit">Save</Button>
                 {r.jms.payment ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    onClick={() => {
-                      recordPayment(r.jms.id, null);
-                      onMsg({ ok: true, msg: `Payment cleared for JMS ${r.jms.jmsNo}.` });
-                      onEdit(false);
-                    }}
-                  >
-                    Clear
+                  <Button type="button" variant="ghost" onClick={() => setClearing(clearing == null ? "" : null)}>
+                    {clearing == null ? "Clear…" : "Keep"}
                   </Button>
                 ) : null}
               </div>
+              {clearing != null ? (
+                <div className="flex items-end gap-2 sm:col-span-6">
+                  <label className="min-w-[240px] flex-1 text-xs">
+                    Why clear this payment? (logged)
+                    <Input className="mt-1" value={clearing} onChange={(e) => setClearing(e.target.value)} placeholder="e.g. entered against the wrong JMS" />
+                  </label>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      const res = recordPayment(r.jms.id, null, clearing);
+                      if (!res.ok) return onMsg({ ok: false, msg: res.error });
+                      onMsg({ ok: true, msg: `Payment cleared for JMS ${r.jms.jmsNo}.` });
+                      setClearing(null);
+                      onEdit(false);
+                    }}
+                  >
+                    Clear payment
+                  </Button>
+                </div>
+              ) : null}
             </form>
           </td>
         </tr>

@@ -1,5 +1,7 @@
 "use client";
 
+import { today as todayDate } from "./today";
+
 import React, {
   createContext,
   useCallback,
@@ -650,7 +652,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     (labourerId: string, status: AttendanceStatus, note?: string) => {
       setState((s) => {
         if (!can(s, "hr", "update") && !can(s, "supervisor", "update")) return s;
-        const today = "2026-10-05";
+        const today = todayDate();
         const existing = s.attendance.find(
           (a) => a.labourerId === labourerId && a.date === today
         );
@@ -1293,7 +1295,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         ).length;
         const overdue = dprDocs.flatMap((d) =>
           d.equipmentMarks.filter(
-            (e) => e.expiryDate && e.expiryDate < "2026-10-05"
+            (e) => e.expiryDate && e.expiryDate < todayDate()
           )
         ).length;
         const equipmentCare = Math.max(1, 5 - faultEq - overdue);
@@ -1332,7 +1334,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         {
           id: uid("wg"),
           staffId: r.supervisorId,
-          date: "2026-10-05",
+          date: todayDate(),
           kind: "incentive" as const,
           amount: r.suggestedSupervisorIncentive,
           note: `JMS rating incentive · score ${r.score} · ${pkg.label}`,
@@ -2067,7 +2069,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       setState((s) => {
         if (!can(s, "telegram", "create")) return s;
         let next = { ...s, telegramDrafts: [draft, ...s.telegramDrafts] };
-        const today = "2026-10-05";
+        const today = todayDate();
 
         if (input.mappedEntity === "attendance") {
           const labourer = next.labourers[0];

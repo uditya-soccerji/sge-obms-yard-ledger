@@ -3,20 +3,18 @@
 import Link from "next/link";
 import { formatINR, Panel, StatusPill } from "@/components/shared/ui-bits";
 import { Button } from "@/components/ui/button";
-import { paymentRows, paymentSummary, perUnit, pnlRows, rollUp } from "@/lib/work/logic";
-import { WORK_TODAY } from "@/lib/work/seed";
+import { paymentRows, paymentSummary, perUnit, pnlRows, rollUp, worstPayments } from "@/lib/work/logic";
+import { today } from "@/lib/today";
 import { useWorkScope } from "./common";
 
 /** Dashboard card: SIC-approved vs received in bank, plus the P&L headline. */
 export function MoneyCard() {
   const s = useWorkScope();
   const { work } = s;
-  const rows = paymentRows(work.jms.filter((j) => s.lineIds.has(j.planLineId)), WORK_TODAY);
+  const rows = paymentRows(work.jms.filter((j) => s.lineIds.has(j.planLineId)), today());
   const sum = paymentSummary(rows);
-  const worst = rows
-    .filter((r) => (r.gap ?? 0) <= -1 || (r.waiting ?? 0) > 45)
-    .sort((a, b) => (a.gap ?? -(b.waiting ?? 0)) - (b.gap ?? -(a.waiting ?? 0)))
-    .slice(0, 4);
+  // Biggest shortfalls first, then the longest unpaid
+  const worst = worstPayments(rows, 4);
   const pnl = rollUp(pnlRows(work, s.wageOf).filter((r) => s.inSite(r.siteId)), () => "all")[0];
   // Cash basis per m² uses the m² that has been paid for
   const perM2 = pnl ? perUnit(pnl.profit, pnl.paidQty) : null;

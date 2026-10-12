@@ -22,8 +22,8 @@ import type {
   WorkState,
 } from "./types";
 
-/** v5: plan months per site; Admin entries win; close-request timestamps */
-export const WORK_STORAGE_KEY = "sge-work-v5";
+/** v6: per-site months, Admin entries win, JMS status log, void costs, healthy demo paint */
+export const WORK_STORAGE_KEY = "sge-work-v6";
 /** "Today" for the work demo (DPR dates, expiry warnings). */
 export const WORK_TODAY = "2026-09-28";
 
@@ -43,7 +43,9 @@ const SERVICE_ITEMS: ServiceItem[] = [
   { code: "3378276", mps: "MPS-4", description: "APLY MPS4 - BLAST CLG - SPRAY APLY", uom: "M2", rate: 629.81, paints: [{ sap: "2002462128", name: "TYPE 23 PAINT", normL: 0.4 }], defaultStages: ["prep", "coat1", "final"] },
   { code: "3378275", mps: "MPS-6", description: "APLY MPS6 - HANDTOOL - BRUSHROLLER APLY", uom: "M2", rate: 191.56, paints: [{ sap: "2002462133", name: "TYPE 2 PAINT", normL: 0.176 }], defaultStages: [...ALL4] },
   { code: "3378301", mps: "MPS-23", description: "APLY MPS23 - HANDTOOL - BRUSHROLLER APLY", uom: "M2", rate: 117.14, paints: [{ sap: "2002462190", name: "TYPE 6 PAINT", normL: 0.156 }], defaultStages: [...ALL4] },
-  { code: "PEND-MPS8", mps: "MPS-8", description: "MPS8 - BLASTING & SPRAY PAINTING (rate pending)", uom: "M2", rate: 650, ratePending: true, paints: [], defaultStages: [...ALL4] },
+  { code: "PEND-MPS8", mps: "MPS-8", description: "MPS8 - BLASTING & SPRAY PAINTING (rate pending)", uom: "M2", rate: 650, ratePending: true, paintsPending: true,
+    // Paint list for MPS-8 not received yet: litres go against a placeholder with no norm
+    paints: [{ sap: "PEND-MPS8-PAINT", name: "MPS-8 PAINT (SAP PENDING)", normL: 0 }], defaultStages: [...ALL4] },
   { code: "PEND-MPS13", mps: "MPS-13", description: "MPS13 - MANUAL CLEANING & BRUSH PAINTING (rate pending)", uom: "M2", rate: 180, ratePending: true, paints: [T17, T6], defaultStages: [...ALL4] },
   { code: "PEND-MPS23S", mps: "MPS-23", description: "MPS23 - MANUAL CLEANING & SPRAY PAINTING (rate pending)", uom: "M2", rate: 130, ratePending: true, paints: [{ sap: "2002462190", name: "TYPE 6 PAINT", normL: 0.156 }], defaultStages: [...ALL4] },
   { code: "PEND-BLAST-INT", mps: "BLASTING", description: "INTERNAL BLASTING (rate pending)", uom: "M2", rate: 300, ratePending: true, paints: [], defaultStages: ["prep"] },
@@ -152,7 +154,7 @@ export function createWorkSeed(): WorkState {
   const addJms = (job: Job, line: PlanLine, qty: number, from: string, to: string, status: JmsStatus, no?: string, confirmedOn = to) => {
     const rate = rateOf(line.serviceCode);
     const id = `jms-${no ?? ++jmsSeq}`;
-    jms.push({ id, jmsNo: no ?? String(jmsSeq), jobId: job.id, planLineId: line.id, serviceCode: line.serviceCode, qty, rate, amount: Math.round(qty * rate * 100) / 100, periodFrom: from, periodTo: to, status, woId: WO_ID, confirmedOn });
+    jms.push({ id, jmsNo: no ?? String(jmsSeq), jobId: job.id, planLineId: line.id, serviceCode: line.serviceCode, qty, rate, amount: Math.round(qty * rate * 100) / 100, periodFrom: from, periodTo: to, status, woId: WO_ID, confirmedOn, ratePending: SERVICE_ITEMS.find((s) => s.code === line.serviceCode)?.ratePending || undefined });
     job.jmsId = id;
     return jms[jms.length - 1];
   };
@@ -297,9 +299,9 @@ export function createWorkSeed(): WorkState {
   // Paint: supervisor holdings (issued 1-Sep) and SGE store batches
   const paint: PaintBatch[] = [
     { id: "pb-1", sap: T17.sap, name: "TYPE 17 PAINT", batch: "1006976037", qtyL: 120, supervisorId: SUP_A, issuedOn: "2026-09-01", mfg: "2025-11-12", expiry: "2026-11-10", siteId: SITE },
-    { id: "pb-2", sap: T6.sap, name: "TYPE 6 PAINT", batch: "1007007418", qtyL: 60, supervisorId: SUP_A, issuedOn: "2026-09-01", mfg: "2026-03-01", expiry: "2027-03-01", siteId: SITE },
+    { id: "pb-2", sap: T6.sap, name: "TYPE 6 PAINT", batch: "1007007418", qtyL: 120, supervisorId: SUP_A, issuedOn: "2026-09-01", mfg: "2026-03-01", expiry: "2027-03-01", siteId: SITE },
     { id: "pb-3", sap: "2002462154", name: "TYPE 24 PAINT", batch: "1007020864", qtyL: 180, supervisorId: SUP_A, issuedOn: "2026-09-01", mfg: "2026-02-10", expiry: "2027-02-10", siteId: SITE },
-    { id: "pb-4", sap: T17.sap, name: "TYPE 17 PAINT", batch: "1007020865", qtyL: 60, supervisorId: SUP_B, issuedOn: "2026-09-01", mfg: "2025-12-01", expiry: "2026-12-01", siteId: SITE },
+    { id: "pb-4", sap: T17.sap, name: "TYPE 17 PAINT", batch: "1007020865", qtyL: 100, supervisorId: SUP_B, issuedOn: "2026-09-01", mfg: "2025-12-01", expiry: "2026-12-01", siteId: SITE },
     { id: "pb-5", sap: T6.sap, name: "TYPE 6 PAINT", batch: "1007020866", qtyL: 30, supervisorId: SUP_B, issuedOn: "2026-09-01", mfg: "2026-03-01", expiry: "2027-03-01", siteId: SITE },
     { id: "pb-6", sap: "2002462154", name: "TYPE 24 PAINT", batch: "1007029147", qtyL: 400, supervisorId: SUP_B, issuedOn: "2026-09-01", mfg: "2026-02-10", expiry: "2027-02-10", siteId: SITE },
     { id: "pb-7", sap: "2002462128", name: "TYPE 23 PAINT", batch: "15184659", qtyL: 150, supervisorId: null, mfg: "2024-08-20", expiry: "2026-08-15", siteId: SITE },
@@ -339,6 +341,7 @@ const DEMO_NAMES: Record<string, { name: string; role: RoleId }> = {
   sic: { name: "R. Mehta", role: "sic" },
   finance: { name: "D. Trivedi", role: "finance" },
   owner: { name: "K. Sisodia", role: "owner" },
+  admin: { name: "N. Sharma", role: "admin" },
 };
 
 /** Activity history matching the seed: September DPRs, closes, JMS and short payments. */
@@ -351,7 +354,8 @@ function seedEvents(w: WorkState): WorkEvent[] {
   add("2026-08-31", "18:00", "owner", { kind: "month_closed", title: "2026-08 closed", detail: "Unfinished plan lines carried into 2026-09", tab: "plan" });
   for (const d of w.dprs) {
     const job = jobOf(d.jobId);
-    add(d.date, "17:30", d.supervisorId as keyof typeof DEMO_NAMES, {
+    // T3: an entry keyed in by Admin is credited to Admin, not the supervisor
+    add(d.date, "17:30", (d.enteredBy === "admin" ? "admin" : d.supervisorId) as keyof typeof DEMO_NAMES, {
       kind: "dpr_added",
       subjectStaffId: job.supervisorId,
       title: `${job.jobNo} · ${STAGES.find((s) => s.id === d.stage)?.label} ${round3(entryArea(d))} m²`,
