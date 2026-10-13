@@ -99,7 +99,8 @@ export function NotificationBell() {
 
   const go = (tab: string) => {
     setOpen(false);
-    router.push(`/work?t=${tab}`);
+    // Events from outside Work (e.g. crews) carry their own path
+    router.push(tab.startsWith("/") ? tab : `/work?t=${tab}`);
   };
 
   return (

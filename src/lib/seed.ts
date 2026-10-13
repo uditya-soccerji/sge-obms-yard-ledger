@@ -1089,6 +1089,7 @@ export function createSeedState(): AppState {
       { id: "wg-3", staffId: "st-sup1", date: D2, kind: "bonus", amount: 5000, note: "Monthly target bonus draft", flaggedToSic: false },
     ],
     financeAlerts: [],
+    crewRequests: [],
     equipmentRequests: [
       {
         id: "er-1",

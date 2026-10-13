@@ -7,6 +7,7 @@ export type OpsPanelId =
   | "store"
   | "safety"
   | "approvals"
+  | "crew"
   | "acpl"
   | "jms"
   | "finance"
@@ -31,6 +32,7 @@ export interface OpsPill {
 const ROLE_PILLS: Record<RoleId, OpsPill[]> = {
   super_admin: [
     { id: "dpr", label: "DPR", module: "dpr" },
+    { id: "crew", label: "Crews", module: "crew" },
     { id: "store", label: "Store / FIM", module: "store" },
     { id: "safety", label: "Safety", module: "safety" },
     { id: "approvals", label: "Approvals", module: "approvals" },
@@ -48,6 +50,7 @@ const ROLE_PILLS: Record<RoleId, OpsPill[]> = {
   ],
   owner: [
     { id: "approvals", label: "Approvals", module: "approvals" },
+    { id: "crew", label: "Crews", module: "crew" },
     { id: "store", label: "Store / FIM", module: "store" },
     { id: "jms", label: "JMS", module: "jms" },
     { id: "finance", label: "Finance", module: "finance" },
@@ -58,6 +61,7 @@ const ROLE_PILLS: Record<RoleId, OpsPill[]> = {
   ],
   sic: [
     { id: "approvals", label: "Approvals", module: "approvals" },
+    { id: "crew", label: "Crews", module: "crew" },
     { id: "dpr", label: "DPR", module: "dpr" },
     { id: "jms", label: "JMS", module: "jms" },
     { id: "acpl", label: "ACPL", module: "acpl" },
@@ -82,6 +86,7 @@ const ROLE_PILLS: Record<RoleId, OpsPill[]> = {
   ],
   supervisor: [
     { id: "dpr", label: "DPR", module: "dpr" },
+    { id: "crew", label: "My crew", module: "crew" },
     { id: "store", label: "Store", module: "store" },
     { id: "submissions", label: "My submissions", module: "submissions" },
     { id: "requests", label: "Requests", module: "requests" },

@@ -241,6 +241,16 @@ export function DprForm({
           <h3 className="mb-3 font-heading text-sm font-bold uppercase tracking-wide text-[var(--sge-ink-3)]">
             Labour attendance
           </h3>
+          {crew.length === 0 ? (
+            // B03: a new supervisor has no crew yet; say so instead of an empty panel
+            <p className="text-sm text-[var(--sge-ink-3)]">
+              No labourers are on this supervisor&apos;s crew yet. The SIC assigns them in{" "}
+              <a className="text-[var(--sge-brass-ink)] underline" href="/operations?p=crew">
+                Operations → Crews
+              </a>
+              {" "}(or the supervisor requests them there, if allowed).
+            </p>
+          ) : null}
           <div className="space-y-2">
             {crew.map((l) => {
               const mark = value.labourMarks.find((m) => m.labourerId === l.id);
@@ -252,7 +262,7 @@ export function DprForm({
                   <div>
                     <div className="text-sm font-semibold">{l.name}</div>
                     <div className="text-xs text-[var(--sge-ink-3)]">
-                      {l.trade} · {l.epNumber}
+                      {state.tradeCatalogue.find((t) => t.id === l.trade)?.label ?? l.trade} · {l.epNumber}
                     </div>
                   </div>
                   <div className="flex flex-wrap items-center gap-2">

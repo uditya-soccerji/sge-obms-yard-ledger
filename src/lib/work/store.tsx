@@ -84,6 +84,8 @@ interface WorkApi {
   markSeen: (accountId: string) => void;
   /** Start fresh: an empty current month on the real date (Owner / Super Admin) */
   resetWork: () => void;
+  /** Log an event raised outside the Work store (e.g. crew changes, docs §23) */
+  notify: (e: Omit<WorkEvent, "id" | "seq" | "at" | "day" | "actorName" | "actorRole">) => void;
 }
 
 const WorkContext = createContext<WorkApi | null>(null);
@@ -453,6 +455,8 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
     setWork((s) => ({ ...s, reports: s.reports.map((x) => (x.id === id ? sent : x)) }));
     // Requests on the DPR go to the request desk (docs §9)
     mainActs.current.raiseRequestsFromDpr(sent);
+    // docs §23: the crew's attendance counts when the DPR is submitted; the SIC is told and reviews the work
+    mainActs.current.applyDprAttendance(sent);
     const late = isLate(sent);
     log({ kind: "dpr_submitted", problem: late, siteId: r.siteId, subjectStaffId: r.submitterId, title: `DPR ${r.date} · ${r.plant} submitted${late ? " late" : ""}`, detail: `${r.submitterType.replace("_", " & ")} · ${entriesOf(w, id).length} job line(s) · crew ${r.labourMarks.length}`, tab: "jobs", refId: id });
     return { ok: true };
@@ -467,8 +471,7 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
     const at = new Date().toISOString();
     const done: DprReport = { ...r, status: decision, sicNote: note.trim() || undefined, sicReviewedBy: actor.current.name, sicReviewedAt: at, updatedAt: at };
     setWork((s) => ({ ...s, reports: s.reports.map((x) => (x.id === id ? done : x)) }));
-    // Approval writes the day's attendance (docs §4); HR / ACPL own it in the main store
-    if (decision === "sic_approved") mainActs.current.applyDprAttendance(done);
+    // Attendance was recorded at submit (docs §23); the review accepts the work quantities
     log({
       kind: decision === "sic_approved" ? "dpr_approved" : "dpr_sent_back",
       problem: decision === "sic_rejected",
@@ -880,8 +883,8 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const api = useMemo<WorkApi>(
-    () => ({ work, hydrated, editExpense, receivePaint, advancePaintLifecycle, recoMonth, postMonth, setRilRef, uploadSubmission, linkSubmission, unlinkSubmission, addPlanLine, startJob, addDpr, removeEntry, saveReport, submitReport, reviewReport, unlockReport, telegramToReport, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork }),
-    [work, hydrated, editExpense, receivePaint, advancePaintLifecycle, recoMonth, postMonth, setRilRef, uploadSubmission, linkSubmission, unlinkSubmission, addPlanLine, startJob, addDpr, removeEntry, saveReport, submitReport, reviewReport, unlockReport, telegramToReport, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork]
+    () => ({ work, hydrated, editExpense, receivePaint, advancePaintLifecycle, recoMonth, postMonth, setRilRef, uploadSubmission, linkSubmission, unlinkSubmission, addPlanLine, startJob, addDpr, removeEntry, saveReport, submitReport, reviewReport, unlockReport, telegramToReport, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork, notify: log }),
+    [work, hydrated, editExpense, receivePaint, advancePaintLifecycle, recoMonth, postMonth, setRilRef, uploadSubmission, linkSubmission, unlinkSubmission, addPlanLine, startJob, addDpr, removeEntry, saveReport, submitReport, reviewReport, unlockReport, telegramToReport, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork, log]
   );
   return <WorkContext.Provider value={api}>{children}</WorkContext.Provider>;
 }

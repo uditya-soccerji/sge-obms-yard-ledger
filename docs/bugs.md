@@ -2,7 +2,7 @@
 
 **Now on branch `fix/bugs-2026-10-14`, made from the latest `main` @ `7cfbdde`** (after the merge plan, PRs #12–#20).
 The first round of fixes was built on the old `main` (branch `fix/bugs-2026-10-13`, kept for reference, never merged) and is being **ported** here one by one.
-Port status: B01 ✅ already on `main` · B02 ✅ ported · B03 ⏳ · B04 ⏳ · B05 ⏳ · B06 ⏳ (top up `main`'s request flow) · B07 ⏳ · B08 ⏳ (add Admin + draft saves) · B09 ✅ ported (+ RIL export, EIC) · B10 ✅ ported.
+Port status: B01 ✅ already on `main` · B02 ✅ ported · B03 ✅ ported · B04 ⏳ · B05 ⏳ · B06 ⏳ (top up `main`'s request flow) · B07 ⏳ · B08 ⏳ (add Admin + draft saves) · B09 ✅ ported (+ RIL export, EIC) · B10 ✅ ported.
 
 Status: **open** (recorded) · **confirmed** (reproduced on the live site) · **fixed** (on this branch, checked on `npm run dev`) · **needs owner** (business-rule question) · **deployed**.
 Screenshots, when saved as files, go in `docs/bugs/` as `B<nn>-<n>.png`. Never include Aadhaar, bank or wage details.
@@ -270,4 +270,11 @@ Screenshots, when saved as files, go in `docs/bugs/` as `B<nn>-<n>.png`. Never i
   - Held back: **39** possible duplicates (same name, trade and skill as another row, each with its own Worker ID). Waiting for the owner.
   - The register runs smoothly at 1,404 rows on DTA; no console errors. `tsc` + `eslint src` clean.
 - Note: the SOLAR site was added in the local app only. On the live site it's added in Master Data → Sites at deploy time (a live database write).
+
+### B03 on the new `main` (2026-10-14)
+- Crews ported: `lib/crew.ts`, Operations → **Crews** (SIC / Owner / SA) and **My crew** (supervisor), crew requests with SIC approval, release by the current supervisor, "Can pick own crew" right on the Users table. Rules in `rules-decisions.md` §23 (renumbered: `main` already has §20–§22).
+- Master Data → Labourers: changing a supervisor is now a crew change (logged, notified).
+- Attendance now counts when the DPR is **submitted** (Work store `submitReport` → `applyDprAttendance`); the SIC review covers the work quantities only.
+- DPR shows a message when the supervisor has no crew yet; trade shows its name, not its id.
+- Checked locally: SIC assigned 2 labourers (crew 24 → 26); the supervisor's DPR lists the imported labourers; a submitted DPR recorded attendance for 3 (audit "attendance recorded at submit for 3"). `tsc` + `eslint src` clean.
 

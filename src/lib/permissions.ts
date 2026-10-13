@@ -11,6 +11,7 @@ export type PermissionKey = `${ModuleId}:${PermissionAction}`;
 /** Default rights matrix per role (locked ACL picks). */
 const ROLE_MATRIX: Record<RoleId, Partial<Record<ModuleId, PermissionAction[]>>> = {
   super_admin: {
+    crew: ["view", "approve", "update"],
     owner: ["view"],
     sic: ["view", "approve"],
     admin: ["view", "create", "update", "upload"],
@@ -36,6 +37,7 @@ const ROLE_MATRIX: Record<RoleId, Partial<Record<ModuleId, PermissionAction[]>>>
   },
   owner: {
     owner: ["view"],
+    crew: ["view", "approve", "update"],
     sic: ["view", "approve"],
     admin: ["view"],
     hr: ["view"],
@@ -61,6 +63,8 @@ const ROLE_MATRIX: Record<RoleId, Partial<Record<ModuleId, PermissionAction[]>>>
     master: ["view", "create", "update", "admin"],
   },
   sic: {
+    // SIC changes crews and approves supervisors' requests (docs §23)
+    crew: ["view", "approve"],
     sic: ["view"],
     dpr: ["view", "approve"],
     approvals: ["view", "approve"],
@@ -103,6 +107,8 @@ const ROLE_MATRIX: Record<RoleId, Partial<Record<ModuleId, PermissionAction[]>>>
   },
   supervisor: {
     supervisor: ["view", "create", "update", "submit"],
+    // Sees own crew; picking labourers ("create") is granted per person by Owner / SA (docs §23)
+    crew: ["view"],
     dpr: ["view", "create", "update", "submit", "upload"],
     store: ["view"],
     calculators: ["view"],

@@ -282,3 +282,11 @@ GitHub PRs #15–#20 built the merge plan (X1). Each object now lives once, in W
 - **Money:** costs are Work costs with the §8 fields; same-day edits by the person who entered them, later the Owner; every edit kept.
 - **Audit:** every audit line and Work event also goes to the shared Supabase `audit_log` (once migration 004 is applied, through `write_audit()`); the audit page reads it when the backend is on.
 - Kept on purpose: job lines keep `supervisorId` / `enteredBy` (history lines from before reports have no report); the wage ledger stays payroll and never enters P&L.
+
+## 23. Supervisor crews (decided 2026-10-13)
+- **Standing crew:** each labourer belongs to one supervisor's crew on a site, and stays there until changed. The supervisor's DPR lists their crew for attendance.
+- **Who changes crews:** the SIC (for their sites), Owner and Super Admin. Every crew change is logged (who, when, from → to, labourer).
+- **Major change:** Owner and Super Admin are notified when a labourer is moved off a supervisor's crew (transfer or removal).
+- **Supervisor picking labourers:** only when Owner / Super Admin has given that supervisor the right. A pick is a **request** that the SIC approves before the labourer joins the crew.
+- **Labourer already on another crew:** the request needs SIC approval, and the current supervisor is notified. If the current supervisor **releases** the labourer, they become free and the transfer can go ahead (still through SIC approval).
+- **Attendance:** marking attendance for one's own crew is submitted directly; the SIC gets a notification, not an approval step. Work quantities on the DPR are still approved, by the SIC or by Admin on the SIC's behalf (§5, B04).
