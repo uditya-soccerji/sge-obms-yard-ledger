@@ -470,20 +470,6 @@ export interface SafetyChecklistDay {
   signed: boolean;
 }
 
-export interface FinanceEntry {
-  id: string;
-  date: string;
-  kind: "expense" | "income";
-  category: string;
-  amount: number;
-  description: string;
-  siteId: string;
-  enteredBy: string;
-  /** docs §8 fields (required on new entries) */
-  time?: string;
-  vendor?: string;
-  paymentMode?: "cash" | "upi" | "bank" | "credit";
-}
 
 export interface TelegramDraft {
   id: string;
@@ -619,7 +605,6 @@ export interface AppState {
   equipment: EquipmentItem[];
   workPlans: WorkPlanItem[];
   safetyDays: SafetyChecklistDay[];
-  finance: FinanceEntry[];
   telegramDrafts: TelegramDraft[];
   compliance: ComplianceDoc[];
   transfers: MaterialTransfer[];

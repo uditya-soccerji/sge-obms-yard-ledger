@@ -935,13 +935,6 @@ export function createSeedState(): AppState {
         signed: false,
       },
     ],
-    finance: [
-      { id: "fin-1", date: TODAY, kind: "expense", category: "Transport", amount: 12500, description: "Labourer bus hire — DTA shift", siteId: SITE, enteredBy: "st-owner" },
-      { id: "fin-2", date: TODAY, kind: "expense", category: "Consumables", amount: 4800, description: "PPE gloves & ear plugs top-up", siteId: SITE, enteredBy: "st-store" },
-      { id: "fin-3", date: YDAY, kind: "income", category: "RA bill", amount: 485000, description: "RA-09 painting abstract CPP", siteId: SITE, enteredBy: "st-owner" },
-      { id: "fin-4", date: YDAY, kind: "expense", category: "Diesel", amount: 22000, description: "Compressor diesel fill", siteId: SITE, enteredBy: "st-sic" },
-      { id: "fin-5", date: D2, kind: "expense", category: "Vendor", amount: 65000, description: "Scaffold hire — FS-01 week", siteId: SITE, enteredBy: "st-owner" },
-    ],
     telegramDrafts: [],
     compliance: [
       { id: "comp-1", title: "Labour license copy", category: "Statutory", uploadedBy: "st-hr", uploadedAt: YDAY, status: "filed" },
@@ -1133,7 +1126,7 @@ export function createSeedState(): AppState {
 /** v9: per-site demo data — a new key so old browsers load the new seed. */
 /** v10: EP numbers in the PP + 10 digit format (docs §1) */
 /** v11: attendance statuses per docs §4, HR on all sites */
-export const STORAGE_KEY = "sge-obms-ops-v15";
+export const STORAGE_KEY = "sge-obms-ops-v16";
 export { SAFETY_ITEMS };
 
 /**
@@ -1167,7 +1160,6 @@ function withOtherSites(base: AppState): AppState {
     equipment: [...base.equipment, ...more.equipment],
     workPlans: [...dta(base.workPlans), ...more.workPlans],
     safetyDays: [...base.safetyDays, ...more.safetyDays],
-    finance: [...base.finance, ...more.finance],
     compliance: [...dta(base.compliance), ...more.compliance],
     transfers: [...dta(base.transfers), ...more.transfers],
     acplPunches: dta(base.acplPunches),

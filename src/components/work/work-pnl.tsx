@@ -196,13 +196,20 @@ function PnlRow({ g, label, income, profit, qty }: { g: PnlTotals; label: { main
   );
 }
 
+/** The cost ledger (docs §8, §18): used on the P&L tab and the Finance page. */
+export function CostLedger() {
+  return <Expenses />;
+}
+
 function Expenses() {
-  const { addExpense, removeExpense } = useWork();
+  const { addExpense, removeExpense, editExpense } = useWork();
   const s = useWorkScope();
   const { work } = s;
   const { fullState, currentAccount } = useStore();
   // Cost being voided, and the reason typed for it
   const [voiding, setVoiding] = useState<{ id: string; reason: string } | null>(null);
+  // Cost being edited (amount, category, vendor, mode, remark)
+  const [editing, setEditing] = useState<{ id: string; amount: string; category: string; vendor: string; paymentMode: PaymentMode | ""; note: string } | null>(null);
   const vendors = fullState.vendors.filter((v) => v.status === "active").map((v) => v.name);
   const nowTime = () => new Date().toTimeString().slice(0, 5);
   const blank = { kind: "fixed" as ExpenseKind, siteId: "", month: "", date: today(), time: nowTime(), category: "", amount: "", jobId: "", vendor: "", paymentMode: "" as PaymentMode | "", note: "", billFile: "", billPending: false };
@@ -368,12 +375,55 @@ function Expenses() {
                     {x.voided ? (
                       <span className="text-[10px] no-underline" title={x.voided.reason}>voided by {x.voided.by}</span>
                     ) : s.canMoney && canVoidExpense(x, { accountId: currentAccount?.id ?? "", role: s.role }, today()) ? (
-                      <button type="button" aria-label="Void cost" title="Void (kept on record, leaves the P&L)" onClick={() => setVoiding({ id: x.id, reason: "" })}>
-                        <Trash2 className="h-3.5 w-3.5 text-[var(--sge-ink-3)]" />
-                      </button>
+                      <span className="flex items-center gap-2">
+                        <button type="button" className="text-[11px] text-[var(--sge-brass-ink)] underline" onClick={() => setEditing({ id: x.id, amount: String(x.amount), category: x.category, vendor: x.vendor ?? "", paymentMode: x.paymentMode ?? "", note: x.note ?? "" })}>
+                          Edit
+                        </button>
+                        <button type="button" aria-label="Void cost" title="Void (kept on record, leaves the P&L)" onClick={() => setVoiding({ id: x.id, reason: "" })}>
+                          <Trash2 className="h-3.5 w-3.5 text-[var(--sge-ink-3)]" />
+                        </button>
+                      </span>
                     ) : null}
                   </td>
                 </tr>
+                {x.edits?.length ? (
+                  <tr className="border-b border-[var(--sge-line)]">
+                    <td colSpan={6} className="px-2.5 pb-1.5 text-[10px] text-[var(--sge-ink-3)]">
+                      {x.edits.map((e) => `Edited ${e.at.slice(0, 10)} by ${e.by}: ${e.changes}`).join(" · ")}
+                    </td>
+                  </tr>
+                ) : null}
+                {editing?.id === x.id ? (
+                  <tr className="border-b border-[var(--sge-line)] bg-[var(--sge-brass-wash)]/40">
+                    <td colSpan={6} className="px-2.5 py-2">
+                      <form
+                        className="flex flex-wrap items-end gap-2"
+                        onSubmit={(e) => {
+                          e.preventDefault();
+                          const r = editExpense(x.id, { amount: Number(editing.amount), category: editing.category, vendor: editing.vendor, paymentMode: editing.paymentMode || undefined, note: editing.note });
+                          setMsg(r.ok ? { ok: true, msg: "Cost changed — the edit is logged." } : { ok: false, msg: r.error });
+                          if (r.ok) setEditing(null);
+                        }}
+                      >
+                        <label className="text-xs">Amount ₹<Input className="mt-1 w-28" type="number" min="0" step="0.01" value={editing.amount} onChange={(e) => setEditing({ ...editing, amount: e.target.value })} /></label>
+                        <label className="text-xs">Category
+                          <select className={selectCls + " mt-1"} value={editing.category} onChange={(e) => setEditing({ ...editing, category: e.target.value })}>
+                            {EXPENSE_CATEGORIES.map((c) => <option key={c} value={c}>{c}</option>)}
+                          </select>
+                        </label>
+                        <label className="text-xs">Paid to<Input className="mt-1 w-40" value={editing.vendor} onChange={(e) => setEditing({ ...editing, vendor: e.target.value })} /></label>
+                        <label className="text-xs">Mode
+                          <select className={selectCls + " mt-1"} value={editing.paymentMode} onChange={(e) => setEditing({ ...editing, paymentMode: e.target.value as PaymentMode | "" })}>
+                            {PAYMENT_MODES.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+                          </select>
+                        </label>
+                        <label className="min-w-[200px] flex-1 text-xs">Remark<Input className="mt-1" value={editing.note} onChange={(e) => setEditing({ ...editing, note: e.target.value })} /></label>
+                        <Button type="submit" size="sm">Save change</Button>
+                        <Button type="button" size="sm" variant="ghost" onClick={() => setEditing(null)}>Cancel</Button>
+                      </form>
+                    </td>
+                  </tr>
+                ) : null}
                 {voiding?.id === x.id ? (
                   <tr className="border-b border-[var(--sge-line)] bg-[var(--sge-crit-wash)]/40">
                     <td colSpan={6} className="px-2.5 py-2">

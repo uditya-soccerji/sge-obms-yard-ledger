@@ -8,6 +8,7 @@ import type { AppState } from "@/lib/types";
 import type { WorkState } from "@/lib/work/types";
 import { entryArea } from "@/lib/work/logic";
 import { useWork } from "@/lib/work/store";
+import { spendOn } from "@/lib/work/money";
 
 
 export interface SiteRow {
@@ -52,9 +53,7 @@ export function siteRows(s: AppState, w: WorkState): SiteRow[] {
         ).length,
         kitIssues: s.equipment.filter((e) => e.siteId === id && e.status !== "ok")
           .length,
-        expenseToday: s.finance
-          .filter((f) => f.siteId === id && f.date === todayDate() && f.kind === "expense")
-          .reduce((n, f) => n + f.amount, 0),
+        expenseToday: spendOn(w, day, (x) => x === id),
         // Billed = approved value of the internal JMS on this site (Work)
         billed: Math.round(w.jms.filter((j) => w.planLines.find((l) => l.id === j.planLineId)?.siteId === id).reduce((n, j) => n + j.amount, 0)),
       };

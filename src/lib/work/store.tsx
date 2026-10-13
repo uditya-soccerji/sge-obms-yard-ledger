@@ -72,6 +72,8 @@ interface WorkApi {
   /** Record the money received, or clear it (null) with a reason */
   recordPayment: (jmsId: string, payment: JmsPayment | null, clearReason?: string) => Result;
   addExpense: (input: Omit<Expense, "id">) => Result;
+  /** Change a cost: the person who entered it on the same day, later the Owner; every edit is logged (docs §8) */
+  editExpense: (id: string, patch: Partial<Pick<Expense, "amount" | "category" | "vendor" | "paymentMode" | "note" | "billFile" | "billPending" | "time">>) => Result;
   /** Void a cost with a reason: it stays on record but leaves the P&L (docs §8) */
   removeExpense: (id: string, reason: string) => Result;
   loadScenario: (id: ScenarioId) => void;
@@ -793,11 +795,33 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
       id,
       enteredBy: actor.current.accountId,
       enteredByName: actor.current.name,
-      enteredAt: new Date().toISOString(),
+      // On the app date (the demo date when one is set), so "same day" edits line up with today()
+      enteredAt: `${today()}T${nowTime()}:00+05:30`,
     };
     setWork((s) => ({ ...s, expenses: [...s.expenses, entry] }));
     log({ kind: "expense_added", problem: !!input.billPending, siteId: input.siteId, title: `Cost ₹${input.amount.toLocaleString("en-IN")} · ${entry.category} · ${entry.vendor}`, detail: `${input.kind === "fixed" ? `Fixed · ${month}` : "Direct (job)"} · ${input.paymentMode}${input.billPending ? " · bill to follow" : ""}`, tab: "pnl", refId: id });
     return { ok: true, id };
+  }, [log]);
+
+  const editExpense = useCallback<WorkApi["editExpense"]>((id, patch) => {
+    if (!rights().canMoney) return NOT_ALLOWED;
+    const x = ref.current.expenses.find((e) => e.id === id);
+    if (!x) return { ok: false, error: "Cost not found" };
+    if (!canVoidExpense(x, { accountId: actor.current.accountId, role: actor.current.role }, today())) {
+      return { ok: false, error: "Only the person who entered it can change it, on the same day — after that, the Owner" };
+    }
+    if (patch.amount !== undefined && !(patch.amount > 0)) return { ok: false, error: "Amount must be above zero" };
+    if (patch.category !== undefined && !(EXPENSE_CATEGORIES as readonly string[]).includes(patch.category)) return { ok: false, error: "Pick a category from the list" };
+    if (patch.vendor !== undefined && !patch.vendor.trim()) return { ok: false, error: "Enter who was paid (vendor)" };
+    if (patch.note !== undefined && !patch.note.trim()) return { ok: false, error: "Add a remark" };
+    const keys = (Object.keys(patch) as (keyof typeof patch)[]).filter((k) => patch[k] !== x[k]);
+    if (!keys.length) return { ok: true };
+    const changes = keys.map((k) => `${k} ${x[k] ?? "—"} → ${patch[k] ?? "—"}`).join(", ");
+    const edit = { by: actor.current.name, at: new Date().toISOString(), changes };
+    setWork((s) => ({ ...s, expenses: s.expenses.map((e) => (e.id === id ? { ...e, ...patch, edits: [...(e.edits ?? []), edit] } : e)) }));
+    const late = (x.enteredAt ?? "").slice(0, 10) !== today();
+    log({ kind: "expense_edited", problem: late, siteId: x.siteId, title: `Cost edited · ${x.category} ₹${x.amount.toLocaleString("en-IN")}`, detail: changes, tab: "pnl", refId: id });
+    return { ok: true };
   }, [log]);
 
   const removeExpense = useCallback<WorkApi["removeExpense"]>((id, reason) => {
@@ -840,8 +864,8 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const api = useMemo<WorkApi>(
-    () => ({ work, hydrated, receivePaint, advancePaintLifecycle, recoMonth, postMonth, setRilRef, uploadSubmission, linkSubmission, unlinkSubmission, addPlanLine, startJob, addDpr, removeEntry, saveReport, submitReport, reviewReport, unlockReport, telegramToReport, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork }),
-    [work, hydrated, receivePaint, advancePaintLifecycle, recoMonth, postMonth, setRilRef, uploadSubmission, linkSubmission, unlinkSubmission, addPlanLine, startJob, addDpr, removeEntry, saveReport, submitReport, reviewReport, unlockReport, telegramToReport, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork]
+    () => ({ work, hydrated, editExpense, receivePaint, advancePaintLifecycle, recoMonth, postMonth, setRilRef, uploadSubmission, linkSubmission, unlinkSubmission, addPlanLine, startJob, addDpr, removeEntry, saveReport, submitReport, reviewReport, unlockReport, telegramToReport, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork }),
+    [work, hydrated, editExpense, receivePaint, advancePaintLifecycle, recoMonth, postMonth, setRilRef, uploadSubmission, linkSubmission, unlinkSubmission, addPlanLine, startJob, addDpr, removeEntry, saveReport, submitReport, reviewReport, unlockReport, telegramToReport, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork]
   );
   return <WorkContext.Provider value={api}>{children}</WorkContext.Provider>;
 }
