@@ -14,19 +14,25 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useStore } from "@/lib/store";
+import { useSiteReports } from "@/lib/work/use-reports";
+import { useWork } from "@/lib/work/store";
+import { entriesOf, isLate, reportArea } from "@/lib/work/reports";
 
 function SicApprovalsPage() {
-  const { state, reviewDpr } = useStore();
+  const { state } = useStore();
+  const { work, reviewReport } = useWork();
+  const reports = useSiteReports();
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [msg, setMsg] = useState<string | null>(null);
 
-  const pending = state.dprDocuments.filter((d) => d.status === "submitted");
-  const recent = state.dprDocuments
+  const pending = reports.filter((d) => d.status === "submitted");
+  const recent = reports
     .filter((d) => d.status === "sic_approved" || d.status === "sic_rejected")
+    .sort((a, b) => (b.sicReviewedAt ?? b.updatedAt).localeCompare(a.sicReviewedAt ?? a.updatedAt))
     .slice(0, 8);
 
   function act(id: string, decision: "sic_approved" | "sic_rejected") {
-    const r = reviewDpr(id, decision, notes[id] ?? "");
+    const r = reviewReport(id, decision, notes[id] ?? "");
     if (!r.ok) {
       setMsg(r.error ?? "Review blocked");
       return;
@@ -50,14 +56,14 @@ function SicApprovalsPage() {
         <KpiTile
           label="Approved (seed+)"
           value={String(
-            state.dprDocuments.filter((d) => d.status === "sic_approved").length
+            reports.filter((d) => d.status === "sic_approved").length
           )}
           tone="ok"
         />
         <KpiTile
           label="Rejected"
           value={String(
-            state.dprDocuments.filter((d) => d.status === "sic_rejected").length
+            reports.filter((d) => d.status === "sic_rejected").length
           )}
           tone="warn"
         />
@@ -104,6 +110,8 @@ function SicApprovalsPage() {
                         {d.note}
                       </p>
                       <div className="mt-1 font-mono text-[11px] text-[var(--sge-ink-3)]">
+                        {entriesOf(work, d.id).length ? `job lines ${entriesOf(work, d.id).length} · ${reportArea(work, d.id)} m² · ` : ""}
+                        {isLate(d) ? "late · " : ""}
                         labour {d.labourMarks.length} · equipment{" "}
                         {d.equipmentMarks.length} · requests {d.requests.length}
                       </div>

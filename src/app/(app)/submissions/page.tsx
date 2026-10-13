@@ -12,14 +12,15 @@ import {
 import { Button } from "@/components/ui/button";
 import { canViewModule } from "@/lib/permissions";
 import { useStore } from "@/lib/store";
-import type { DprStatus, JmsPackageStatus } from "@/lib/types";
+import { useSiteReports } from "@/lib/work/use-reports";
+import type { ReportStatus } from "@/lib/work/types";
+import type { JmsPackageStatus } from "@/lib/types";
 
-const DPR_TONE: Record<DprStatus, "ok" | "warn" | "accent" | "crit" | "default"> = {
+const DPR_TONE: Record<ReportStatus, "ok" | "warn" | "accent" | "crit" | "default"> = {
   draft: "default",
   submitted: "warn",
   sic_approved: "ok",
   sic_rejected: "crit",
-  locked: "accent",
 };
 
 const JMS_TONE: Record<JmsPackageStatus, "ok" | "warn" | "accent" | "crit" | "default"> = {
@@ -32,16 +33,17 @@ const JMS_TONE: Record<JmsPackageStatus, "ok" | "warn" | "accent" | "crit" | "de
 
 export default function MySubmissionsPage() {
   const { state, currentAccount } = useStore();
+  const reports = useSiteReports();
   const canView = canViewModule(currentAccount, state.currentRole, "submissions");
   const userId = state.currentUserId;
   const accountId = state.currentAccountId;
 
   const myDprs = useMemo(() => {
     if (!userId) return [];
-    return state.dprDocuments
+    return reports
       .filter((d) => d.submitterId === userId)
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-  }, [state.dprDocuments, userId]);
+  }, [reports, userId]);
 
   const myJms = useMemo(() => {
     if (!userId && !accountId) return [];

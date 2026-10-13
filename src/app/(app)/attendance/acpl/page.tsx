@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { useStore } from "@/lib/store";
+import { useWork } from "@/lib/work/store";
 import type { AcplMatchFlag, AcplResolveStatus } from "@/lib/types";
 
 const FLAG_TONE: Record<
@@ -35,6 +36,7 @@ PP5920188421,Ramesh Kumar,07:58,18:05`;
 
 function AcplMatchPage() {
   const { state, uploadAcplText, runAcplMatch, resolveAcplFlag } = useStore();
+  const { work } = useWork();
   // Gate punches are uploaded the next morning: default to yesterday
   const [date, setDate] = useState(() => daysAgo(1));
   const [paste, setPaste] = useState(SAMPLE_CSV);
@@ -69,7 +71,7 @@ function AcplMatchPage() {
   }
 
   function handleMatch() {
-    const n = runAcplMatch(date);
+    const n = runAcplMatch(date, work.reports);
     setMsg(`Matched ${n} rows vs SIC-approved DPRs for ${date}.`);
   }
 
@@ -105,7 +107,7 @@ function AcplMatchPage() {
         <KpiTile
           label="Approved DPRs (day)"
           value={String(
-            state.dprDocuments.filter(
+            work.reports.filter(
               (d) => d.date === date && d.status === "sic_approved"
             ).length
           )}

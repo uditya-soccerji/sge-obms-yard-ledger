@@ -12,19 +12,21 @@ import {
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useStore } from "@/lib/store";
+import { useSiteReports } from "@/lib/work/use-reports";
 import { useEffect } from "react";
 import { entrySiteId } from "@/lib/site-scope";
 import { today as todayDate } from "@/lib/today";
 
 function SafetyHomePage() {
   const { state, toggleSafetyItem, signSafetyDay, openSafetyDay } = useStore();
+  const reports = useSiteReports();
   const site = entrySiteId(state);
   // Today's checklist for this site; it's opened (blank) the first time the page is used today
   const day = state.safetyDays.find((d) => d.siteId === site && d.date === todayDate());
   useEffect(() => {
     if (!day) openSafetyDay(site);
   }, [day, site, openSafetyDay]);
-  const safetyDprs = state.dprDocuments
+  const safetyDprs = reports
     .filter((d) => d.submitterType === "safety")
     .sort((a, b) => b.date.localeCompare(a.date) || b.updatedAt.localeCompare(a.updatedAt));
 

@@ -1,4 +1,13 @@
 import type { WorkEvent } from "./events";
+import type {
+  DprEquipmentMark,
+  DprLabourMark,
+  DprRequest,
+  DprSafetyBody,
+  DprScaffoldWorkLine,
+  DprStoreBody,
+  DprSubmitterType,
+} from "../types";
 /**
  * Work tracking: Work Order → monthly Plan → Jobs → DPR entries → JMS.
  * See docs/rules-decisions.md §5, §10, §15, §17.
@@ -98,10 +107,57 @@ export interface Member {
   cf: number;
 }
 
+/** Report status (docs §5): draft → submitted → SIC approved, or sent back with a reason. */
+export type ReportStatus = "draft" | "submitted" | "sic_approved" | "sic_rejected";
+
+/**
+ * The daily report — the one DPR (merge plan §1). One per submitter · site ·
+ * plant · date · type (any number a day). It carries the day's attendance,
+ * permit / TBT, equipment, requests, scaffold / safety / store bodies and the
+ * SIC review. Painting & blasting quantities are the job entries (DprEntry)
+ * that point at it with `reportId`.
+ */
+export interface DprReport {
+  id: string;
+  date: string;
+  siteId: string;
+  plant: string;
+  submitterId: string;
+  submitterType: DprSubmitterType;
+  /** Admin (data operator) double entry for a supervisor's day (docs §5b) */
+  enteredBy?: DprEntry["enteredBy"];
+  enteredByName?: string;
+  status: ReportStatus;
+  /** Every crew member's attendance for the day (docs §4, §5) */
+  labourMarks: DprLabourMark[];
+  equipmentMarks: DprEquipmentMark[];
+  requests: DprRequest[];
+  nextDayPlan: string;
+  note: string;
+  telegramDraftLines: string[];
+  scaffoldWork?: DprScaffoldWorkLine[];
+  safetyBody?: DprSafetyBody;
+  storeBody?: DprStoreBody;
+  permitNos?: string[];
+  permitOk?: boolean;
+  tbtDone?: boolean;
+  zeroReason?: string;
+  submittedAt?: string;
+  /** Owner / Super Admin unlocks of an approved report, with the reason (docs §5) */
+  unlocks?: { by: string; at: string; reason: string }[];
+  sicNote?: string;
+  sicReviewedBy?: string;
+  sicReviewedAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface DprEntry {
   id: string;
   date: string;
   jobId: string;
+  /** The day's report this line belongs to (history imported before reports has none) */
+  reportId?: string;
   stage: Stage;
   members: Member[];
   paintSap?: string;
@@ -170,6 +226,8 @@ export interface WorkState {
   workOrders: WorkOrder[];
   planLines: PlanLine[];
   jobs: Job[];
+  /** Daily reports (the one DPR); job entries point at them */
+  reports: DprReport[];
   dprs: DprEntry[];
   jms: Jms[];
   paint: PaintBatch[];

@@ -48,13 +48,13 @@ export function classifyAcplFlag(
 }
 
 export function matchAcplAgainstApproved(
-  state: AppState,
+  state: Pick<AppState, "labourers">,
   punches: AcplPunchRow[],
-  date: string
+  date: string,
+  /** SIC-approved daily reports (Work) — their crew marks are the DPR side */
+  reports: { date: string; status: string; labourMarks: { labourerId: string; status: AttendanceStatus; inTime?: string; outTime?: string }[] }[]
 ): AcplMatchRow[] {
-  const approved = state.dprDocuments.filter(
-    (d) => d.date === date && d.status === "sic_approved"
-  );
+  const approved = reports.filter((d) => d.date === date && d.status === "sic_approved");
 
   const dprByLabourer = new Map<
     string,

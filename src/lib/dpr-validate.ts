@@ -1,11 +1,13 @@
-import type { DprDocument, Labourer } from "./types";
+import type { Labourer } from "./types";
+import type { DprEntry, DprReport } from "./work/types";
+import { entryArea } from "./work/logic";
 import { timeProblem, WORKING } from "./attendance";
 
 /** Max area on one painting / blasting line (docs §5). */
 export const MAX_LINE_M2 = 2000;
 
 /** Crew a DPR must account for: the submitter's active labourers. */
-export function dprCrew(doc: Pick<DprDocument, "submitterId" | "submitterType">, labourers: Labourer[]): Labourer[] {
+export function dprCrew(doc: Pick<DprReport, "submitterId" | "submitterType">, labourers: Labourer[]): Labourer[] {
   if (doc.submitterType === "safety" || doc.submitterType === "store") return [];
   return labourers.filter((l) => l.active && l.supervisorId === doc.submitterId);
 }
@@ -16,9 +18,11 @@ export function dprCrew(doc: Pick<DprDocument, "submitterId" | "submitterType">,
  * Saving a draft is never blocked, only submitting.
  */
 export function validateDprForSubmit(
-  doc: DprDocument,
+  doc: DprReport,
   crew: Labourer[],
-  sitePlants: string[]
+  sitePlants: string[],
+  /** The job lines filed under this report (painting & blasting) */
+  entries: DprEntry[] = []
 ): string[] {
   const out: string[] = [];
   if (!doc.date) out.push("Pick the date");
@@ -43,14 +47,16 @@ export function validateDprForSubmit(
   }
 
   if (doc.submitterType === "painting_blasting") {
-    const lines = doc.paintWork ?? [];
-    const total = lines.reduce((s, l) => s + (l.areaM2 || 0), 0);
-    lines.forEach((l, i) => {
-      if (!l.plant) out.push(`Painting line ${i + 1}: pick the plant`);
-      if (l.areaM2 < 0) out.push(`Painting line ${i + 1}: area can't be negative`);
-      if (l.areaM2 > MAX_LINE_M2) out.push(`Painting line ${i + 1}: ${l.areaM2} m² is over the ${MAX_LINE_M2.toLocaleString("en-IN")} m² per line limit`);
+    // Quantities are the job lines (Work entries) under this report
+    const total = entries.reduce((s, e) => s + entryArea(e), 0);
+    entries.forEach((e, i) => {
+      if (entryArea(e) > MAX_LINE_M2) out.push(`Job line ${i + 1}: over the ${MAX_LINE_M2.toLocaleString("en-IN")} m² per line limit`);
     });
-    if (!(total > 0) && !doc.zeroReason?.trim()) out.push("Enter the m² done, or give a reason for zero");
+    if (!(total > 0) && !doc.zeroReason?.trim()) out.push("Add a job line with the m² done, or give a reason for zero");
+    // Everyone booked on a job line must be marked as working on the report
+    const worked = new Set(doc.labourMarks.filter((m) => WORKING.includes(m.status)).map((m) => m.labourerId));
+    const missing = [...new Set(entries.flatMap((e) => e.crew ?? []))].filter((id) => !worked.has(id));
+    if (missing.length) out.push(`${missing.length} crew member(s) on the job lines aren't marked as working on this report`);
   }
 
   if (doc.submitterType === "scaffolding") {

@@ -12,10 +12,12 @@ import {
 } from "@/components/shared/ui-bits";
 import { Button } from "@/components/ui/button";
 import { useStore } from "@/lib/store";
+import { useSiteReports } from "@/lib/work/use-reports";
 
 function AdminHomePage() {
   const { state } = useStore();
-  const pendingDpr = state.dprDocuments.filter((d) => d.status === "submitted")
+  const reports = useSiteReports();
+  const pendingDpr = reports.filter((d) => d.status === "submitted")
     .length;
   const openAcpl = state.acplMatches.filter(
     (m) => m.resolveStatus === "open" && m.flag !== "match"

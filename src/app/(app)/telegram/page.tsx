@@ -20,6 +20,8 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { ROLES } from "@/lib/roles";
 import { useStore } from "@/lib/store";
+import { useWork } from "@/lib/work/store";
+import { entrySiteId } from "@/lib/site-scope";
 import type { DraftEntityKind, MessageType, RoleId } from "@/lib/types";
 
 const ENTITY_MAP: {
@@ -103,6 +105,7 @@ const ENTITY_MAP: {
 
 function TelegramPage() {
   const { state, currentAccount, applyTelegram } = useStore();
+  const { telegramToReport } = useWork();
   const allowed =
     state.currentRole === "super_admin" ||
     state.currentRole === "owner" ||
@@ -140,6 +143,16 @@ function TelegramPage() {
       mappedEntity,
     });
     setLastId(draft.id);
+    // DPR notes and safety observations go on today's daily report in Work (the one DPR)
+    if (mappedEntity === "dpr_note" || mappedEntity === "safety_obs") {
+      const site = entrySiteId(state);
+      const type = role === "safety" || mappedEntity === "safety_obs" ? "safety" : role === "store" ? "store" : "painting_blasting";
+      const submitter = state.staff.find((x) =>
+        x.siteId === site &&
+        (type === "safety" ? x.role === "safety" : type === "store" ? x.role === "store" : x.role === "supervisor" && x.supervisorType !== "scaffolding")
+      );
+      if (submitter) telegramToReport({ content, submitterId: submitter.id, submitterType: type, siteId: site, observation: mappedEntity === "safety_obs" });
+    }
   }
 
   if (!allowed) {

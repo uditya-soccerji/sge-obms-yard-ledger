@@ -2,7 +2,7 @@
 
 import { guarded } from "@/components/shared/require-module";
 import Link from "next/link";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 import { DprForm } from "@/components/dpr/dpr-form";
 import {
@@ -13,21 +13,25 @@ import {
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { dprCrew, validateDprForSubmit } from "@/lib/dpr-validate";
 import { useStore } from "@/lib/store";
-import type { DprDocument } from "@/lib/types";
+import { useWork } from "@/lib/work/store";
+import { deadlineOf, isLate } from "@/lib/work/reports";
+import type { DprReport } from "@/lib/work/types";
 
 function DprDetailPage() {
   const params = useParams();
   const id = String(params.id);
   const router = useRouter();
-  const { state, saveDpr, submitDpr, reviewDpr, unlockDpr } = useStore();
+  const { state } = useStore();
+  const { work, saveReport, submitReport, reviewReport, unlockReport } = useWork();
+  const search = useSearchParams();
   const [unlockReason, setUnlockReason] = useState("");
-  const original = state.dprDocuments.find((d) => d.id === id);
-  const [draft, setDraft] = useState<DprDocument | null>(null);
+  const original = work.reports.find((d) => d.id === id);
+  const [draft, setDraft] = useState<DprReport | null>(null);
   const [sicNote, setSicNote] = useState("");
   const [msg, setMsg] = useState<string | null>(null);
-  const [problems, setProblems] = useState<string[]>([]);
+  // Problems handed over from "Save & submit" on the new-DPR page
+  const [problems, setProblems] = useState<string[]>(() => (search.get("problems") ? search.get("problems")!.split(" · ") : []));
 
   const doc = draft ?? original;
 
@@ -59,43 +63,45 @@ function DprDetailPage() {
     );
   }
 
-  function persist(next: DprDocument) {
+  function persist(next: DprReport) {
     setDraft(next);
   }
 
   function handleSave() {
     if (!doc) return;
-    const r = saveDpr(doc);
+    const r = saveReport(doc);
     if (!r.ok) {
-      setMsg(r.error ?? "Save blocked");
+      setMsg(r.error);
       return;
     }
     setDraft(null);
+    setProblems([]);
     setMsg("DPR saved as draft.");
   }
 
   function handleSubmit() {
     if (!doc) return;
-    // docs §5: permit + TBT, every crew member marked, quantity or a reason
-    const plants = state.sites.find((x) => x.id === doc.siteId)?.plants ?? [];
-    const found = validateDprForSubmit(doc, dprCrew(doc, state.labourers), plants);
-    setProblems(found);
-    if (found.length) return;
-    const r = saveDpr({ ...doc, status: "draft" });
+    const r = saveReport(doc);
     if (!r.ok) {
-      setMsg(r.error ?? "Save blocked");
+      setMsg(r.error);
       return;
     }
-    submitDpr(doc.id);
+    // docs §5: permit + TBT, every crew member marked, quantity or a reason
+    const sent = submitReport(doc.id);
+    if (!sent.ok) {
+      setProblems(sent.error.split(" · "));
+      return;
+    }
+    setProblems([]);
     setDraft(null);
     setMsg("DPR submitted to SIC — frozen until review.");
   }
 
   function handleReview(decision: "sic_approved" | "sic_rejected") {
     if (!doc) return;
-    const r = reviewDpr(doc.id, decision, sicNote);
+    const r = reviewReport(doc.id, decision, sicNote);
     if (!r.ok) {
-      setMsg(r.error ?? "Review blocked");
+      setMsg(r.error);
       return;
     }
     setMsg(
@@ -126,6 +132,8 @@ function DprDetailPage() {
             >
               {doc.status.replace("_", " ")}
             </StatusPill>
+            {isLate(doc) ? <StatusPill tone="warn">late · due {deadlineOf(doc).slice(0, 10)} 10:00</StatusPill> : null}
+            {doc.enteredBy === "admin" ? <StatusPill>entered by Admin</StatusPill> : null}
             <Link href="/dpr">
               <Button size="sm" variant="outline">
                 Desk
@@ -197,7 +205,7 @@ function DprDetailPage() {
               type="button"
               variant="outline"
               onClick={() => {
-                const r = unlockDpr(doc.id, unlockReason);
+                const r = unlockReport(doc.id, unlockReason);
                 setMsg(r.ok ? "Unlocked — the supervisor can edit and resubmit." : r.error ?? "Unlock blocked");
                 if (r.ok) setUnlockReason("");
               }}
