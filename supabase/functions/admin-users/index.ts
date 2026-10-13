@@ -6,7 +6,8 @@ const ROLES = [
   "super_admin", "owner", "sic", "hr", "admin",
   "finance", "supervisor", "store", "safety", "labourer",
 ];
-const USERNAME_RE = /^[a-z0-9._-]{2,32}$/;
+// Same rule as src/lib/users.ts USERNAME_RE (docs/rules-decisions.md §2) — keep the two in step
+const USERNAME_RE = /^[a-z0-9.]{3,20}$/;
 const PATCHABLE = [
   "name", "roles", "site_ids", "plant_ids", "staff_id",
   "labourer_id", "permission_overrides", "active",
@@ -57,16 +58,32 @@ Deno.serve(async (req) => {
 
   // Only Super Admin may grant or touch the super_admin role.
   const touchesSA = (roles: unknown) => Array.isArray(roles) && roles.includes("super_admin");
+  // One role per login (§2)
   const validRoles = (roles: unknown) =>
-    Array.isArray(roles) && roles.length > 0 && roles.every((r) => ROLES.includes(r));
+    Array.isArray(roles) && roles.length === 1 && roles.every((r) => ROLES.includes(r));
+  // Supervisors work on exactly one site (src/lib/users.ts checkSites)
+  const siteProblem = (roles: unknown, siteIds: unknown) => {
+    const ids = Array.isArray(siteIds) ? siteIds : [];
+    if (!ids.length) return "Pick at least one site";
+    if (Array.isArray(roles) && roles.includes("supervisor") && ids.length > 1) return "A supervisor works on one site only";
+    return null;
+  };
+  // Keep at least one active Super Admin
+  const lastActiveSA = async (id: string) => {
+    const { count } = await admin.from("profiles").select("id", { count: "exact", head: true })
+      .contains("roles", ["super_admin"]).eq("active", true).neq("id", id);
+    return (count ?? 0) === 0;
+  };
 
   if (body.action === "create") {
     const username = String(body.username ?? "").trim().toLowerCase();
     const password = String(body.password ?? "");
-    if (!USERNAME_RE.test(username)) return fail("Username: 2–32 chars, a-z 0-9 . _ -");
+    if (!USERNAME_RE.test(username)) return fail("Username: 3–20 lowercase letters, digits or dots");
     if (password.length < 6) return fail("Password must be at least 6 characters");
-    if (!validRoles(body.roles)) return fail("Assign at least one valid role");
+    if (!validRoles(body.roles)) return fail("Assign exactly one valid role");
     if (touchesSA(body.roles) && !isSA) return fail("Only Super Admin can create a Super Admin", 403);
+    const createSites = siteProblem(body.roles, body.site_ids);
+    if (createSites) return fail(createSites);
 
     const { data: created, error: authErr } = await admin.auth.admin.createUser({
       email: `${username}@obms.internal`,
@@ -102,7 +119,7 @@ Deno.serve(async (req) => {
   // update / set_password need an existing target
   const id = String(body.id ?? "");
   const { data: target } = await admin
-    .from("profiles").select("id, username, roles").eq("id", id).single();
+    .from("profiles").select("id, username, roles, site_ids, active").eq("id", id).single();
   if (!target) return fail("User not found", 404);
   if (target.roles.includes("super_admin") && !isSA) {
     return fail("Only Super Admin can change a Super Admin", 403);
@@ -121,15 +138,28 @@ Deno.serve(async (req) => {
     const patch: Record<string, unknown> = {};
     for (const k of PATCHABLE) if (k in (body.patch ?? {})) patch[k] = body.patch[k];
     if ("roles" in patch) {
-      if (!validRoles(patch.roles)) return fail("Assign at least one valid role");
+      if (!validRoles(patch.roles)) return fail("Assign exactly one valid role");
       if (touchesSA(patch.roles) && !isSA) return fail("Only Super Admin can grant Super Admin", 403);
+    }
+    if ("roles" in patch || "site_ids" in patch) {
+      const p = siteProblem(patch.roles ?? target.roles, patch.site_ids ?? target.site_ids);
+      if (p) return fail(p);
     }
     if (patch.active === false && id === caller.user.id) {
       return fail("You cannot deactivate yourself");
     }
+    const losesSA = target.roles.includes("super_admin") &&
+      (patch.active === false || ("roles" in patch && !touchesSA(patch.roles)));
+    if (losesSA && await lastActiveSA(id)) return fail("Keep at least one active Super Admin");
     if (!Object.keys(patch).length) return fail("Nothing to update");
     const { error } = await admin.from("profiles").update(patch).eq("id", id);
     if (error) return fail("Could not update user");
+    // B2: an inactive user's sessions stop working — ban in auth; lift it on reactivation
+    if (patch.active === false && target.active) {
+      await admin.auth.admin.updateUserById(id, { ban_duration: "876000h" });
+    } else if (patch.active === true && !target.active) {
+      await admin.auth.admin.updateUserById(id, { ban_duration: "none" });
+    }
     await audit("update", `Updated ${target.username}: ${Object.keys(patch).join(", ")}`);
     return json({ ok: true });
   }

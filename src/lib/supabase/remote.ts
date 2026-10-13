@@ -228,11 +228,12 @@ export async function remoteLoadMaster(): Promise<MasterCatalog | null> {
 }
 
 /** Write-through save of one master row. Errors are logged, never thrown. */
+/** Save one master row; the caller updates local state only when this succeeds (B5). */
 export async function remoteSaveMaster(
   sheet: MasterSheet,
   item: CatalogItem | Contractor | MaterialItem
-) {
-  if (!supabase) return;
+): Promise<{ ok: boolean; error?: string }> {
+  if (!supabase) return { ok: true };
   const c = item as Contractor;
   const m = item as MaterialItem;
   const row = {
@@ -251,11 +252,15 @@ export async function remoteSaveMaster(
           : {},
   };
   const { error } = await supabase.from("master_items").upsert(row);
-  if (error) console.error("master save failed", sheet, item.code, error.message);
+  if (error) {
+    console.error("master save failed", sheet, item.code, error.message);
+    return { ok: false, error: "Couldn't save to the server — try again" };
+  }
+  return { ok: true };
 }
 
-export async function remoteSaveSite(site: Site) {
-  if (!supabase) return;
+export async function remoteSaveSite(site: Site): Promise<{ ok: boolean; error?: string }> {
+  if (!supabase) return { ok: true };
   const { error } = await supabase.from("sites").upsert({
     id: site.id,
     code: site.code,
@@ -265,7 +270,24 @@ export async function remoteSaveSite(site: Site) {
     rp_tags: site.rpTags,
     plants: site.plants,
   });
-  if (error) console.error("site save failed", site.code, error.message);
+  if (error) {
+    console.error("site save failed", site.code, error.message);
+    return { ok: false, error: "Couldn't save to the server — try again" };
+  }
+  return { ok: true };
+}
+
+/**
+ * B2: is the signed-in user still allowed in? Null when there's no backend.
+ * False when the session is gone or the profile was deactivated.
+ */
+export async function remoteStillActive(): Promise<boolean | null> {
+  if (!supabase) return null;
+  const { data } = await supabase.auth.getUser();
+  if (!data.user) return false;
+  const { data: row, error } = await supabase.from("profiles").select("active").eq("id", data.user.id).single();
+  if (error) return true; // network trouble: don't sign people out for it
+  return !!row?.active;
 }
 
 export async function remoteLogout() {
@@ -282,6 +304,15 @@ export async function remoteAudit(entry: {
   detail: string;
 }) {
   if (!supabase) return;
+  // B1: the server fills who did it from the caller's profile (migration 004)
+  const rpc = await supabase.rpc("write_audit", {
+    p_module: entry.module,
+    p_action: entry.action,
+    p_detail: entry.detail,
+    p_site_id: entry.siteId,
+  });
+  if (!rpc.error) return;
+  // Until migration 004 is applied the function doesn't exist; fall back to the direct insert
   await supabase.from("audit_log").insert({
     user_id: entry.userId,
     username: entry.username,

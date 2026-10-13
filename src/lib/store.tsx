@@ -32,15 +32,19 @@ import {
   remoteLogout,
   remoteSaveMaster,
   remoteSaveSite,
+  remoteStillActive,
   remoteSetPassword,
   remoteUpdateUser,
 } from "./supabase/remote";
 import type { CatalogItem, Contractor, MasterCatalog, MaterialItem } from "./master/types";
 import { createSeedState, STORAGE_KEY } from "./seed";
-import { ALL_SITES, canSeeAllSites, canSwitchSites, entrySiteId, scopeState } from "./site-scope";
+import { ALL_SITES, canSeeAllSites, canSwitchSites, entrySiteId, landingSite, scopeState } from "./site-scope";
+import { checkSite } from "./sites";
+import { normalizeEp } from "./ep";
+import { checkLabourer, describeChanges } from "./labourers";
 import { daysAgo } from "./today";
 import { WORKING } from "./attendance";
-import { checkSeat, checkSites } from "./users";
+import { checkSeat, checkSites, checkUserChange, MIN_PASSWORD } from "./users";
 import type {
   AcplMatchRow,
   AcplPunchRow,
@@ -162,8 +166,9 @@ interface StoreApi {
   upsertRateLine: (
     input: Omit<RateLine, "id" | "superseded"> & { id?: string; superseded?: boolean }
   ) => string;
-  updateTrade: (id: string, patch: Partial<TradeDefinition>) => void;
-  addTrade: (input: Omit<TradeDefinition, "id"> & { id?: string }) => string;
+  updateTrade: (id: string, patch: Partial<TradeDefinition>) => { ok: boolean; error?: string };
+  /** Refuses a label that already exists (case-insensitive) */
+  addTrade: (input: Omit<TradeDefinition, "id"> & { id?: string }) => { ok: boolean; error?: string; id?: string };
   updateLabourer: (
     id: string,
     patch: Partial<
@@ -178,25 +183,32 @@ interface StoreApi {
         | "contractorId"
         | "epNumber"
         | "gatePass"
+        | "supervisorId"
+        | "aadhaar"
+        | "mobile"
       >
     >
-  ) => void;
-  upsertContractor: (row: Contractor) => string;
-  setContractorActive: (id: string, active: boolean) => void;
+  ) => { ok: boolean; error?: string };
+  /** Master Data saves go to the server first when it's configured; local state changes only on success (B5) */
+  upsertContractor: (row: Contractor) => Promise<{ ok: boolean; error?: string; id?: string }>;
+  setContractorActive: (id: string, active: boolean) => Promise<{ ok: boolean; error?: string }>;
   upsertCatalogItem: (
     sheet: keyof Omit<MasterCatalog, "contractors" | "materials">,
     row: CatalogItem
-  ) => string;
-  upsertMaterial: (row: MaterialItem) => string;
+  ) => Promise<{ ok: boolean; error?: string; id?: string }>;
+  upsertMaterial: (row: MaterialItem) => Promise<{ ok: boolean; error?: string; id?: string }>;
   setCatalogActive: (
     sheet: keyof MasterCatalog,
     id: string,
     active: boolean
-  ) => void;
-  upsertSite: (site: AppState["sites"][number]) => void;
+  ) => Promise<{ ok: boolean; error?: string }>;
+  /** Checked with checkSite (code, uniqueness, name, plants) */
+  upsertSite: (site: AppState["sites"][number]) => Promise<{ ok: boolean; error?: string }>;
   /** New staff record (to link a login to); returns its id, or "" if not allowed */
   addStaff: (input: Omit<StaffMember, "id">) => string;
-  addLabourer: (row: Omit<Labourer, "id"> & { id?: string }) => string;
+  addLabourer: (row: Omit<Labourer, "id"> & { id?: string }) => { ok: boolean; error?: string; id?: string };
+  /** Owner / Super Admin: delete a labourer with no history; otherwise deactivate */
+  removeLabourer: (id: string) => { ok: boolean; error?: string };
   addWageEntry: (entry: Omit<WageLedgerEntry, "id">) => void;
   acknowledgeFinanceAlert: (id: string) => void;
   flagFinanceAlertToSic: (id: string) => void;
@@ -269,6 +281,9 @@ function makeAudit(
  */
 function can(s: AppState, module: ModuleId, action: PermissionAction): boolean {
   const account = s.users.find((u) => u.id === s.currentAccountId);
+  // A switched-off site is read-only; Master Data and users stay open so it can be switched back on
+  const site = s.sites.find((x) => x.id === s.currentSiteId);
+  if (site && !site.enabled && action !== "view" && module !== "master" && module !== "users") return false;
   return effectivePermission(account, s.currentRole, module, action);
 }
 
@@ -400,7 +415,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         if (recovered && recovered.roles.length) {
           const role = recovered.roles[0];
           const opId = recovered.staffId ?? recovered.labourerId ?? null;
-          const siteId = recovered.siteIds[0] ?? fresh.currentSiteId;
+          const siteId = landingSite(role, recovered.siteIds, fresh.currentSiteId);
           const next: AppState = {
             ...fresh,
             currentAccountId: recovered.id,
@@ -427,7 +442,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     }
     const role = account.roles[0];
     const opId = account.staffId ?? account.labourerId ?? null;
-    const siteId = canSeeAllSites(role) ? ALL_SITES : account.siteIds[0] ?? s.currentSiteId;
+    const siteId = landingSite(role, account.siteIds, s.currentSiteId);
     const next: AppState = {
       ...s,
       currentAccountId: account.id,
@@ -457,7 +472,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const master = await remoteLoadMaster();
       const role = me.roles[0];
       const s = stateRef.current;
-      const siteId = me.siteIds[0] ?? s.currentSiteId;
+      const siteId = landingSite(role, me.siteIds, s.currentSiteId);
       const next: AppState = {
         ...s,
         masterCatalog: master ?? s.masterCatalog,
@@ -525,6 +540,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
+  // B2: a deactivated user (or an ended session) is signed out within a few minutes
+  const signedIn = !!state.currentAccountId;
+  useEffect(() => {
+    if (!supabase || !signedIn) return;
+    const check = async () => {
+      if ((await remoteStillActive()) === false) logout();
+    };
+    void check();
+    const t = setInterval(check, 3 * 60 * 1000);
+    return () => clearInterval(t);
+  }, [signedIn, logout]);
+
   const startImpersonation = useCallback((targetAccountId: string) => {
     let result:
       | { ok: true; home: string }
@@ -576,7 +603,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       }
       const role = target.roles[0];
       const opId = target.staffId ?? target.labourerId ?? null;
-      const siteId = target.siteIds[0] ?? s.currentSiteId;
+      const siteId = landingSite(role, target.siteIds, s.currentSiteId);
       const next: AppState = {
         ...s,
         impersonatorAccountId: actor.id,
@@ -1635,8 +1662,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     if (!allowed) {
       return { ok: false as const, error: "Site not assigned to account" };
     }
-    const site = s.sites.find((x) => x.id === siteId && x.enabled);
-    if (!site) return { ok: false as const, error: "Unknown or disabled site" };
+    // Switched-off sites stay reachable, read-only (M5)
+    const site = s.sites.find((x) => x.id === siteId);
+    if (!site) return { ok: false as const, error: "Unknown site" };
     setState((prev) => ({
       ...prev,
       currentSiteId: siteId,
@@ -1693,12 +1721,23 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   );
 
   const updateTrade = useCallback((id: string, patch: Partial<TradeDefinition>) => {
-    setState((s) => !can(s, "trades", "update") && !can(s, "master", "update") ? s : ({
-      ...s,
-      tradeCatalogue: s.tradeCatalogue.map((t) =>
-        t.id === id ? { ...t, ...patch } : t
-      ),
-    }));
+    const cur = stateRef.current;
+    if (!can(cur, "trades", "update") && !can(cur, "master", "update")) return DENIED;
+    const before = cur.tradeCatalogue.find((t) => t.id === id);
+    if (!before) return { ok: false, error: "Trade not found" };
+    if (patch.label !== undefined) {
+      const label = patch.label.trim();
+      if (!label) return { ok: false, error: "Trade name is required" };
+      if (cur.tradeCatalogue.some((t) => t.id !== id && t.label.trim().toLowerCase() === label.toLowerCase())) return { ok: false, error: "Trade already exists" };
+      patch = { ...patch, label };
+    }
+    const changes = describeChanges(before, patch);
+    if (!changes) return { ok: true };
+    setState((s) => {
+      const next = { ...s, tradeCatalogue: s.tradeCatalogue.map((t) => (t.id === id ? { ...t, ...patch } : t)) };
+      return { ...next, auditLog: [makeAudit(next, "trades", "update", `Trade ${before.label}: ${changes}`), ...s.auditLog] };
+    });
+    return { ok: true };
   }, []);
 
   const addTrade = useCallback(
@@ -1707,21 +1746,25 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, "_")
         .replace(/^_|_$/g, "");
-      const id = input.id ?? (slug || uid("trade"));
-      if (!can(stateRef.current, "trades", "create") && !can(stateRef.current, "master", "update")) return "";
-      setState((s) => ({
-        ...s,
-        tradeCatalogue: [
-          ...s.tradeCatalogue,
-          {
-            id,
-            label: input.label,
-            subcategories: input.subcategories ?? [],
-            active: input.active ?? true,
-          },
-        ],
-      }));
-      return id;
+      const cur = stateRef.current;
+      if (!can(cur, "trades", "create") && !can(cur, "master", "update")) return DENIED;
+      const label = input.label.trim();
+      if (!label) return { ok: false, error: "Trade name is required" };
+      if (cur.tradeCatalogue.some((t) => t.label.trim().toLowerCase() === label.toLowerCase())) return { ok: false, error: "Trade already exists" };
+      // A taken slug gets -2, -3, …
+      let id = input.id ?? (slug || uid("trade"));
+      for (let n = 2; cur.tradeCatalogue.some((t) => t.id === id); n++) id = `${slug || "trade"}-${n}`;
+      setState((s) => {
+        const next = {
+          ...s,
+          tradeCatalogue: [
+            ...s.tradeCatalogue,
+            { id, label, subcategories: input.subcategories ?? [], active: input.active ?? true, siteId: input.siteId ?? null },
+          ],
+        };
+        return { ...next, auditLog: [makeAudit(next, "trades", "create", `Trade ${label}`), ...s.auditLog] };
+      });
+      return { ok: true, id };
     },
     []
   );
@@ -1741,41 +1784,75 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           | "contractorId"
           | "epNumber"
           | "gatePass"
+          | "supervisorId"
+          | "aadhaar"
+          | "mobile"
         >
       >
     ) => {
-      setState((s) => !can(s, "labourer", "update") && !can(s, "master", "update") ? s : ({
-        ...s,
-        labourers: s.labourers.map((l) =>
-          l.id === id ? { ...l, ...patch } : l
-        ),
-      }));
+      const cur = stateRef.current;
+      if (!can(cur, "labourer", "update") && !can(cur, "master", "update")) return DENIED;
+      const before = cur.labourers.find((l) => l.id === id);
+      if (!before) return { ok: false, error: "Labourer not found" };
+      const merged = { ...before, ...patch };
+      const bad = checkLabourer(merged, cur.labourers);
+      if (bad) return { ok: false, error: bad };
+      patch = { ...patch, ...(patch.epNumber !== undefined ? { epNumber: normalizeEp(patch.epNumber)! } : {}) };
+      const changes = describeChanges(before, patch, ["aadhaar"]);
+      if (!changes) return { ok: true };
+      setState((s) => {
+        const next = { ...s, labourers: s.labourers.map((l) => (l.id === id ? { ...l, ...patch } : l)) };
+        return { ...next, auditLog: [makeAudit(next, "labourer", "update", `Labourer ${before.name}: ${changes}`), ...s.auditLog] };
+      });
+      return { ok: true };
     },
     []
   );
+
+  const removeLabourer = useCallback((id: string) => {
+    const cur = stateRef.current;
+    if (cur.currentRole !== "owner" && cur.currentRole !== "super_admin") return { ok: false, error: "Only Owner or Super Admin can delete a labourer" };
+    const l = cur.labourers.find((x) => x.id === id);
+    if (!l) return { ok: false, error: "Labourer not found" };
+    const used =
+      cur.attendance.some((a) => a.labourerId === id) ||
+      cur.wageLedger.some((w) => w.labourerId === id) ||
+      cur.users.some((u) => u.labourerId === id);
+    if (used) return { ok: false, error: `${l.name} has attendance, wages or a login — deactivate instead` };
+    setState((s) => {
+      const next = { ...s, labourers: s.labourers.filter((x) => x.id !== id) };
+      return { ...next, auditLog: [makeAudit(next, "labourer", "delete", `Deleted labourer ${l.name} · ${l.epNumber}`), ...s.auditLog] };
+    });
+    return { ok: true };
+  }, []);
 
   const addLabourer = useCallback(
     (row: Omit<Labourer, "id"> & { id?: string }) => {
       const id = row.id ?? uid("lb");
-      if (!can(stateRef.current, "labourer", "create") && !can(stateRef.current, "master", "update")) return "";
+      const cur = stateRef.current;
+      if (!can(cur, "labourer", "create") && !can(cur, "master", "update")) return DENIED;
+      const bad = checkLabourer({ ...row, id }, cur.labourers);
+      if (bad) return { ok: false, error: bad };
+      const clean = { ...row, id, name: row.name.trim(), epNumber: normalizeEp(row.epNumber)! };
       setState((s) => ({
         ...s,
-        labourers: [{ ...row, id }, ...s.labourers],
+        labourers: [clean, ...s.labourers],
         auditLog: [
-          makeAudit(s, "master", "create", `Labourer ${row.name}`),
+          makeAudit(s, "labourer", "create", `Labourer ${clean.name} · ${clean.epNumber}`),
           ...s.auditLog,
         ],
       }));
-      return id;
+      return { ok: true, id };
     },
     []
   );
 
-  const upsertContractor = useCallback((row: Contractor) => {
+  const upsertContractor = useCallback(async (row: Contractor) => {
     const id = row.id || uid("con");
-    if (!can(stateRef.current, "master", "update")) return id;
+    if (!can(stateRef.current, "master", "update")) return DENIED;
     const next = { ...row, id };
-    void remoteSaveMaster("contractors", next);
+    const saved = await remoteSaveMaster("contractors", next);
+    if (!saved.ok) return saved;
     setState((s) => {
       const exists = s.masterCatalog.contractors.some((c) => c.id === id);
       return {
@@ -1797,33 +1874,38 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         ],
       };
     });
-    return id;
+    return { ok: true, id };
   }, []);
 
-  const setContractorActive = useCallback((id: string, active: boolean) => {
-    if (!can(stateRef.current, "master", "update")) return;
+  const setContractorActive = useCallback(async (id: string, active: boolean) => {
+    if (!can(stateRef.current, "master", "update")) return DENIED;
     const row = stateRef.current.masterCatalog.contractors.find((c) => c.id === id);
-    if (row) void remoteSaveMaster("contractors", { ...row, active });
-    setState((s) => ({
-      ...s,
-      masterCatalog: {
-        ...s.masterCatalog,
-        contractors: s.masterCatalog.contractors.map((c) =>
-          c.id === id ? { ...c, active } : c
-        ),
-      },
-    }));
+    if (!row) return { ok: false, error: "Contractor not found" };
+    const saved = await remoteSaveMaster("contractors", { ...row, active });
+    if (!saved.ok) return saved;
+    setState((s) => {
+      const next = {
+        ...s,
+        masterCatalog: {
+          ...s.masterCatalog,
+          contractors: s.masterCatalog.contractors.map((c) => (c.id === id ? { ...c, active } : c)),
+        },
+      };
+      return { ...next, auditLog: [makeAudit(next, "master", "update", `Contractor ${row.code}: ${active ? "activated" : "deactivated"}`), ...s.auditLog] };
+    });
+    return { ok: true };
   }, []);
 
   const upsertCatalogItem = useCallback(
-    (
+    async (
       sheet: keyof Omit<MasterCatalog, "contractors" | "materials">,
       row: CatalogItem
     ) => {
       const id = row.id || uid("cat");
-      if (!can(stateRef.current, "master", "update")) return id;
+      if (!can(stateRef.current, "master", "update")) return DENIED;
       const next = { ...row, id };
-      void remoteSaveMaster(sheet, next);
+      const saved = await remoteSaveMaster(sheet, next);
+      if (!saved.ok) return saved;
       setState((s) => {
         const list = s.masterCatalog[sheet] as CatalogItem[];
         const exists = list.some((r) => r.id === id);
@@ -1846,16 +1928,17 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           ],
         };
       });
-      return id;
+      return { ok: true, id };
     },
     []
   );
 
-  const upsertMaterial = useCallback((row: MaterialItem) => {
+  const upsertMaterial = useCallback(async (row: MaterialItem) => {
     const id = row.id || uid("mat");
-    if (!can(stateRef.current, "master", "update")) return id;
+    if (!can(stateRef.current, "master", "update")) return DENIED;
     const next = { ...row, id };
-    void remoteSaveMaster("materials", next);
+    const saved = await remoteSaveMaster("materials", next);
+    if (!saved.ok) return saved;
     setState((s) => {
       const exists = s.masterCatalog.materials.some((m) => m.id === id);
       return {
@@ -1877,33 +1960,41 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         ],
       };
     });
-    return id;
+    return { ok: true, id };
   }, []);
 
   const setCatalogActive = useCallback(
-    (sheet: keyof MasterCatalog, id: string, active: boolean) => {
-      if (!can(stateRef.current, "master", "update")) return;
+    async (sheet: keyof MasterCatalog, id: string, active: boolean) => {
+      if (!can(stateRef.current, "master", "update")) return DENIED;
       const row = (
         stateRef.current.masterCatalog[sheet] as (CatalogItem | Contractor | MaterialItem)[]
       ).find((r) => r.id === id);
-      if (row) void remoteSaveMaster(sheet, { ...row, active });
+      if (!row) return { ok: false, error: "Row not found" };
+      const saved = await remoteSaveMaster(sheet, { ...row, active });
+      if (!saved.ok) return saved;
       setState((s) => {
         const list = s.masterCatalog[sheet] as { id: string; active: boolean }[];
-        return {
+        const next = {
           ...s,
           masterCatalog: {
             ...s.masterCatalog,
             [sheet]: list.map((r) => (r.id === id ? { ...r, active } : r)),
           },
         };
+        return { ...next, auditLog: [makeAudit(next, "master", "update", `${sheet} ${row.code}: ${active ? "activated" : "deactivated"}`), ...s.auditLog] };
       });
+      return { ok: true };
     },
     []
   );
 
-  const upsertSite = useCallback((site: AppState["sites"][number]) => {
-    if (!can(stateRef.current, "master", "update")) return;
-    void remoteSaveSite(site);
+  const upsertSite = useCallback(async (input: AppState["sites"][number]) => {
+    if (!can(stateRef.current, "master", "update")) return DENIED;
+    const site = { ...input, code: input.code.trim().toUpperCase(), name: input.name.trim(), plants: input.plants.map((p) => p.trim()).filter(Boolean) };
+    const bad = checkSite(site, stateRef.current.sites);
+    if (bad) return { ok: false, error: bad };
+    const saved = await remoteSaveSite(site);
+    if (!saved.ok) return saved;
     setState((s) => {
       const exists = s.sites.some((x) => x.id === site.id);
       return {
@@ -1912,11 +2003,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           ? s.sites.map((x) => (x.id === site.id ? site : x))
           : [...s.sites, site],
         auditLog: [
-          makeAudit(s, "master", exists ? "update" : "create", `Site ${site.code}`),
+          makeAudit(s, "master", exists ? "update" : "create", `Site ${site.code}${site.enabled ? "" : " (switched off)"}`),
           ...s.auditLog,
         ],
       };
     });
+    return { ok: true };
   }, []);
 
   const addStaff = useCallback((input: Omit<StaffMember, "id">) => {
@@ -1990,7 +2082,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         result = { ok: false, error: "Only Owner or Super Admin can create users" };
         return s;
       }
-      const invalid = checkSeat(input, s.users);
+      const invalid = checkSeat(input, s.users) ?? checkUserChange({ role: s.currentRole, accountId: s.currentAccountId }, s.users, null, input);
       if (invalid) {
         result = { ok: false, error: invalid };
         return s;
@@ -2035,6 +2127,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         result = { ok: false, error: "User not found" };
         return s;
       }
+      const guard = checkUserChange({ role: s.currentRole, accountId: s.currentAccountId }, s.users, existing, {
+        roles: patch.roles ?? existing.roles,
+        active: patch.active ?? existing.active,
+      });
+      if (guard) {
+        result = { ok: false, error: guard };
+        return s;
+      }
+      if (patch.password !== undefined && patch.password.length < MIN_PASSWORD) {
+        result = { ok: false, error: `Password must be at least ${MIN_PASSWORD} characters` };
+        return s;
+      }
       if (patch.siteIds || patch.roles) {
         const bad = checkSites(patch.roles ?? existing.roles, patch.siteIds ?? existing.siteIds);
         if (bad) {
@@ -2062,7 +2166,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             next,
             "users",
             "update",
-            `Updated ${existing.username}: ${Object.keys(patch).join(", ")}`
+            patch.password !== undefined
+              ? `Password reset for ${existing.username}`
+              : `Updated ${existing.username}: ${describeChanges(existing, patch, ["password"]) || Object.keys(patch).join(", ")}`
           ),
           ...s.auditLog,
         ],
@@ -2077,6 +2183,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const createUser = useCallback(
     async (input: Omit<UserAccount, "id">) => {
       if (!supabase) return createUserLocal(input);
+      const cur = stateRef.current;
+      const guard = checkUserChange({ role: cur.currentRole, accountId: cur.currentAccountId }, cur.users, null, input);
+      if (guard) return { ok: false, error: guard };
       const r = await remoteCreateUser(input);
       if (!r.ok) return { ok: false, error: r.error };
       const account = r.account;
@@ -2106,6 +2215,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       if (patch.username !== undefined) {
         return { ok: false, error: "Usernames cannot be changed once created" };
       }
+      const cur = stateRef.current;
+      const existing = cur.users.find((u) => u.id === id);
+      if (!existing) return { ok: false, error: "User not found" };
+      const guard = checkUserChange({ role: cur.currentRole, accountId: cur.currentAccountId }, cur.users, existing, {
+        roles: patch.roles ?? existing.roles,
+        active: patch.active ?? existing.active,
+      });
+      if (guard) return { ok: false, error: guard };
       const r = await remoteUpdateUser(id, patch);
       if (!r.ok) return { ok: false, error: r.error };
       return updateUserLocal(id, patch);
@@ -2114,7 +2231,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   );
 
   const setUserPassword = useCallback(async (id: string, password: string) => {
-    if (!supabase) return { ok: false, error: "Backend not configured" };
+    if (password.length < MIN_PASSWORD) return { ok: false, error: `Password must be at least ${MIN_PASSWORD} characters` };
+    // Demo mode: change the local login (same checks as any other user edit)
+    if (!supabase) return updateUserLocal(id, { password });
+    const cur = stateRef.current;
+    const target = cur.users.find((u) => u.id === id);
+    const guard = target ? checkUserChange({ role: cur.currentRole, accountId: cur.currentAccountId }, cur.users, target, target) : "User not found";
+    if (guard) return { ok: false, error: guard };
     const r = await remoteSetPassword(id, password);
     if (!r.ok) return { ok: false, error: r.error };
     setState((s) => {
@@ -2128,7 +2251,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       };
     });
     return { ok: true };
-  }, []);
+  }, [updateUserLocal]);
 
   const createEquipmentRequest = useCallback(
     (
@@ -2554,6 +2677,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       addTrade,
       updateLabourer,
       addLabourer,
+      removeLabourer,
       upsertContractor,
       setContractorActive,
       upsertCatalogItem,
@@ -2611,6 +2735,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       addTrade,
       updateLabourer,
       addLabourer,
+      removeLabourer,
       upsertContractor,
       setContractorActive,
       upsertCatalogItem,

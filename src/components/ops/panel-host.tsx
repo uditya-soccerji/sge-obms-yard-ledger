@@ -50,6 +50,7 @@ const PANELS: Record<OpsPanelId, ComponentType> = {
     () => import("@/app/(app)/calculators/scaffold/page"),
     { loading, ssr: false }
   ),
+  telegram: dynamic(() => import("@/app/(app)/telegram/page"), { loading, ssr: false }),
   estimate: dynamic(() => import("@/app/(app)/calculators/estimate/page"), {
     loading,
     ssr: false,

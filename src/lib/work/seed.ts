@@ -23,7 +23,7 @@ import type {
 } from "./types";
 
 /** v6: per-site months, Admin entries win, JMS status log, void costs, healthy demo paint */
-export const WORK_STORAGE_KEY = "sge-work-v6";
+export const WORK_STORAGE_KEY = "sge-work-v7";
 /** "Today" for the work demo (DPR dates, expiry warnings). */
 export const WORK_TODAY = "2026-09-28";
 

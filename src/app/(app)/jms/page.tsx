@@ -33,12 +33,12 @@ function JmsPage() {
     computeRatings,
     markJmsPayment,
   } = useStore();
-  const [label, setLabel] = useState("JMS Oct W2 — CPP");
+  const [label, setLabel] = useState("JMS Oct W2 — COKER");
   const [period, setPeriod] = useState("2026-10-W2");
   const [paste, setPaste] = useState(
-    `Pipe rack B-12 painting,CPP,painting,400,m2,450
-V-204 blasting,CPP,blasting,150,m2,380
-FS-01 scaffold,CPP,scaffolding,840,m3,85`
+    `Pipe rack B-12 painting,COKER,painting,400,m2,450
+V-204 blasting,COKER,blasting,150,m2,380
+FS-01 scaffold,COKER,scaffolding,840,m3,85`
   );
   // One note and one "amount received" box per package
   const [notes, setNotes] = useState<Record<string, string>>({});
@@ -66,7 +66,7 @@ FS-01 scaffold,CPP,scaffolding,840,m3,85`
         return {
           id: uid("jl"),
           description: description || "Line",
-          plant: plant || "CPP",
+          plant: plant || "",
           activity: (activity as JmsLine["activity"]) || "painting",
           qty: q,
           unit: (unit as "m2" | "m3") || "m2",

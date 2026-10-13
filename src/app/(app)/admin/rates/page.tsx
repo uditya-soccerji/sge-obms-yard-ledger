@@ -10,7 +10,7 @@ export default function RatesRedirectPage() {
   }, [router]);
   return (
     <div className="py-16 text-center text-sm text-[var(--sge-ink-3)]">
-      Opening Rate book in Master Data…
+      Opening the Rate book…
     </div>
   );
 }

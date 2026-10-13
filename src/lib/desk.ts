@@ -1,4 +1,5 @@
 import { canViewModule } from "./permissions";
+import type { MasterSheetId } from "./master/types";
 import type { ModuleId, RoleId, UserAccount } from "./types";
 
 export type OpsPanelId =
@@ -17,7 +18,8 @@ export type OpsPanelId =
   | "paint-calc"
   | "area-calc"
   | "scaffold-calc"
-  | "estimate";
+  | "estimate"
+  | "telegram";
 
 export interface OpsPill {
   id: OpsPanelId;
@@ -42,6 +44,7 @@ const ROLE_PILLS: Record<RoleId, OpsPill[]> = {
     { id: "paint-calc", label: "Paint calc", module: "calculators" },
     { id: "area-calc", label: "Area", module: "calculators" },
     { id: "scaffold-calc", label: "Scaffold calc", module: "calculators" },
+    { id: "telegram", label: "Telegram", module: "telegram" },
   ],
   owner: [
     { id: "approvals", label: "Approvals", module: "approvals" },
@@ -51,6 +54,7 @@ const ROLE_PILLS: Record<RoleId, OpsPill[]> = {
     { id: "acpl", label: "ACPL", module: "acpl" },
     { id: "audit", label: "Audit", module: "audit" },
     { id: "estimate", label: "Estimator", module: "calculators" },
+    { id: "telegram", label: "Telegram", module: "telegram" },
   ],
   sic: [
     { id: "approvals", label: "Approvals", module: "approvals" },
@@ -98,8 +102,15 @@ const ROLE_PILLS: Record<RoleId, OpsPill[]> = {
   labourer: [],
 };
 
+/** Owner and Super Admin see every sheet; Admin keeps trades and the rate book (M3, rules §2). */
 export function canAccessMasterData(role: RoleId | null | undefined): boolean {
-  return role === "super_admin" || role === "owner";
+  return role === "super_admin" || role === "owner" || role === "admin";
+}
+
+export function masterSheetsFor(role: RoleId | null | undefined): "all" | MasterSheetId[] {
+  if (role === "super_admin" || role === "owner") return "all";
+  if (role === "admin") return ["trades", "rateBook"];
+  return [];
 }
 
 export function opsPillsFor(

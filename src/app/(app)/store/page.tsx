@@ -11,6 +11,7 @@ import {
 } from "@/components/shared/ui-bits";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { BlurInput } from "@/components/shared/blur-input";
 import {
   PAINT_STAGE_HINT,
   PAINT_STAGE_LABEL,
@@ -298,20 +299,6 @@ function StoreHomePage() {
         </div>
       </Panel>
     </div>
-  );
-}
-
-/** Text box that saves when you leave it, not on every key (one audit line per change) */
-function BlurInput({ value, onSave, ...rest }: { value: string; onSave: (v: string) => void } & Omit<React.ComponentProps<typeof Input>, "value" | "onChange" | "onBlur" | "defaultValue">) {
-  return (
-    <Input
-      key={value}
-      defaultValue={value}
-      onBlur={(e) => {
-        if (e.target.value !== value) onSave(e.target.value);
-      }}
-      {...rest}
-    />
   );
 }
 

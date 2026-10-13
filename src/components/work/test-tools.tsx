@@ -16,6 +16,7 @@ import { Msg, selectCls } from "./common";
 /** Demo accounts a tester can "view as" — matched by username, since account ids differ once logins live in Supabase. */
 const VIEW_AS = [
   { id: "paint", label: "Supervisor — V. Chauhan" },
+  { id: "solanki", label: "Supervisor — K. Solanki" },
   { id: "sic", label: "SIC — R. Mehta" },
   { id: "admin", label: "Admin (data operator)" },
   { id: "finance", label: "Finance" },
