@@ -20,6 +20,7 @@ import {
 } from "@/lib/paint-lifecycle";
 import { useStore } from "@/lib/store";
 import { kindDef } from "@/lib/equipment";
+import { RequestsBoard } from "@/components/requests/requests-board";
 import type { PaintLifecycleStage } from "@/lib/types";
 
 function StoreHomePage() {
@@ -57,6 +58,9 @@ function StoreHomePage() {
           </div>
         }
       />
+
+      {/* B06: the store's dashboard leads with the requests board, urgent first */}
+      <RequestsBoard title="Requests to handle" />
 
       <Panel>
         <h3 className="mb-2 font-heading text-sm font-bold">Store DPRs</h3>

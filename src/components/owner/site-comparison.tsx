@@ -1,5 +1,6 @@
 "use client";
 
+import { isOpenRequest } from "@/lib/requests";
 import { formatINR, Panel, StatusPill } from "@/components/shared/ui-bits";
 import { today as todayDate } from "@/lib/today";
 import { useStore } from "@/lib/store";
@@ -49,7 +50,7 @@ export function siteRows(s: AppState): SiteRow[] {
           (d) => d.siteId === id && d.status === "submitted"
         ).length,
         openRequests: s.equipmentRequests.filter(
-          (r) => r.siteId === id && (r.status === "open" || r.status === "fulfilling")
+          (r) => r.siteId === id && isOpenRequest(r)
         ).length,
         kitIssues: s.equipment.filter((e) => e.siteId === id && e.status !== "ok")
           .length,

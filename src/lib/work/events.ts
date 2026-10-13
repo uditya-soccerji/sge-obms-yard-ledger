@@ -32,7 +32,10 @@ export type EventKind =
   | "dpr_saved"
   | "dpr_submitted"
   // Equipment setup change (B05): SIC + store of the site (a Store login with all sites = central store)
-  | "equipment_changed";
+  | "equipment_changed"
+  // Requests (B06): raised → SIC + store; each step → requester + SIC + store
+  | "request_raised"
+  | "request_step";
 
 export interface WorkEvent {
   id: string;
@@ -68,7 +71,7 @@ export interface Viewer {
 }
 
 /** Events that need someone to act, or tell the submitter the outcome: instant. */
-export const INSTANT: EventKind[] = ["job_closed", "jms_confirmed", "job_sent_back", "crew_requested", "crew_released", "crew_decided", "dpr_reviewed", "dpr_submitted"];
+export const INSTANT: EventKind[] = ["job_closed", "jms_confirmed", "job_sent_back", "crew_requested", "crew_released", "crew_decided", "dpr_reviewed", "dpr_submitted", "request_raised", "request_step"];
 
 export const KIND_LABEL: Record<EventKind, string> = {
   dpr_added: "DPR entry",
@@ -94,6 +97,8 @@ export const KIND_LABEL: Record<EventKind, string> = {
   dpr_saved: "DPR draft saved",
   dpr_submitted: "DPR submitted",
   equipment_changed: "Equipment changed",
+  request_raised: "Request raised",
+  request_step: "Request update",
 };
 
 const onSite = (v: Viewer, siteId: string) => v.siteIds.length === 0 || v.siteIds.includes(siteId);
@@ -147,6 +152,10 @@ export function isFor(e: WorkEvent, v: Viewer): boolean {
       return mine || v.role === "sic" || v.role === "admin";
     case "equipment_changed":
       // §7 (B05/B06): SIC, the site's store and the central store (a Store login on all sites)
+      return mine || v.role === "sic" || v.role === "store";
+    case "request_raised":
+    case "request_step":
+      // §9 (B06): SIC approves, store fulfils, the requester hears each step
       return mine || v.role === "sic" || v.role === "store";
   }
 }

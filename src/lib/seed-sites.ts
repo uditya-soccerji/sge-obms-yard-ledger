@@ -120,8 +120,8 @@ const SITE_PROFILES: SiteProfile[] = [
       { label: "RA-12 Tank blasting (draft)", amount: 214000, status: "draft", period: "Oct 2026" },
     ],
     requests: [
-      { kind: "equipment", description: "Second dehumidifier for T-312", qty: 1, urgent: true, status: "open" },
-      { kind: "material", description: "Type 24 top-up 200 L", qty: 200, status: "fulfilling" },
+      { kind: "equipment", description: "Second dehumidifier for T-312", qty: 1, urgent: true, status: "sic_pending" },
+      { kind: "material", description: "Type 24 top-up 200 L", qty: 200, status: "approved" },
     ],
     jms: {
       label: "JMS Oct W1 — MTF tanks",
@@ -171,8 +171,8 @@ const SITE_PROFILES: SiteProfile[] = [
       { label: "RA-05 Marine coating", amount: 168000, status: "submitted", period: "Sep 2026" },
     ],
     requests: [
-      { kind: "spare", description: "Hopper deadman valve", qty: 1, urgent: true, status: "open" },
-      { kind: "other", description: "Extra life buoys at Berth 4", qty: 4, urgent: true, status: "open" },
+      { kind: "spare", description: "Hopper deadman valve", qty: 1, urgent: true, status: "sic_pending" },
+      { kind: "other", description: "Extra life buoys at Berth 4", qty: 4, urgent: true, status: "sic_pending" },
     ],
     prediction: {
       kind: "high_variance",
@@ -284,8 +284,8 @@ const SITE_PROFILES: SiteProfile[] = [
     ],
     billing: [{ label: "RA-03 Jetty scaffolding", amount: 126000, status: "draft", period: "Oct 2026" }],
     requests: [
-      { kind: "equipment", description: "Replace FBH harness (failed webbing)", qty: 2, urgent: true, status: "open" },
-      { kind: "other", description: "Safety net 20 m roll", qty: 1, status: "open" },
+      { kind: "equipment", description: "Replace FBH harness (failed webbing)", qty: 2, urgent: true, status: "sic_pending" },
+      { kind: "other", description: "Safety net 20 m roll", qty: 1, status: "sic_pending" },
     ],
     prediction: {
       kind: "low_stock",
@@ -326,7 +326,7 @@ const SITE_PROFILES: SiteProfile[] = [
       { date: D2, kind: "expense", category: "Transport", amount: 12000, description: "Equipment shifting DTA → Gagva" },
     ],
     billing: [{ label: "Mobilisation advance", amount: 150000, status: "approved", period: "Oct 2026" }],
-    requests: [{ kind: "equipment", description: "Airless pump for Gagva", qty: 1, status: "open" }],
+    requests: [{ kind: "equipment", description: "Airless pump for Gagva", qty: 1, status: "sic_pending" }],
     plans: [{ task: "GR-1 blasting trial + inspection", target: 150, status: "in_progress" }],
     safetyNote: "Induction for 22 new workers completed; TBT board installed.",
     acplFlags: [],

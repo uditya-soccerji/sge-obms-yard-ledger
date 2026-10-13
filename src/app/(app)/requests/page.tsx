@@ -1,265 +1,167 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import {
-  EmptyState,
-  KpiTile,
-  Panel,
-  SectionHeader,
-  StatusPill,
-} from "@/components/shared/ui-bits";
+import { useState } from "react";
+import { EmptyState, KpiTile, Panel, SectionHeader } from "@/components/shared/ui-bits";
+import { REQUESTS_TAB, RequestsBoard } from "@/components/requests/requests-board";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { selectCls } from "@/components/work/common";
+import { kindDef } from "@/lib/equipment";
 import { canViewModule, effectivePermission, plantScopeFor } from "@/lib/permissions";
-import { useStore } from "@/lib/store";
+import { filterBoard } from "@/lib/requests";
 import { entrySiteId } from "@/lib/site-scope";
+import { useStore } from "@/lib/store";
 import type { EquipmentRequest } from "@/lib/types";
-
-const TONE: Record<
-  EquipmentRequest["status"],
-  "ok" | "warn" | "accent" | "default" | "crit"
-> = {
-  open: "warn",
-  fulfilling: "accent",
-  fulfilled: "ok",
-  cancelled: "default",
-};
+import { useWork } from "@/lib/work/store";
 
 export default function RequestsDeskPage() {
-  const {
-    state,
-    currentAccount,
-    createEquipmentRequest,
-    updateEquipmentRequest,
-  } = useStore();
+  const { state, currentAccount, createEquipmentRequest } = useStore();
+  const { notify } = useWork();
   const role = state.currentRole;
   const canView = canViewModule(currentAccount, role, "requests");
   const canCreate = effectivePermission(currentAccount, role, "requests", "create");
-  const canFulfill = effectivePermission(currentAccount, role, "requests", "approve") ||
-    effectivePermission(currentAccount, role, "requests", "update");
-
   const scope = plantScopeFor(currentAccount, role);
+  const siteId = entrySiteId(state);
+  // Plants come from the site's Master Data list (docs §3), narrowed to the login's plants
+  const sitePlants = state.sites.find((s) => s.id === siteId)?.plants ?? [];
+  const scoped = scope === "all" ? sitePlants : sitePlants.filter((p) => scope.includes(p));
+  // A login whose assigned plants were removed from Master Data still needs a plant to pick
+  const plants = scoped.length ? scoped : sitePlants;
+  const mySetup = state.equipment.filter((e) => e.supervisorId && e.supervisorId === state.currentUserId);
 
-  const [kind, setKind] = useState<EquipmentRequest["kind"]>("spare");
+  const [kind, setKind] = useState<EquipmentRequest["kind"]>("equipment");
+  const [action, setAction] = useState<"issue" | "exchange">("issue");
+  const [exchangeItemId, setExchangeItemId] = useState("");
   const [description, setDescription] = useState("");
   const [qty, setQty] = useState("1");
-  const [plant, setPlant] = useState(
-    currentAccount?.plantIds[0] ?? "CPP"
-  );
+  const [plant, setPlant] = useState("");
   const [urgent, setUrgent] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
 
-  const list = useMemo(() => {
-    return state.equipmentRequests.filter((r) => {
-      if (scope === "all") return true;
-      return scope.includes(r.plant);
-    });
-  }, [state.equipmentRequests, scope]);
-
-  const openCount = list.filter((r) => r.status === "open" || r.status === "fulfilling").length;
+  const all = state.equipmentRequests.filter((r) => scope === "all" || scope.includes(r.plant) || r.createdBy === state.currentUserId);
 
   if (!canView) {
-    return (
-      <EmptyState
-        title="No access"
-        detail="Equipment & spare request desk is for supervisors, safety, store, SIC, and above."
-      />
-    );
+    return <EmptyState title="No access" detail="The request desk is for supervisors, safety, store, SIC and above." />;
   }
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (!canCreate || !description.trim()) return;
-    createEquipmentRequest({
-      siteId: entrySiteId(state),
-      plant,
+    const p = plant || plants[0] || "";
+    if (!description.trim()) return setMsg({ ok: false, text: "Describe what's needed" });
+    if (!p) return setMsg({ ok: false, text: "Pick the plant" });
+    if (!(Number(qty) > 0)) return setMsg({ ok: false, text: "Quantity must be above 0" });
+    if (action === "exchange" && !exchangeItemId) return setMsg({ ok: false, text: "Pick the item you're exchanging" });
+    const id = createEquipmentRequest({
+      siteId,
+      plant: p,
       kind,
+      action,
+      ...(action === "exchange" ? { exchangeItemId } : {}),
       description: description.trim(),
-      qty: Number(qty) || undefined,
+      qty: Number(qty),
       urgent,
     });
+    notify({
+      kind: "request_raised",
+      siteId,
+      subjectStaffId: state.currentUserId ?? undefined,
+      // §9 (B06): urgent ones jump the queue and the bell
+      problem: urgent,
+      title: `${urgent ? "URGENT · " : ""}${action === "exchange" ? "Exchange" : "Request"}: ${description.trim()}`,
+      detail: `${kind} · ${p} · qty ${qty} — SIC approval pending`,
+      tab: REQUESTS_TAB,
+      refId: id,
+    });
     setDescription("");
-    setMsg("Request created — visible to Store and SIC.");
+    setUrgent(false);
+    setExchangeItemId("");
+    setMsg({ ok: true, text: "Request sent — waiting for SIC approval; the store sees it on its board." });
   }
 
   return (
     <div className="sge-enter space-y-6">
       <SectionHeader
         title="Equipment & spare requests"
-        subtitle="Desk outside DPR — supervisors/safety create; Store fulfills; SIC sees open queue."
+        subtitle="Raise a request → SIC approves → store fulfils (or says why not) → you confirm received (docs §9)."
       />
 
-      <div className="grid gap-3 sm:grid-cols-3">
-        <KpiTile label="Open / fulfilling" value={String(openCount)} tone="warn" />
-        <KpiTile label="Total" value={String(list.length)} />
-        <KpiTile
-          label="Plant scope"
-          value={scope === "all" ? "All plants" : scope.join(", ") || "—"}
-        />
+      <div className="grid gap-3 sm:grid-cols-4">
+        <KpiTile label="SIC approval pending" value={String(filterBoard(all, "sic_pending").length)} tone="warn" />
+        <KpiTile label="To fulfil" value={String(filterBoard(all, "approved").length)} tone="accent" />
+        <KpiTile label="Urgent open" value={String(filterBoard(all, "open").filter((r) => r.urgent).length)} tone="crit" />
+        <KpiTile label="Total" value={String(all.length)} />
       </div>
 
       {msg ? (
-        <div className="rounded-md border border-[var(--sge-ok)]/30 bg-[var(--sge-ok-wash)] px-3 py-2 text-sm text-[var(--sge-ok)]">
-          {msg}
+        <div className={msg.ok ? "rounded-md border border-[var(--sge-ok)]/30 bg-[var(--sge-ok-wash)] px-3 py-2 text-sm text-[var(--sge-ok)]" : "rounded-md border border-[var(--sge-crit)]/30 bg-[var(--sge-crit-wash)] px-3 py-2 text-sm text-[var(--sge-crit)]"}>
+          {msg.text}
         </div>
       ) : null}
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid gap-4 lg:grid-cols-[22rem_1fr]">
         {canCreate ? (
           <Panel>
             <h3 className="mb-3 font-heading text-sm font-bold">New request</h3>
             <form onSubmit={submit} className="space-y-3">
-              <div>
-                <Label>Kind</Label>
-                <Select
-                  value={kind}
-                  onValueChange={(v) => setKind(v as EquipmentRequest["kind"])}
-                >
-                  <SelectTrigger className="mt-1">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="spare">Spare</SelectItem>
-                    <SelectItem value="equipment">Equipment</SelectItem>
-                    <SelectItem value="material">Material</SelectItem>
-                    <SelectItem value="other">Other</SelectItem>
-                  </SelectContent>
-                </Select>
+              <div className="grid grid-cols-2 gap-2">
+                <label className="text-sm">
+                  <Label>Type</Label>
+                  <select aria-label="Issue or exchange" className={`${selectCls} mt-1`} value={action} onChange={(e) => setAction(e.target.value as "issue" | "exchange")}>
+                    <option value="issue">Issue new</option>
+                    <option value="exchange">Exchange</option>
+                  </select>
+                </label>
+                <label className="text-sm">
+                  <Label>Kind</Label>
+                  <select aria-label="Request kind" className={`${selectCls} mt-1`} value={kind} onChange={(e) => setKind(e.target.value as EquipmentRequest["kind"])}>
+                    <option value="equipment">Equipment</option>
+                    <option value="spare">Spare</option>
+                    <option value="material">Material</option>
+                    <option value="other">Other</option>
+                  </select>
+                </label>
               </div>
-              <div>
-                <Label>Plant</Label>
-                <Select value={plant} onValueChange={setPlant}>
-                  <SelectTrigger className="mt-1">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {(scope === "all" ? ["CPP", "CPP-flare"] : scope).map((p) => (
-                      <SelectItem key={p} value={p}>
-                        {p}
-                      </SelectItem>
+              {action === "exchange" ? (
+                <label className="block text-sm">
+                  <Label>Item you&apos;re handing back</Label>
+                  <select aria-label="Exchange item" className={`${selectCls} mt-1`} value={exchangeItemId} onChange={(e) => setExchangeItemId(e.target.value)}>
+                    <option value="">{mySetup.length ? "Pick from your setup…" : "No items in your setup"}</option>
+                    {mySetup.map((e) => (
+                      <option key={e.id} value={e.id}>{e.tag} · {kindDef(e.type).label} · {e.status}</option>
                     ))}
-                  </SelectContent>
-                </Select>
-              </div>
+                  </select>
+                </label>
+              ) : null}
+              <label className="block text-sm">
+                <Label>Plant</Label>
+                <select aria-label="Plant" className={`${selectCls} mt-1`} value={plant || plants[0] || ""} onChange={(e) => setPlant(e.target.value)}>
+                  {plants.length ? plants.map((p) => <option key={p} value={p}>{p}</option>) : <option value="">No plants on this site</option>}
+                </select>
+              </label>
               <div>
                 <Label>Description</Label>
-                <Textarea
-                  className="mt-1"
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  rows={3}
-                />
+                <Textarea className="mt-1" aria-label="Description" value={description} onChange={(e) => setDescription(e.target.value)} rows={3} />
               </div>
               <div className="flex gap-3">
                 <div className="flex-1">
                   <Label>Qty</Label>
-                  <Input
-                    className="mt-1"
-                    value={qty}
-                    onChange={(e) => setQty(e.target.value)}
-                  />
+                  <Input className="mt-1" aria-label="Qty" value={qty} onChange={(e) => setQty(e.target.value)} />
                 </div>
                 <label className="mt-6 flex items-center gap-2 text-sm">
-                  <Checkbox
-                    checked={urgent}
-                    onCheckedChange={(c) => setUrgent(!!c)}
-                  />
+                  <Checkbox aria-label="Urgent" checked={urgent} onCheckedChange={(c) => setUrgent(!!c)} />
                   Urgent
                 </label>
               </div>
-              <Button type="submit" className="w-full">
-                Submit request
-              </Button>
+              <Button type="submit" className="w-full">Send request</Button>
             </form>
           </Panel>
         ) : null}
-
-        <Panel className={canCreate ? undefined : "lg:col-span-2"}>
-          <h3 className="mb-3 font-heading text-sm font-bold">Queue</h3>
-          {list.length === 0 ? (
-            <EmptyState title="No requests" detail="Create one or submit a DPR with requests." />
-          ) : (
-            <div className="space-y-2">
-              {list.map((r) => {
-                const creator =
-                  state.staff.find((s) => s.id === r.createdBy)?.name ??
-                  r.createdBy;
-                return (
-                  <div
-                    key={r.id}
-                    className="rounded-md border border-[var(--sge-line)] bg-[var(--sge-ground)] px-3 py-2"
-                  >
-                    <div className="flex flex-wrap items-center justify-between gap-2">
-                      <div className="font-medium text-sm">
-                        {r.description}
-                        {r.urgent ? (
-                          <span className="ml-2 text-[10px] font-bold uppercase text-[var(--sge-crit)]">
-                            Urgent
-                          </span>
-                        ) : null}
-                      </div>
-                      <StatusPill tone={TONE[r.status]}>{r.status}</StatusPill>
-                    </div>
-                    <div className="mt-1 text-xs text-[var(--sge-ink-3)]">
-                      {r.kind} · {r.plant} · qty {r.qty ?? "—"} · by {creator}
-                      {r.sourceDprId ? ` · from ${r.sourceDprId}` : ""}
-                    </div>
-                    {canFulfill && r.status !== "fulfilled" && r.status !== "cancelled" ? (
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        {r.status === "open" ? (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() =>
-                              updateEquipmentRequest(r.id, { status: "fulfilling" })
-                            }
-                          >
-                            Start fulfill
-                          </Button>
-                        ) : null}
-                        <Button
-                          size="sm"
-                          onClick={() =>
-                            updateEquipmentRequest(r.id, {
-                              status: "fulfilled",
-                              fulfillNote: "Issued from store",
-                            })
-                          }
-                        >
-                          Mark fulfilled
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() =>
-                            updateEquipmentRequest(r.id, { status: "cancelled" })
-                          }
-                        >
-                          Cancel
-                        </Button>
-                      </div>
-                    ) : null}
-                    {r.fulfillNote ? (
-                      <div className="mt-1 text-xs text-[var(--sge-ok)]">
-                        {r.fulfillNote}
-                      </div>
-                    ) : null}
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </Panel>
+        <div className={canCreate ? undefined : "lg:col-span-2"}>
+          <RequestsBoard />
+        </div>
       </div>
     </div>
   );

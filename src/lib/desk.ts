@@ -49,6 +49,7 @@ const ROLE_PILLS: Record<RoleId, OpsPill[]> = {
   ],
   owner: [
     { id: "approvals", label: "Approvals", module: "approvals" },
+    { id: "requests", label: "Requests", module: "requests" },
     { id: "crew", label: "Crews", module: "crew" },
     { id: "equipment", label: "Equipment", module: "equipment" },
     { id: "store", label: "Store / FIM", module: "store" },
@@ -60,6 +61,7 @@ const ROLE_PILLS: Record<RoleId, OpsPill[]> = {
   ],
   sic: [
     { id: "approvals", label: "Approvals", module: "approvals" },
+    { id: "requests", label: "Requests", module: "requests" },
     { id: "crew", label: "Crews", module: "crew" },
     { id: "equipment", label: "Equipment", module: "equipment" },
     { id: "dpr", label: "DPR", module: "dpr" },

@@ -1392,7 +1392,7 @@ export function createSeedState(): AppState {
         description: "Airless tip #517",
         qty: 4,
         urgent: true,
-        status: "open",
+        status: "sic_pending",
         sourceDprId: "dprd-1",
       },
       {
@@ -1406,7 +1406,7 @@ export function createSeedState(): AppState {
         description: "Spare compressor hose 1.5\"",
         qty: 2,
         urgent: true,
-        status: "fulfilling",
+        status: "approved",
         sourceDprId: "dprd-2",
       },
       {

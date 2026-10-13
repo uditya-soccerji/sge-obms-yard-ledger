@@ -19,6 +19,7 @@ import { dprCrew, validateDprForSubmit } from "./dpr-validate";
 import { approveBlock, checkCrewRequest } from "./crew";
 import { reviewedAsFor, reviewLine, siteSicId } from "./dpr-review";
 import { checkExpiry, kindDef, nextTag } from "./equipment";
+import { migrateRequestStatus, REQUEST_STATUS_LABEL, REQUEST_STEPS, stepBlock, type RequestAction } from "./requests";
 import { scoreFromMatchRatio } from "./estimate";
 import { effectivePermission } from "./permissions";
 import { PAINT_STAGE_ORDER } from "./paint-lifecycle";
@@ -236,10 +237,7 @@ interface StoreApi {
       status?: EquipmentRequestStatus;
     }
   ) => string;
-  updateEquipmentRequest: (
-    id: string,
-    patch: Partial<Pick<EquipmentRequest, "status" | "fulfillNote" | "qty" | "description" | "urgent">>
-  ) => void;
+  stepEquipmentRequest: (id: string, action: RequestAction, note: string) => { ok: boolean; error?: string; status?: EquipmentRequestStatus };
 }
 
 const StoreContext = createContext<StoreApi | null>(null);
@@ -317,7 +315,8 @@ function migrateState(parsed: Partial<AppState>): AppState {
     impersonatorSnapshot: parsed.impersonatorSnapshot ?? null,
     users,
     auditLog: parsed.auditLog ?? seed.auditLog,
-    equipmentRequests: parsed.equipmentRequests ?? seed.equipmentRequests,
+    // B06: statuses from before the SIC-approval step are mapped on load
+    equipmentRequests: (parsed.equipmentRequests ?? seed.equipmentRequests).map((r) => ({ ...r, status: migrateRequestStatus(r.status) })),
     crewRequests: parsed.crewRequests ?? [],
     attendance: (parsed.attendance ?? seed.attendance).map((a) =>
       (a.status as string) === "off" ? { ...a, status: "weekly_off" as const } : a
@@ -963,7 +962,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             description: req.description,
             qty: req.qty,
             urgent: req.urgent,
-            status: "open",
+            status: "sic_pending",
+            action: "issue",
             sourceDprId: id,
           },
           ...equipmentRequests,
@@ -2372,7 +2372,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           createdAt: now,
           updatedAt: now,
           createdBy: s.currentUserId ?? s.currentAccountId ?? "unknown",
-          status: input.status ?? "open",
+          status: input.status ?? "sic_pending",
+          action: input.action ?? "issue",
         };
         const next = {
           ...s,
@@ -2397,48 +2398,48 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     []
   );
 
-  const updateEquipmentRequest = useCallback(
-    (
-      id: string,
-      patch: Partial<
-        Pick<
-          EquipmentRequest,
-          "status" | "fulfillNote" | "qty" | "description" | "urgent"
-        >
-      >
-    ) => {
-      setState((s) => {
-        if (!can(s, "requests", "update") && !can(s, "requests", "approve")) return s;
-        const existing = s.equipmentRequests.find((r) => r.id === id);
-        if (!existing) return s;
-        const now = new Date().toISOString();
-        const equipmentRequests = s.equipmentRequests.map((r) => {
-          if (r.id !== id) return r;
-          const next = { ...r, ...patch, updatedAt: now };
-          if (patch.status === "fulfilled") {
-            next.fulfilledBy = s.currentUserId ?? undefined;
-            next.fulfilledAt = now;
-          }
-          return next;
-        });
-        const next = { ...s, equipmentRequests };
-        return {
-          ...next,
-          auditLog: [
-            makeAudit(
-              next,
-              "requests",
-              patch.status === "fulfilled" ? "approve" : "update",
-              `${id} · ${patch.status ?? "edit"}`,
-              existing.plant
-            ),
-            ...s.auditLog,
-          ],
-        };
+  /** One step on a request (docs §9, B06): SIC approve / reject, store fulfil / not fulfilled, requester received. */
+  const stepEquipmentRequest = useCallback((id: string, action: RequestAction, note: string) => {
+    const cur = stateRef.current;
+    const r = cur.equipmentRequests.find((x) => x.id === id);
+    if (!r) return { ok: false as const, error: "Request not found" };
+    const allowed =
+      action === "approve" || action === "reject"
+        ? can(cur, "requests", "approve")
+        : action === "received"
+          ? r.createdBy === cur.currentUserId || can(cur, "requests", "approve")
+          : can(cur, "requests", "update") || can(cur, "requests", "approve");
+    if (!allowed) return DENIED;
+    const block = stepBlock(r, action, note);
+    if (block) return { ok: false as const, error: block };
+    const now = new Date().toISOString();
+    const by = cur.currentUserId ?? undefined;
+    const step = REQUEST_STEPS[action];
+    setState((s) => {
+      const equipmentRequests = s.equipmentRequests.map((x) => {
+        if (x.id !== id) return x;
+        const next: EquipmentRequest = { ...x, status: step.to, updatedAt: now };
+        if (action === "approve" || action === "reject") {
+          next.sicBy = by;
+          next.sicAt = now;
+          if (action === "reject") next.sicNote = note.trim();
+        }
+        if (action === "fulfil" || action === "not_fulfilled") {
+          next.fulfilledBy = by;
+          next.fulfilledAt = now;
+          next.fulfillNote = note.trim() || (action === "fulfil" ? "Issued from store" : undefined);
+        }
+        if (action === "received") next.receivedAt = now;
+        return next;
       });
-    },
-    []
-  );
+      const next = { ...s, equipmentRequests };
+      return {
+        ...next,
+        auditLog: [makeAudit(next, "requests", action, `${r.description} · ${REQUEST_STATUS_LABEL[step.to]}${note.trim() ? ` · ${note.trim()}` : ""}`, r.plant), ...s.auditLog],
+      };
+    });
+    return { ok: true as const, status: step.to };
+  }, []);
 
   const applyTelegram = useCallback(
     (input: {
@@ -2738,7 +2739,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       startImpersonation,
       endImpersonation,
       createEquipmentRequest,
-      updateEquipmentRequest,
+      stepEquipmentRequest,
     }),
     [
       state,
@@ -2801,7 +2802,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       startImpersonation,
       endImpersonation,
       createEquipmentRequest,
-      updateEquipmentRequest,
+      stepEquipmentRequest,
     ]
   );
 

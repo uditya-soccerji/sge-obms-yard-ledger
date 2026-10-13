@@ -78,7 +78,7 @@ const ROLE_MATRIX: Record<RoleId, Partial<Record<ModuleId, PermissionAction[]>>>
     safety: ["view"],
     finance: ["view"],
     calculators: ["view"],
-    requests: ["view"],
+    requests: ["view", "approve"],
     submissions: ["view"],
     rates: ["view"],
   },
@@ -127,7 +127,8 @@ const ROLE_MATRIX: Record<RoleId, Partial<Record<ModuleId, PermissionAction[]>>>
     equipment: ["view", "create", "update"],
     store: ["view", "create", "update", "submit"],
     dpr: ["view", "create", "update", "submit", "upload"],
-    requests: ["view", "update", "approve"],
+    // Store fulfils; the SIC approves (docs §9, B06)
+    requests: ["view", "update"],
     calculators: ["view"],
     submissions: ["view", "create", "submit"],
   },

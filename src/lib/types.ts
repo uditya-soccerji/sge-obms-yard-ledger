@@ -86,11 +86,14 @@ export interface AuditEntry {
   impersonatedBy?: string | null;
 }
 
+/** docs §9 (B06): SIC approves → store fulfils (or can't) → requester confirms received */
 export type EquipmentRequestStatus =
-  | "open"
-  | "fulfilling"
+  | "sic_pending"
+  | "approved"
   | "fulfilled"
-  | "cancelled";
+  | "not_fulfilled"
+  | "rejected"
+  | "received";
 
 export interface EquipmentRequest {
   id: string;
@@ -108,6 +111,15 @@ export interface EquipmentRequest {
   fulfilledAt?: string;
   fulfillNote?: string;
   sourceDprId?: string;
+  /** Issue new, or exchange an item from the requester's setup (B06) */
+  action?: "issue" | "exchange";
+  /** Exchange: the setup item being handed back */
+  exchangeItemId?: string;
+  sicBy?: string;
+  sicAt?: string;
+  /** Reason when rejected */
+  sicNote?: string;
+  receivedAt?: string;
 }
 
 export type SupervisorType =

@@ -14,7 +14,7 @@ Screenshots, when saved as files, go in `docs/bugs/` as `B<nn>-<n>.png`. Never i
 | B03 | 2026-10-13 | Supervisor (Prasan Da, viewed as) · MTF · DPR → New | New supervisor's DPR shows an empty Labour attendance, and there's no way to give them labourers | fixed (shared database still to do) |
 | B04 | 2026-10-13 | Admin · DPR approvals | Admin approves DPR work quantities on SIC's behalf; both logged | fixed |
 | B05 | 2026-10-13 | Supervisor · DPR → Equipment assigned | Equipment needs a detailed per-supervisor "setup" list (kinds, expiry, FEFO/FIFO), with expiry added by the supervisor | fixed |
-| B06 | 2026-10-13 | Store / Central store · dashboard | Equipment status changes reach SIC + site store + central store; requests board with urgent first and status buttons | open (ready to build) |
+| B06 | 2026-10-13 | Store / Central store · dashboard | Equipment status changes reach SIC + site store + central store; requests board with urgent first and status buttons | fixed |
 | B07 | 2026-10-13 | Supervisor (Prasan Da) · MTF · DPR → Painting/blasting work | Line needs plant, location, activity, area m², MPS, paint type and litres per paint type | fixed |
 | B08 | 2026-10-13 | Supervisor · DPR → Save / Submit | Save and Submit should notify SIC and Admin | fixed |
 
@@ -184,6 +184,22 @@ Screenshots, when saved as files, go in `docs/bugs/` as `B<nn>-<n>.png`. Never i
 - Today: there's one `store` role (site-scoped) and no central store. `EquipmentRequestStatus` is open / fulfilling / fulfilled / cancelled, with no SIC-approval or reject step, although §9 says "Open → SIC approves → store fulfils → requester confirms". Requests have `kind` spare/equipment/material/other, with no "exchange".
 - Fix plan: request statuses `sic_pending → approved → fulfilled | not_fulfilled | rejected` (reason required for reject / not fulfilled, §9), kind + `issue | exchange`. A store dashboard board sorted urgent-first with those filters. Events `equipment_status` (to SIC + site store + central store) and `request_*` (to requester, SIC, store).
 - Answer (2026-10-13): the **Central store manager is a Store login with access to all sites** (one site at a time, like HR / Finance, §2). No new role. Notifications go to every Store login whose sites include the item's site, so the central one hears about all sites.
+
+- Fix (2026-10-13, branch `fix/bugs-2026-10-13`):
+  - Statuses (`EquipmentRequestStatus`): `sic_pending → approved → fulfilled | not_fulfilled`, or `rejected`; then `received`. Old `open / fulfilling / cancelled` are mapped on load (`migrateRequestStatus`), and the seeds are updated. Requests also carry `action: issue | exchange` + `exchangeItemId` (the setup item handed back), `sicBy / sicAt / sicNote`, `receivedAt`.
+  - Rules in `src/lib/requests.ts` (pure): `REQUEST_STEPS` (from-status, to-status, note required for reject / not fulfilled, §9), `stepBlock`, `sortBoard` (urgent first, then oldest), `filterBoard`, `BOARD_FILTERS`.
+  - Rights: SIC `requests: view, approve` (approve / reject); Store `requests: view, update` (fulfil / not fulfilled, **no longer** SIC-approve); the requester confirms **Received**.
+  - Store action `stepEquipmentRequest(id, action, note)` replaces the old free-form `updateEquipmentRequest`; each step writes the audit log. DPR-raised requests start at "SIC approval pending".
+  - **Requests board** (`src/components/requests/requests-board.tsx`): urgent first (urgent open rows highlighted), filter buttons with counts (All open, SIC approval pending, To fulfil, Fulfilled, Not fulfilled, Rejected), and only the buttons the viewer may use. It's the top panel of the **Store dashboard** ("Requests to handle") and of Operations → Requests. A new **Requests** tab for SIC and Owner.
+  - Request form: Issue / Exchange; for an exchange, pick the item from your setup (B05). Plant from the site's Master Data plants (no more hard-coded CPP; falls back to the site's plants when a login's assigned plants no longer exist).
+  - Bell: `request_raised` (SIC + store; urgent = problem) and `request_step` (requester + SIC + store; reject / not fulfilled = problem), all instant. The central store is a Store login on all sites, so it sees every site.
+- Verified on `npm run dev` (local data):
+  - As @paint (V. Chauhan): plant list = DTA's Master Data plants. Sent an **urgent exchange** (handing back CMP-DTA-01) and a spray-tips request → both "SIC approval pending". His board shows them (own requests show even outside his plant scope).
+  - As @sic: Requests tab, no request form; approved the exchange → "Approved — to fulfil"; Reject without a reason → "Give a reason to reject"; with a reason → rejected, `sicNote` kept.
+  - As @store: the Store page opens with "Requests to handle", urgent first. No buttons on SIC-pending items (the store can't SIC-approve). Marked the exchange **Fulfilled**; the Rejected filter shows "Rejected: Tips already in store bin B4".
+  - As @paint: **Received** → status received. The bell showed every step (raised, approved, rejected = PROBLEM, fulfilled, received). Audit lists create → approve → reject → fulfil → received.
+  - `tsc` + `eslint src` clean; no console errors.
+- Not done: requests, like equipment, are still saved per browser (not Supabase).
 
 ### B07: Painting/blasting line fields
 - Ask: each painting & blasting work line has **Plant name, Location, Activity, Area m², MPS, Paint type, and litres consumed per paint type**.
