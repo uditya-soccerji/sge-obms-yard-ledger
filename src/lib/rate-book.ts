@@ -133,29 +133,38 @@ export function resolveActivityRate(
   );
 }
 
-/** Mark older same-key lines superseded after inserting a newer line. */
+/**
+ * Mark older same-key lines superseded after inserting a newer line — only
+ * for the sites the new line covers. An older DTA+MTF line hit by a DTA-only
+ * rate is split: it stays current for MTF and is superseded for DTA.
+ */
 export function withSupersession(
   existing: RateLine[],
   incoming: RateLine
 ): RateLine[] {
-  return existing.map((l) => {
-    if (l.id === incoming.id) return l;
+  return existing.flatMap((l) => {
+    if (l.id === incoming.id) return [l];
     const sameItem =
       l.itemKey.trim().toLowerCase() === incoming.itemKey.trim().toLowerCase() &&
       l.uom.trim().toLowerCase() === incoming.uom.trim().toLowerCase();
-    if (!sameItem) return l;
-    const sharesSite = l.siteIds.some((s) => incoming.siteIds.includes(s));
-    if (!sharesSite) return l;
+    if (!sameItem || l.superseded) return [l];
+    const shared = l.siteIds.filter((s) => incoming.siteIds.includes(s));
+    if (!shared.length) return [l];
     if (l.effectiveFrom < incoming.effectiveFrom) {
-      return { ...l, superseded: true };
+      const rest = l.siteIds.filter((s) => !incoming.siteIds.includes(s));
+      if (!rest.length) return [{ ...l, superseded: true }];
+      return [
+        { ...l, siteIds: shared, superseded: true },
+        { ...l, id: `${l.id}-${rest.join("-")}`, siteIds: rest },
+      ];
     }
     if (
       l.effectiveFrom === incoming.effectiveFrom &&
       l.id !== incoming.id
     ) {
-      // Same date: keep both current unless explicitly older id — leave as-is
-      return l;
+      // Same date: keep both current; latestRate takes the later one
+      return [l];
     }
-    return l;
+    return [l];
   });
 }

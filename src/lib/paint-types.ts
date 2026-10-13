@@ -42,4 +42,6 @@ export interface CalcResult {
   isNoNorm: boolean;
   status: SchemeStatus;
   flaggedForOwner: boolean;
+  /** Coats with no norm for this method; the total leaves them out */
+  partial?: string[];
 }

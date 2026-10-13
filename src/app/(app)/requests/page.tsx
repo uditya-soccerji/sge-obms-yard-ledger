@@ -30,32 +30,51 @@ const TONE: Record<
   "ok" | "warn" | "accent" | "default" | "crit"
 > = {
   open: "warn",
+  sic_approved: "accent",
   fulfilling: "accent",
   fulfilled: "ok",
+  part_filled: "warn",
+  received: "ok",
   cancelled: "default",
 };
+
+const LABEL: Record<EquipmentRequest["status"], string> = {
+  open: "Waiting for SIC",
+  sic_approved: "SIC approved",
+  fulfilling: "Store working on it",
+  fulfilled: "Fulfilled — confirm receipt",
+  part_filled: "Part filled — confirm receipt",
+  received: "Received",
+  cancelled: "Cancelled",
+};
+
+/** Whole days since the request was raised */
+const ageDays = (iso: string) => Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 86400000));
 
 export default function RequestsDeskPage() {
   const {
     state,
     currentAccount,
     createEquipmentRequest,
-    updateEquipmentRequest,
+    actOnRequest,
   } = useStore();
   const role = state.currentRole;
   const canView = canViewModule(currentAccount, role, "requests");
   const canCreate = effectivePermission(currentAccount, role, "requests", "create");
-  const canFulfill = effectivePermission(currentAccount, role, "requests", "approve") ||
-    effectivePermission(currentAccount, role, "requests", "update");
+  const canApprove = effectivePermission(currentAccount, role, "requests", "approve");
+  const canFulfill = effectivePermission(currentAccount, role, "requests", "update");
+  const me = state.currentUserId ?? state.currentAccountId;
+  const [notes, setNotes] = useState<Record<string, string>>({});
 
   const scope = plantScopeFor(currentAccount, role);
+  // Plants come from the site being entered for, limited to the user's plant scope
+  const sitePlants = state.sites.find((x) => x.id === entrySiteId(state))?.plants ?? [];
+  const plantOptions = scope === "all" ? sitePlants : sitePlants.filter((p) => scope.includes(p));
 
   const [kind, setKind] = useState<EquipmentRequest["kind"]>("spare");
   const [description, setDescription] = useState("");
   const [qty, setQty] = useState("1");
-  const [plant, setPlant] = useState(
-    currentAccount?.plantIds[0] ?? "CPP"
-  );
+  const [plant, setPlant] = useState("");
   const [urgent, setUrgent] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
@@ -66,7 +85,14 @@ export default function RequestsDeskPage() {
     });
   }, [state.equipmentRequests, scope]);
 
-  const openCount = list.filter((r) => r.status === "open" || r.status === "fulfilling").length;
+  const openCount = list.filter((r) => ["open", "sic_approved", "fulfilling"].includes(r.status)).length;
+  const chosenPlant = plantOptions.includes(plant) ? plant : plantOptions[0] ?? "";
+
+  function act(id: string, action: Parameters<typeof actOnRequest>[1]) {
+    const res = actOnRequest(id, action, notes[id]);
+    setMsg(res.ok ? "Updated." : res.error ?? "Couldn't update");
+    if (res.ok) setNotes((n) => ({ ...n, [id]: "" }));
+  }
 
   if (!canView) {
     return (
@@ -80,23 +106,26 @@ export default function RequestsDeskPage() {
   function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!canCreate || !description.trim()) return;
+    if (!chosenPlant) return setMsg("This site has no plants set up — add them in Master Data first.");
+    const q = Number(qty);
+    if (!(q >= 1)) return setMsg("Quantity must be at least 1.");
     createEquipmentRequest({
       siteId: entrySiteId(state),
-      plant,
+      plant: chosenPlant,
       kind,
       description: description.trim(),
-      qty: Number(qty) || undefined,
+      qty: q,
       urgent,
     });
     setDescription("");
-    setMsg("Request created — visible to Store and SIC.");
+    setMsg("Request raised — the SIC approves it, then the store fulfils it.");
   }
 
   return (
     <div className="sge-enter space-y-6">
       <SectionHeader
         title="Equipment & spare requests"
-        subtitle="Desk outside DPR — supervisors/safety create; Store fulfills; SIC sees open queue."
+        subtitle="Raise → SIC approves → store fulfils (in full or part) → you confirm it arrived."
       />
 
       <div className="grid gap-3 sm:grid-cols-3">
@@ -138,12 +167,12 @@ export default function RequestsDeskPage() {
               </div>
               <div>
                 <Label>Plant</Label>
-                <Select value={plant} onValueChange={setPlant}>
+                <Select value={chosenPlant} onValueChange={setPlant}>
                   <SelectTrigger className="mt-1">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {(scope === "all" ? ["CPP", "CPP-flare"] : scope).map((p) => (
+                    {plantOptions.map((p) => (
                       <SelectItem key={p} value={p}>
                         {p}
                       </SelectItem>
@@ -165,6 +194,8 @@ export default function RequestsDeskPage() {
                   <Label>Qty</Label>
                   <Input
                     className="mt-1"
+                    type="number"
+                    min={1}
                     value={qty}
                     onChange={(e) => setQty(e.target.value)}
                   />
@@ -208,46 +239,42 @@ export default function RequestsDeskPage() {
                           </span>
                         ) : null}
                       </div>
-                      <StatusPill tone={TONE[r.status]}>{r.status}</StatusPill>
+                      <StatusPill tone={TONE[r.status]}>{LABEL[r.status] ?? r.status}</StatusPill>
                     </div>
                     <div className="mt-1 text-xs text-[var(--sge-ink-3)]">
                       {r.kind} · {r.plant} · qty {r.qty ?? "—"} · by {creator}
                       {r.sourceDprId ? ` · from ${r.sourceDprId}` : ""}
+                      {["open", "sic_approved", "fulfilling"].includes(r.status) ? ` · ${ageDays(r.createdAt)} day(s) old` : ""}
                     </div>
-                    {canFulfill && r.status !== "fulfilled" && r.status !== "cancelled" ? (
-                      <div className="mt-2 flex flex-wrap gap-2">
-                        {r.status === "open" ? (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() =>
-                              updateEquipmentRequest(r.id, { status: "fulfilling" })
-                            }
-                          >
-                            Start fulfill
-                          </Button>
-                        ) : null}
-                        <Button
-                          size="sm"
-                          onClick={() =>
-                            updateEquipmentRequest(r.id, {
-                              status: "fulfilled",
-                              fulfillNote: "Issued from store",
-                            })
-                          }
-                        >
-                          Mark fulfilled
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          onClick={() =>
-                            updateEquipmentRequest(r.id, { status: "cancelled" })
-                          }
-                        >
-                          Cancel
-                        </Button>
-                      </div>
+                    {(() => {
+                      const buttons: [Parameters<typeof actOnRequest>[1], string, "default" | "outline" | "ghost"][] = [];
+                      if (canApprove && r.status === "open") buttons.push(["approve", "Approve", "default"]);
+                      if (canFulfill && r.status === "sic_approved") buttons.push(["start", "Start", "outline"]);
+                      if (canFulfill && (r.status === "sic_approved" || r.status === "fulfilling")) buttons.push(["fulfil", "Fulfilled in full", "default"], ["part_fill", "Part filled", "outline"]);
+                      if ((canApprove || canFulfill || r.createdBy === me) && ["open", "sic_approved", "fulfilling"].includes(r.status)) buttons.push(["cancel", "Cancel", "ghost"]);
+                      if ((r.createdBy === me || role === "super_admin") && (r.status === "fulfilled" || r.status === "part_filled")) buttons.push(["receive", "Confirm received", "default"]);
+                      if (!buttons.length) return null;
+                      return (
+                        <div className="mt-2 space-y-2">
+                          {buttons.some(([a]) => a === "part_fill" || a === "cancel") ? (
+                            <Input
+                              placeholder="Note — needed for part fill or cancel"
+                              value={notes[r.id] ?? ""}
+                              onChange={(e) => setNotes((n) => ({ ...n, [r.id]: e.target.value }))}
+                            />
+                          ) : null}
+                          <div className="flex flex-wrap gap-2">
+                            {buttons.map(([a, label, variant]) => (
+                              <Button key={a} size="sm" variant={variant} onClick={() => act(r.id, a)}>
+                                {label}
+                              </Button>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })()}
+                    {r.cancelNote ? (
+                      <div className="mt-1 text-xs text-[var(--sge-warn)]">Note: {r.cancelNote}</div>
                     ) : null}
                     {r.fulfillNote ? (
                       <div className="mt-1 text-xs text-[var(--sge-ok)]">

@@ -96,9 +96,10 @@ interface StoreApi {
     date?: string
   ) => { ok: boolean; error?: string };
   /** siteId defaults to the entry site (active site, or the All sites pick). */
+  /** Ledger entry with the docs §8 fields; returns why it was refused */
   addFinance: (
     entry: Omit<FinanceEntry, "id" | "siteId" | "enteredBy"> & { siteId?: string }
-  ) => void;
+  ) => { ok: boolean; error?: string };
   toggleSafetyItem: (dayId: string, itemId: number) => void;
   signSafetyDay: (dayId: string) => void;
   applyTelegram: (input: {
@@ -107,7 +108,12 @@ interface StoreApi {
     content: string;
     mappedEntity: DraftEntityKind;
   }) => TelegramDraft;
-  advancePaintStage: (lineId: string) => void;
+  /** Move a paint line one stage on; refused until that stage's details are in (docs §6) */
+  advancePaintStage: (lineId: string) => { ok: boolean; error?: string };
+  /** Supervisor reports a fault; the store marks it repaired (docs §7) */
+  setEquipmentStatus: (id: string, status: "ok" | "due" | "fault", note?: string) => { ok: boolean; error?: string };
+  /** Request flow (docs §9): approve, start, fulfil, part_fill, cancel, receive */
+  actOnRequest: (id: string, action: RequestAction, note?: string) => { ok: boolean; error?: string };
   updatePaintLine: (
     lineId: string,
     patch: Partial<
@@ -221,6 +227,8 @@ interface StoreApi {
     patch: Partial<Pick<EquipmentRequest, "status" | "fulfillNote" | "qty" | "description" | "urgent">>
   ) => void;
 }
+
+export type RequestAction = "approve" | "start" | "fulfil" | "part_fill" | "cancel" | "receive";
 
 const StoreContext = createContext<StoreApi | null>(null);
 
@@ -713,18 +721,28 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const addFinance = useCallback(
     (entry: Omit<FinanceEntry, "id" | "siteId" | "enteredBy"> & { siteId?: string }) => {
-      setState((s) => !can(s, "finance", "create") || !(entry.amount > 0) ? s : ({
-        ...s,
-        finance: [
-          {
-            ...entry,
-            id: uid("fin"),
-            siteId: entry.siteId ?? entrySiteId(s),
-            enteredBy: s.currentUserId ?? "system",
-          },
-          ...s.finance,
-        ],
-      }));
+      if (!can(stateRef.current, "finance", "create")) return DENIED;
+      // docs §8: date, time, amount, category, vendor, payment mode, remark
+      if (!(entry.amount > 0)) return { ok: false, error: "Amount must be above zero" };
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(entry.date) || entry.date > todayDate()) return { ok: false, error: "Pick a date that isn't in the future" };
+      if (!entry.time) return { ok: false, error: "Enter the time" };
+      if (!entry.category.trim()) return { ok: false, error: "Pick a category" };
+      if (!entry.vendor?.trim()) return { ok: false, error: "Enter who paid or was paid" };
+      if (!entry.paymentMode) return { ok: false, error: "Pick the payment mode" };
+      if (!entry.description.trim()) return { ok: false, error: "Add a remark" };
+      setState((s) => {
+        const row: FinanceEntry = {
+          ...entry,
+          vendor: entry.vendor?.trim(),
+          description: entry.description.trim(),
+          id: uid("fin"),
+          siteId: entry.siteId ?? entrySiteId(s),
+          enteredBy: s.currentUserId ?? "system",
+        };
+        const next = { ...s, finance: [row, ...s.finance] };
+        return { ...next, auditLog: [makeAudit(next, "finance", "create", `${row.kind} ₹${row.amount.toLocaleString("en-IN")} · ${row.category} · ${row.vendor}`), ...s.auditLog] };
+      });
+      return { ok: true };
     },
     []
   );
@@ -756,6 +774,17 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const advancePaintStage = useCallback((lineId: string) => {
+    const cur = stateRef.current;
+    if (!can(cur, "store", "update")) return DENIED;
+    const line = cur.paintStock.find((l) => l.id === lineId);
+    if (!line) return { ok: false, error: "Line not found" };
+    const at = PAINT_STAGE_ORDER.indexOf(line.stage);
+    if (at < 0 || at >= PAINT_STAGE_ORDER.length - 1) return { ok: false, error: "Already at the last stage" };
+    const to = PAINT_STAGE_ORDER[at + 1];
+    // docs §6: issue needs a supervisor and the 941 no.; posting needs 942 and RIL's litres
+    if (to === "issued" && (!line.issuedTo || !line.movement941?.trim())) return { ok: false, error: "Pick the supervisor and enter the 941 issue no. before issuing" };
+    if (to === "issued" && !(line.qtyLitres > 0)) return { ok: false, error: "No litres on this line to issue" };
+    if (to === "posted" && (!line.movement942?.trim() || line.rilPosted == null)) return { ok: false, error: "Enter the 942 no. and RIL's posted litres before posting" };
     setState((s) => {
       if (!can(s, "store", "update")) return s;
       const current = s.paintStock.find((l) => l.id === lineId);
@@ -787,6 +816,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         ],
       };
     });
+    return { ok: true };
   }, []);
 
   const updatePaintLine = useCallback(
@@ -807,6 +837,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     ) => {
       setState((s) => {
         if (!can(s, "store", "update")) return s;
+        const before = s.paintStock.find((l) => l.id === lineId);
+        // Nothing changed → nothing to save or log
+        if (!before || (Object.keys(patch) as (keyof typeof patch)[]).every((k) => before[k] === patch[k])) return s;
         const paintStock = s.paintStock.map((line) =>
           line.id === lineId
             ? {
@@ -2139,6 +2172,60 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     []
   );
 
+  const actOnRequest = useCallback((id: string, action: RequestAction, note?: string) => {
+    const cur = stateRef.current;
+    const r = cur.equipmentRequests.find((x) => x.id === id);
+    if (!r) return { ok: false, error: "Request not found" };
+    const why = note?.trim();
+    const mine = r.createdBy === (cur.currentUserId ?? cur.currentAccountId);
+    // Who may do what, from which status (docs §9)
+    const rules: Record<RequestAction, { from: EquipmentRequestStatus[]; to: EquipmentRequestStatus; allowed: boolean; needsNote?: boolean }> = {
+      approve: { from: ["open"], to: "sic_approved", allowed: can(cur, "requests", "approve") },
+      start: { from: ["sic_approved"], to: "fulfilling", allowed: can(cur, "requests", "update") },
+      fulfil: { from: ["sic_approved", "fulfilling"], to: "fulfilled", allowed: can(cur, "requests", "update") },
+      part_fill: { from: ["sic_approved", "fulfilling"], to: "part_filled", allowed: can(cur, "requests", "update"), needsNote: true },
+      cancel: { from: ["open", "sic_approved", "fulfilling"], to: "cancelled", allowed: can(cur, "requests", "approve") || can(cur, "requests", "update") || mine, needsNote: true },
+      receive: { from: ["fulfilled", "part_filled"], to: "received", allowed: mine || cur.currentRole === "super_admin" },
+    };
+    const rule = rules[action];
+    if (!rule.allowed) return { ok: false, error: action === "receive" ? "Only the person who raised it confirms it was received" : "Your role can't do this" };
+    if (!rule.from.includes(r.status)) return { ok: false, error: `Can't ${action.replace("_", " ")} a request that is ${r.status.replace("_", " ")}` };
+    if (rule.needsNote && !why) return { ok: false, error: "Give a note (what was short, or why it's cancelled)" };
+    setState((s) => {
+      const now = new Date().toISOString();
+      const by = s.currentUserId ?? s.currentAccountId ?? undefined;
+      const equipmentRequests = s.equipmentRequests.map((x) => {
+        if (x.id !== id) return x;
+        const next: EquipmentRequest = { ...x, status: rule.to, updatedAt: now };
+        if (action === "approve") Object.assign(next, { approvedBy: by, approvedAt: now });
+        if (action === "fulfil" || action === "part_fill") Object.assign(next, { fulfilledBy: by, fulfilledAt: now, fulfillNote: why || "Issued from store" });
+        if (action === "part_fill" || action === "cancel") next.cancelNote = why;
+        if (action === "receive") next.receivedAt = now;
+        return next;
+      });
+      const next = { ...s, equipmentRequests };
+      return { ...next, auditLog: [makeAudit(next, "requests", action === "approve" ? "approve" : "update", `${r.description} · ${r.status} → ${rule.to}${why ? ` · ${why}` : ""}`, r.plant), ...s.auditLog] };
+    });
+    return { ok: true };
+  }, []);
+
+  const setEquipmentStatus = useCallback((id: string, status: "ok" | "due" | "fault", note?: string) => {
+    const cur = stateRef.current;
+    const eq = cur.equipment.find((e) => e.id === id);
+    if (!eq) return { ok: false, error: "Equipment not found" };
+    const role = cur.currentRole;
+    // docs §7: a supervisor flags a fault; the store repairs and changes the status back
+    if (status === "fault" && role !== "supervisor" && role !== "store" && role !== "super_admin") return { ok: false, error: "Supervisors (or the store) report faults" };
+    if (status !== "fault" && role !== "store" && role !== "super_admin") return { ok: false, error: "Only the store marks kit repaired" };
+    if (status === "fault" && !note?.trim()) return { ok: false, error: "Say what's wrong with it" };
+    setState((s) => {
+      const equipment = s.equipment.map((e) => (e.id === id ? { ...e, status, faultNote: status === "fault" ? note!.trim() : undefined, lastCheck: todayDate() } : e));
+      const next = { ...s, equipment };
+      return { ...next, auditLog: [makeAudit(next, "store", "update", `${eq.tag}: ${eq.status} → ${status}${note?.trim() ? ` · ${note.trim()}` : ""}`), ...s.auditLog] };
+    });
+    return { ok: true };
+  }, []);
+
   const updateEquipmentRequest = useCallback(
     (
       id: string,
@@ -2205,7 +2292,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         const today = todayDate();
 
         if (input.mappedEntity === "attendance") {
-          const labourer = next.labourers[0];
+          // Mark only the labourer the message names (EP or name); otherwise leave it for review
+          const text = input.content.toUpperCase();
+          const labourer = next.labourers.find(
+            (l) => (l.epNumber && text.includes(l.epNumber.toUpperCase())) || text.includes(l.name.toUpperCase())
+          );
+          if (!labourer) draft.status = "needs_review";
           if (labourer) {
             const record: AttendanceRecord = {
               id: uid("att"),
@@ -2301,10 +2393,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         }
 
         if (input.mappedEntity === "expense") {
-          const amountMatch = input.content.match(/(\d[\d,]*)/);
-          const amount = amountMatch
-            ? Number(amountMatch[1].replace(/,/g, ""))
-            : 0;
+          // Prefer a number marked as money (₹ / Rs / INR); else the largest number in the message
+          const money = input.content.match(/(?:₹|rs\.?|inr)\s*([\d,]+(?:\.\d+)?)/i);
+          const numbers = [...input.content.matchAll(/\d[\d,]*(?:\.\d+)?/g)].map((m) => Number(m[0].replace(/,/g, "")));
+          const amount = money ? Number(money[1].replace(/,/g, "")) : numbers.length ? Math.max(...numbers) : 0;
+          if (!(amount > 0)) draft.status = "needs_review";
           const fin: FinanceEntry = {
             id: uid("fin"),
             date: today,
@@ -2315,8 +2408,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             siteId: entrySiteId(next),
             enteredBy: `telegram:${input.role}`,
           };
-          draft.entityId = fin.id;
-          next = { ...next, finance: [fin, ...next.finance] };
+          // A message with no amount posts nothing; Finance completes it from the draft
+          if (amount > 0) {
+            draft.entityId = fin.id;
+            next = { ...next, finance: [fin, ...next.finance] };
+          }
         }
 
         if (input.mappedEntity === "stock_receipt") {
@@ -2434,6 +2530,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       signSafetyDay,
       applyTelegram,
       advancePaintStage,
+      setEquipmentStatus,
+      actOnRequest,
       updatePaintLine,
       saveDpr,
       submitDpr,
@@ -2489,6 +2587,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       signSafetyDay,
       applyTelegram,
       advancePaintStage,
+      setEquipmentStatus,
+      actOnRequest,
       updatePaintLine,
       saveDpr,
       submitDpr,

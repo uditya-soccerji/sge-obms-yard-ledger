@@ -30,6 +30,9 @@ function CostEstimatePage() {
   const [editId, setEditId] = useState<string | null>(null);
   const [editRate, setEditRate] = useState("");
   const activeSite = entrySiteId(state);
+  // Average daily wage of active labourers — a rough labour cost next to the billing value
+  const active = state.labourers.filter((l) => l.active && l.wageDaily > 0);
+  const avgWage = active.length ? active.reduce((s, l) => s + l.wageDaily, 0) / active.length : 0;
 
   const result = useMemo(
     () =>
@@ -75,22 +78,28 @@ function CostEstimatePage() {
             <Input
               type="number"
               className="mt-1"
+              min={0}
               value={qty}
-              onChange={(e) => setQty(Number(e.target.value))}
+              onChange={(e) => setQty(Math.max(0, Number(e.target.value) || 0))}
             />
           </div>
         </Panel>
 
         <div className="grid gap-3 sm:grid-cols-2">
           <KpiTile
-            label="Estimated cost"
+            label="Billing value (client rate)"
             value={result ? formatINR(result.costInr) : "—"}
             tone="accent"
             hint={
               result
-                ? `${result.quantity} ${result.unit} × ₹${result.rateInr}`
+                ? `${result.quantity} ${result.unit} × ₹${result.rateInr} — what RIL pays, not SGE's cost`
                 : undefined
             }
+          />
+          <KpiTile
+            label="Labour cost (est.)"
+            value={result ? formatINR(Math.round(result.manpowerDays * avgWage)) : "—"}
+            hint={`${result ? result.manpowerDays : 0} crew-days × avg wage ₹${Math.round(avgWage)}`}
           />
           <KpiTile
             label="Paint / material"

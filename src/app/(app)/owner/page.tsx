@@ -17,6 +17,7 @@ import { SiteComparison } from "@/components/owner/site-comparison";
 import { MoneyCard } from "@/components/work/money-card";
 import { ALL_SITES } from "@/lib/site-scope";
 import { useStore } from "@/lib/store";
+import { paintVariance } from "@/lib/paint-variance";
 import { workedCount } from "@/lib/attendance";
 
 function OwnerHomePage() {
@@ -126,11 +127,9 @@ function OwnerHomePage() {
           ) : (
             <div className="space-y-2">
               {varianceLines.map((line) => {
-                const pct =
-                  line.rilPosted && line.sgeUsed != null
-                    ? (((line.sgeUsed - line.rilPosted) / line.rilPosted) * 100).toFixed(1)
-                    : "0";
-                const hot = Math.abs(Number(pct)) >= 8;
+                const v = paintVariance(line, state.masterCatalog.materials);
+                const pct = v ? v.pct.toFixed(1) : "0";
+                const hot = !!v?.over;
                 return (
                   <div
                     key={line.id}
@@ -151,7 +150,7 @@ function OwnerHomePage() {
                         {line.movement261 ? ` · 261 ${line.movement261}` : ""}
                       </div>
                     </div>
-                    <StatusPill tone={hot ? "crit" : "ok"}>{pct}%</StatusPill>
+                    <StatusPill tone={hot ? "crit" : "ok"}>{pct}% (±{v?.tolerance ?? 8}%)</StatusPill>
                   </div>
                 );
               })}

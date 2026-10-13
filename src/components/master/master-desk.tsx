@@ -1082,6 +1082,7 @@ function MaterialsSheet({
             <th>Description</th>
             <th>SAP</th>
             <th>System</th>
+            <th title="Allowed SGE vs RIL difference">Tolerance %</th>
             <th />
           </tr>
         </thead>
@@ -1099,6 +1100,22 @@ function MaterialsSheet({
               </td>
               <td className="font-mono text-xs">{m.sapCode || "—"}</td>
               <td className="text-xs">{m.paintSystem}</td>
+              <td>
+                <Input
+                  type="number"
+                  min={0}
+                  max={50}
+                  className="w-20"
+                  placeholder="8"
+                  value={m.varianceTolerancePct ?? ""}
+                  onChange={(e) =>
+                    upsertMaterial({
+                      ...m,
+                      varianceTolerancePct: e.target.value === "" ? undefined : Math.min(50, Math.max(0, Number(e.target.value))),
+                    })
+                  }
+                />
+              </td>
               <td className="text-right">
                 <Button
                   size="sm"

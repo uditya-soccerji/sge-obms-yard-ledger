@@ -92,7 +92,8 @@ function PaintCalculatorPage() {
                 type="number"
                 className="mt-1"
                 value={area}
-                onChange={(e) => setArea(Number(e.target.value))}
+                min={0}
+                onChange={(e) => setArea(Math.max(0, Number(e.target.value) || 0))}
               />
             </div>
             <div>
@@ -101,7 +102,8 @@ function PaintCalculatorPage() {
                 type="number"
                 className="mt-1"
                 value={contingency}
-                onChange={(e) => setContingency(Number(e.target.value))}
+                min={0}
+                onChange={(e) => setContingency(Math.max(0, Number(e.target.value) || 0))}
               />
             </div>
           </div>
@@ -188,6 +190,11 @@ function PaintCalculatorPage() {
               </div>
             ))}
           </div>
+          {result.partial ? (
+            <div className="mt-4 rounded-md border border-[var(--sge-warn)]/40 bg-[var(--sge-warn-wash)] px-3 py-2 text-xs text-[var(--sge-warn)]">
+              Part total: no {method} norm for {result.partial.join(", ")} — those coats are not in the total. Flagged for the owner.
+            </div>
+          ) : null}
           <div className="mt-4 rounded-md border border-[var(--sge-accent)]/30 bg-[var(--sge-accent-wash)] p-3">
             <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--sge-accent-ink)]">
               Totals (+10% thinner)

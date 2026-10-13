@@ -27,7 +27,8 @@ function AreaScopePage() {
               type="number"
               className="mt-1"
               value={length}
-              onChange={(e) => setLength(Number(e.target.value))}
+              min={0}
+              onChange={(e) => setLength(Math.max(0, Number(e.target.value) || 0))}
             />
           </div>
           <div>
@@ -36,7 +37,8 @@ function AreaScopePage() {
               type="number"
               className="mt-1"
               value={width}
-              onChange={(e) => setWidth(Number(e.target.value))}
+              min={0}
+              onChange={(e) => setWidth(Math.max(0, Number(e.target.value) || 0))}
             />
           </div>
           <div>
@@ -45,7 +47,8 @@ function AreaScopePage() {
               type="number"
               className="mt-1"
               value={faces}
-              onChange={(e) => setFaces(Number(e.target.value))}
+              min={0}
+              onChange={(e) => setFaces(Math.max(0, Number(e.target.value) || 0))}
             />
           </div>
         </div>

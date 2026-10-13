@@ -40,7 +40,7 @@ function SupervisorHomePage() {
   const myPaint = state.paintStock.filter(
     (p) =>
       isPaintSup &&
-      (p.issuedTo === supervisorId || p.issuedTo === "st-sup1") &&
+      p.issuedTo === supervisorId &&
       (p.stage === "issued" || p.stage === "consumed" || p.stage === "reco")
   );
 
