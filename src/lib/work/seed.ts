@@ -22,8 +22,8 @@ import type {
   WorkState,
 } from "./types";
 
-/** v6: per-site months, Admin entries win, JMS status log, void costs, healthy demo paint */
-export const WORK_STORAGE_KEY = "sge-work-v7";
+/** v8: fresh start — a new browser starts on an empty current month; the demo loads from Test tools */
+export const WORK_STORAGE_KEY = "sge-work-v8";
 /** "Today" for the work demo (DPR dates, expiry warnings). */
 export const WORK_TODAY = "2026-09-28";
 
@@ -141,6 +141,30 @@ const CREW_B = ["lb-03", "lb-04", "lb-07"];
 
 const JMS_STATUS_AUG: JmsStatus[] = ["INVOICE UPLOADED", "A3 APR", "A2 APR", "INVOICE UPLOADED", "A1 APR"];
 
+/**
+ * The starting state (merge plan Step 1, Owner decision 1): masters only —
+ * service items and work orders — and nothing done yet. Plan months start at
+ * the month given (the current month).
+ */
+export function createEmptyWork(month: string): WorkState {
+  const demo = createWorkSeed();
+  return {
+    serviceItems: demo.serviceItems,
+    workOrders: demo.workOrders,
+    planLines: [],
+    jobs: [],
+    dprs: [],
+    jms: [],
+    paint: [],
+    expenses: [],
+    events: [],
+    lastSeen: {},
+    siteMonths: {},
+    defaultMonth: month,
+  };
+}
+
+/** The DTA Aug–Sep demo, loaded only from Test tools. */
 export function createWorkSeed(): WorkState {
   const planLines: PlanLine[] = [];
   const jobs: Job[] = [];

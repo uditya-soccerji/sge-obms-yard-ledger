@@ -29,7 +29,7 @@ const VIEW_AS = [
  */
 export function TestTools() {
   const { state, fullState, startImpersonation } = useStore();
-  const { loadScenario, resetWork } = useWork();
+  const { loadScenario, loadDemo, resetWork } = useWork();
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [viewAs, setViewAs] = useState(VIEW_AS[0].id);
@@ -72,7 +72,32 @@ export function TestTools() {
           ) : null}
 
           <div>
-            <div className="mb-1.5 text-[11px] uppercase tracking-wide text-[var(--sge-ink-3)]">Scenarios (start from fresh demo data)</div>
+            <div className="mb-1.5 text-[11px] uppercase tracking-wide text-[var(--sge-ink-3)]">Demo data</div>
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  loadDemo();
+                  setMsg({ ok: true, msg: `DTA Aug–Sep demo loaded; the app date is now ${WORK_TODAY}.` });
+                }}
+              >
+                Load demo (DTA Aug–Sep)
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => {
+                  if (!window.confirm("Start fresh? This empties Work (plan, jobs, DPRs, JMS, paint, costs) and goes back to today's date.")) return;
+                  resetWork();
+                  setMsg({ ok: true, msg: "Started fresh: an empty month on today's date." });
+                }}
+              >
+                Start fresh
+              </Button>
+              <span className="text-[11px] text-[var(--sge-ink-3)]">Work starts empty for real use (merge plan Step 1); the demo is for trying things out.</span>
+            </div>
+            <div className="mb-1.5 text-[11px] uppercase tracking-wide text-[var(--sge-ink-3)]">Scenarios (load the demo, then set up one situation)</div>
             <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
               {SCENARIOS.map((sc) => (
                 <button
@@ -107,18 +132,7 @@ export function TestTools() {
             <p className="mt-1 text-[11px] text-[var(--sge-ink-3)]">The demo data is set in Aug–Sep 2026; the demo date replays it as if it were live. This browser only.</p>
           </div>
 
-          <div className="flex items-center gap-3">
-            <Button
-              variant="ghost"
-              onClick={() => {
-                resetWork();
-                setMsg({ ok: true, msg: "Work demo data reset." });
-              }}
-            >
-              Reset work demo
-            </Button>
-            <Msg text={msg} />
-          </div>
+          <Msg text={msg} />
         </div>
       ) : null}
     </Panel>
