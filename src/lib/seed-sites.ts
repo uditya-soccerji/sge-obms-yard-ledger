@@ -22,8 +22,7 @@ import type {
   FinanceEntry,
   Labourer,
   MaterialTransfer,
-  PaintStockLine,
-  PredictionAlert,
+  PaintLifecycleStage,
   SafetyChecklistDay,
   StaffMember,
   WageLedgerEntry,
@@ -61,7 +60,7 @@ interface SiteProfile {
     desc: string;
     sap: string;
     mps: number;
-    stage: PaintStockLine["stage"];
+    stage: PaintLifecycleStage;
     litres: number;
     sgeUsed?: number;
     rilPosted?: number;
@@ -70,7 +69,7 @@ interface SiteProfile {
   finance: { date: string; kind: FinanceEntry["kind"]; category: string; amount: number; description: string }[];
   billing: { label: string; amount: number; status: "draft" | "submitted" | "approved" | "paid"; period: string }[];
   requests: { kind: EquipmentRequest["kind"]; description: string; qty: number; urgent?: boolean; status: EquipmentRequest["status"] }[];
-  prediction?: Omit<PredictionAlert, "id" | "siteId">;
+  prediction?: { kind: string; severity: "warn" | "crit"; title: string; detail: string; value: number; threshold: number };
   jms?: { label: string; lines: { description: string; activity: "painting" | "blasting" | "scaffolding"; qty: number; unit: "m2" | "m3"; rate: number; claimed: number }[] };
   plans: { task: string; target?: number; status: WorkPlanItem["status"] }[];
   safetyNote: string;
@@ -344,12 +343,10 @@ export interface SiteSeedRows {
   staff: StaffMember[];
   labourers: Labourer[];
   attendance: AttendanceRecord[];
-  paintStock: PaintStockLine[];
   equipment: EquipmentItem[];
   workPlans: WorkPlanItem[];
   safetyDays: SafetyChecklistDay[];
   finance: FinanceEntry[];
-  predictions: PredictionAlert[];
   compliance: ComplianceDoc[];
   transfers: MaterialTransfer[];
   acplMatches: AcplMatchRow[];
@@ -359,8 +356,8 @@ export interface SiteSeedRows {
 
 export function seedOtherSites(): SiteSeedRows {
   const out: SiteSeedRows = {
-    staff: [], labourers: [], attendance: [], paintStock: [], equipment: [],
-    workPlans: [], safetyDays: [], finance: [], predictions: [],
+    staff: [], labourers: [], attendance: [], equipment: [],
+    workPlans: [], safetyDays: [], finance: [],
     compliance: [], transfers: [], acplMatches: [],
     wageLedger: [], equipmentRequests: [],
   };
@@ -422,24 +419,6 @@ export function seedOtherSites(): SiteSeedRows {
       });
     }
 
-    p.paint.forEach((l, i) =>
-      out.paintStock.push({
-        id: `ps-${k}-${i + 1}`,
-        sapCode: l.sap,
-        description: l.desc,
-        mpsScheme: l.mps,
-        batch: `B-${p.code}-${String(1001 + i)}`,
-        stage: l.stage,
-        qtyLitres: l.litres,
-        issuedTo: l.sgeUsed != null ? sup1 : undefined,
-        sgeUsed: l.sgeUsed,
-        rilPosted: l.rilPosted,
-        movement941: l.sgeUsed != null ? `941-2026-${p.code}-${String(310 + i)}` : undefined,
-        siteId: sid,
-        updatedAt: i === 0 ? TODAY : YDAY,
-      })
-    );
-
     p.equipment.forEach((e, i) =>
       out.equipment.push({
         id: `eq-${k}-${i + 1}`,
@@ -479,7 +458,6 @@ export function seedOtherSites(): SiteSeedRows {
       })
     );
 
-    if (p.prediction) out.predictions.push({ id: `pred-${k}`, ...p.prediction, siteId: sid });
 
     p.plans.forEach((w, i) =>
       out.workPlans.push({ id: `wp-${k}-${i + 1}`, date: i ? "2026-10-06" : TODAY, supervisorId: sup1, plant: p.plant, task: w.task, targetM2: w.target, status: w.status, siteId: sid })

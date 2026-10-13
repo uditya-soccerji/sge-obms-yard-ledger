@@ -17,6 +17,7 @@ import type {
   DprReport,
   Jms,
   JmsSubmission,
+  PaintStep,
   JmsStatus,
   Job,
   Member,
@@ -27,7 +28,7 @@ import type {
 } from "./types";
 
 /** v8: fresh start — a new browser starts on an empty current month; the demo loads from Test tools */
-export const WORK_STORAGE_KEY = "sge-work-v10";
+export const WORK_STORAGE_KEY = "sge-work-v11";
 /** "Today" for the work demo (DPR dates, expiry warnings). */
 export const WORK_TODAY = "2026-09-28";
 
@@ -162,6 +163,7 @@ export function createEmptyWork(month: string): WorkState {
     submissions: [],
     jms: [],
     paint: [],
+    paintSteps: [],
     expenses: [],
     events: [],
     lastSeen: {},
@@ -240,6 +242,7 @@ export function createWorkSeed(): WorkState {
     submissions: [],
     jms,
     paint: [],
+    paintSteps: [],
     expenses: [],
     events: [],
     lastSeen: {},
@@ -343,6 +346,13 @@ export function createWorkSeed(): WorkState {
     { id: "pb-11", sap: "2002462154", name: "TYPE 24 PAINT", batch: "12053789", qtyL: 1200, supervisorId: null, mfg: "2026-04-15", expiry: "2027-04-15", siteId: SITE },
   ];
   state.paint = paint;
+  state.paintSteps = demoPaintSteps(state);
+  // On order: one paint at each stage before the SGE store (docs §6)
+  state.paint.push(
+    { id: "pb-ord-1", sap: "2002462162", name: "TYPE 17 PAINT", batch: "", qtyL: 400, supervisorId: null, mfg: "", expiry: "", siteId: SITE, lifecycle: "pr", prNo: "PR-1100452", mps: "MPS-1" },
+    { id: "pb-ord-2", sap: "2002462245", name: "TYPE 6 PAINT", batch: "", qtyL: 300, supervisorId: null, mfg: "", expiry: "", siteId: SITE, lifecycle: "po", prNo: "PR-1100431", poNo: "PO-4500987", mps: "MPS-1" },
+    { id: "pb-ord-3", sap: "2002462154", name: "TYPE 24 PAINT", batch: "B-24-0907", qtyL: 500, supervisorId: null, mfg: "2026-08-20", expiry: "2027-08-19", siteId: SITE, lifecycle: "ril_receive", prNo: "PR-1100388", poNo: "PO-4500951", mps: "MPS-3" },
+  );
 
   state.events = seedEvents(state);
 
@@ -366,6 +376,33 @@ export function createWorkSeed(): WorkState {
   state.reports = demoReports(state);
   state.submissions = demoSubmissions(state);
   return state;
+}
+
+/**
+ * Our 941 for every batch issued in the demo, and August's 942 reco + 261 for
+ * each supervisor · paint with DPR use, with RIL's numbers on most (one 942
+ * carries RIL litres over tolerance, so the variance alert has a case).
+ */
+function demoPaintSteps(w: WorkState): PaintStep[] {
+  const steps: PaintStep[] = [];
+  w.paint.filter((b) => b.supervisorId).forEach((b, i) => {
+    steps.push({ id: `ps-941-${i + 1}`, step: "941", batchId: b.id, supervisorId: b.supervisorId!, sap: b.sap, month: (b.issuedOn ?? WORK_TODAY).slice(0, 7), litres: b.qtyL, date: b.issuedOn ?? WORK_TODAY, by: "A. Joshi", rilRef: i % 3 === 2 ? undefined : `941-2026-${String(8400 + i).padStart(5, "0")}`, rilRefBy: i % 3 === 2 ? undefined : "A. Joshi" });
+  });
+  // August came in as history (JMS, no DPR lines): its use is the JMS m² × the first paint's norm
+  const used = new Map<string, number>();
+  for (const j of w.jms.filter((x) => x.periodTo.startsWith("2026-08"))) {
+    const job = w.jobs.find((x) => x.id === j.jobId);
+    const paint = w.serviceItems.find((x) => x.code === j.serviceCode)?.paints[0];
+    if (!job || !paint || !(paint.normL > 0)) continue;
+    const k = `${job.supervisorId}|${paint.sap}`;
+    used.set(k, round3((used.get(k) ?? 0) + j.qty * paint.normL));
+  }
+  [...used.entries()].forEach(([k, litres], i) => {
+    const [supervisorId, sap] = k.split("|");
+    const reco: PaintStep = { id: `ps-942-${i + 1}`, step: "942", supervisorId, sap, month: "2026-08", litres, date: "2026-09-03", by: "A. Joshi", rilRef: `942-2026-${3100 + i}`, rilRefBy: "A. Joshi", rilLitres: i === 0 ? round3(litres * 0.88) : litres };
+    steps.push(reco, { id: `ps-261-${i + 1}`, step: "261", recoId: reco.id, supervisorId, sap, month: "2026-08", litres, date: "2026-09-05", by: "A. Joshi", rilRef: `261-2026-${5200 + i}`, rilRefBy: "A. Joshi" });
+  });
+  return steps;
 }
 
 /**

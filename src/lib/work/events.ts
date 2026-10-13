@@ -19,6 +19,10 @@ export type EventKind =
   | "plan_added"
   | "month_closed"
   | "paint_issued"
+  | "paint_received"
+  | "paint_stage"
+  | "paint_step"
+  | "paint_variance"
   | "payment_recorded"
   | "payment_cleared"
   | "expense_added"
@@ -77,6 +81,10 @@ export const KIND_LABEL: Record<EventKind, string> = {
   plan_added: "Plan updated",
   month_closed: "Month closed",
   paint_issued: "Paint issued",
+  paint_received: "Paint received",
+  paint_stage: "Paint stage moved",
+  paint_step: "Paint 942 / 261 / RIL ref",
+  paint_variance: "Paint variance over tolerance",
   payment_recorded: "Payment recorded",
   payment_cleared: "Payment cleared",
   expense_added: "Cost added",
@@ -129,6 +137,12 @@ export function isFor(e: WorkEvent, v: Viewer): boolean {
       return v.role === "supervisor" ? mine || e.kind === "month_closed" : v.role === "sic" || v.role === "admin";
     case "paint_issued":
       return mine || v.role === "store";
+    case "paint_received":
+    case "paint_stage":
+    case "paint_step":
+      return v.role === "store";
+    case "paint_variance":
+      return v.role === "store" || v.role === "sic";
     case "payment_recorded":
     case "payment_cleared":
     case "expense_added":

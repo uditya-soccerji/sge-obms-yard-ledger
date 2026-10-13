@@ -105,7 +105,7 @@ const ENTITY_MAP: {
 
 function TelegramPage() {
   const { state, currentAccount, applyTelegram } = useStore();
-  const { telegramToReport } = useWork();
+  const { telegramToReport, receivePaint } = useWork();
   const allowed =
     state.currentRole === "super_admin" ||
     state.currentRole === "owner" ||
@@ -143,6 +143,11 @@ function TelegramPage() {
       mappedEntity,
     });
     setLastId(draft.id);
+    // A stock receipt with litres goes to Work paint as "in RIL store" for the Store to check and move on
+    if (mappedEntity === "stock_receipt") {
+      const litres = Number(content.match(/(\d+(?:\.\d+)?)\s*(?:l|ltr|litres?)\b/i)?.[1] ?? 0);
+      if (litres > 0) receivePaint({ siteId: entrySiteId(state), sap: "TG-RECEIPT", name: `Telegram receipt: ${content.slice(0, 40)}`, batch: "", qtyL: litres, mfg: "", expiry: "", lifecycle: "ril_receive" });
+    }
     // DPR notes and safety observations go on today's daily report in Work (the one DPR)
     if (mappedEntity === "dpr_note" || mappedEntity === "safety_obs") {
       const site = entrySiteId(state);

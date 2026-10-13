@@ -276,28 +276,6 @@ export interface AttendanceRecord {
   correctedFrom?: AttendanceStatus;
 }
 
-export interface PaintStockLine {
-  id: string;
-  sapCode: string;
-  description: string;
-  mpsScheme: number;
-  batch: string;
-  stage: PaintLifecycleStage;
-  qtyLitres: number;
-  issuedTo?: string;
-  /** SGE used litres (DPR × MPS) */
-  sgeUsed?: number;
-  /** RIL posted litres after 942/261 consumption receipt */
-  rilPosted?: number;
-  /** RIL movement 941 — paint issue to supervisor (editable when issued) */
-  movement941?: string;
-  /** RIL movement 942 — consumption after reco (editable when posted) */
-  movement942?: string;
-  /** Related RIL posting 261 (editable when posted) */
-  movement261?: string;
-  siteId: string;
-  updatedAt: string;
-}
 
 export interface EquipmentItem {
   id: string;
@@ -519,18 +497,6 @@ export interface TelegramDraft {
   status: "draft" | "applied" | "needs_review";
 }
 
-export interface PredictionAlert {
-  id: string;
-  kind: "low_stock" | "high_variance" | "scope_slip";
-  severity: "warn" | "crit";
-  title: string;
-  detail: string;
-  value: number;
-  threshold: number;
-  /** Site this row belongs to (unset = company-wide). */
-  siteId?: string;
-}
-
 export interface ComplianceDoc {
   id: string;
   title: string;
@@ -650,13 +616,11 @@ export interface AppState {
   users: UserAccount[];
   labourers: Labourer[];
   attendance: AttendanceRecord[];
-  paintStock: PaintStockLine[];
   equipment: EquipmentItem[];
   workPlans: WorkPlanItem[];
   safetyDays: SafetyChecklistDay[];
   finance: FinanceEntry[];
   telegramDrafts: TelegramDraft[];
-  predictions: PredictionAlert[];
   compliance: ComplianceDoc[];
   transfers: MaterialTransfer[];
   vendors: { id: string; name: string; category: string; status: string }[];

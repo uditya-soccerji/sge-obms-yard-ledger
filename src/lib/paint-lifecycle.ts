@@ -76,12 +76,4 @@ export function allowedDprSubmitterTypes(
   return "all";
 }
 
-export function canEditMovement941(stage: PaintLifecycleStage): boolean {
-  // Filled in before issuing; fixed once the paint is with the supervisor
-  return stage === "sge_receive";
-}
 
-export function canEditMovement942261(stage: PaintLifecycleStage): boolean {
-  // Filled in at reco, needed before posting
-  return stage === "reco";
-}
