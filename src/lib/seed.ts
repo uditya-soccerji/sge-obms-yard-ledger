@@ -1091,11 +1091,6 @@ export function createSeedState(): AppState {
         threshold: 5,
       },
     ],
-    billing: [
-      { id: "bill-1", label: "RA-09 Painting abstract", amount: 485000, status: "submitted", period: "Sep 2026" },
-      { id: "bill-2", label: "RA-08 Scaffolding", amount: 210000, status: "approved", period: "Aug 2026" },
-      { id: "bill-3", label: "RA-10 Blasting (draft)", amount: 96000, status: "draft", period: "Oct 2026" },
-    ],
     compliance: [
       { id: "comp-1", title: "Labour license copy", category: "Statutory", uploadedBy: "st-hr", uploadedAt: YDAY, status: "filed" },
       { id: "comp-2", title: "Insurance — WC policy", category: "Insurance", uploadedBy: "st-hr", uploadedAt: D2, status: "filed" },
@@ -1162,64 +1157,6 @@ export function createSeedState(): AppState {
         resolveStatus: "open",
       },
     ],
-    jmsPackages: [
-      {
-        id: "jms-1",
-        label: "JMS Oct W1 — CPP painting / scaffold",
-        period: "2026-10-W1",
-        uploadedAt: TODAY,
-        uploadedBy: "st-admin",
-        status: "uploaded",
-        financeNotified: true,
-        expectedIncome: 312000,
-        paymentReceived: false,
-        lines: [
-          {
-            id: "jl-1",
-            description: "Pipe rack B-12 painting MPS-2",
-            plant: "COKER",
-            activity: "painting",
-            qty: 400,
-            unit: "m2",
-            rateInr: 450,
-            amountInr: 180000,
-            matchedDprId: "dprd-1",
-            matchedWorkLineId: "pw-1",
-            dprClaimedQty: 420,
-            matchRatio: 0.95,
-          },
-          {
-            id: "jl-2",
-            description: "V-204 blasting SA2.5",
-            plant: "COKER",
-            activity: "blasting",
-            qty: 160,
-            unit: "m2",
-            rateInr: 380,
-            amountInr: 60800,
-            matchedDprId: "dprd-2",
-            matchedWorkLineId: "pw-2",
-            dprClaimedQty: 180,
-            matchRatio: 0.89,
-          },
-          {
-            id: "jl-3",
-            description: "FS-01 standing scaffold",
-            plant: "COKER",
-            activity: "scaffolding",
-            qty: 840,
-            unit: "m3",
-            rateInr: 85,
-            amountInr: 71400,
-            matchedDprId: "dprd-3",
-            matchedWorkLineId: "sw-1",
-            dprClaimedQty: 840,
-            matchRatio: 1,
-          },
-        ],
-      },
-    ],
-    workRatings: [],
     rateCards: [
       {
         id: "rc-1",
@@ -1277,18 +1214,7 @@ export function createSeedState(): AppState {
       { id: "wg-2", labourerId: "lb-03", date: YDAY, kind: "ot", amount: 460, note: "2 hrs OT slag recovery", flaggedToSic: false },
       { id: "wg-3", staffId: "st-sup1", date: D2, kind: "bonus", amount: 5000, note: "Monthly target bonus draft", flaggedToSic: false },
     ],
-    financeAlerts: [
-      {
-        id: "fa-1",
-        createdAt: `${TODAY}T11:00:00Z`,
-        kind: "jms_uploaded",
-        title: "JMS package uploaded",
-        detail: "JMS Oct W1 — CPP painting / scaffold · expected ₹3,12,000",
-        jmsPackageId: "jms-1",
-        acknowledged: false,
-        flaggedToSic: false,
-      },
-    ],
+    financeAlerts: [],
     equipmentRequests: [
       {
         id: "er-1",
@@ -1355,7 +1281,7 @@ export function createSeedState(): AppState {
 /** v9: per-site demo data — a new key so old browsers load the new seed. */
 /** v10: EP numbers in the PP + 10 digit format (docs §1) */
 /** v11: attendance statuses per docs §4, HR on all sites */
-export const STORAGE_KEY = "sge-obms-ops-v13";
+export const STORAGE_KEY = "sge-obms-ops-v14";
 export { SAFETY_ITEMS };
 
 /**
@@ -1392,12 +1318,10 @@ function withOtherSites(base: AppState): AppState {
     safetyDays: [...base.safetyDays, ...more.safetyDays],
     finance: [...base.finance, ...more.finance],
     predictions: [...dta(base.predictions), ...more.predictions],
-    billing: [...dta(base.billing), ...more.billing],
     compliance: [...dta(base.compliance), ...more.compliance],
     transfers: [...dta(base.transfers), ...more.transfers],
     acplPunches: dta(base.acplPunches),
     acplMatches: [...dta(base.acplMatches), ...more.acplMatches],
-    jmsPackages: [...dta(base.jmsPackages), ...more.jmsPackages],
     wageLedger: [...dta(base.wageLedger), ...more.wageLedger],
     financeAlerts: dta(base.financeAlerts),
     equipmentRequests: [...dta(base.equipmentRequests), ...more.equipmentRequests],

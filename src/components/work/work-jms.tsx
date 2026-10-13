@@ -89,6 +89,11 @@ export function WorkJms() {
                     <td className={tdCls + " text-right tabular-nums"}>{formatINR(j.amount)}</td>
                     <td className={tdCls}>
                       <StatusPill tone={j.status === "PAID" ? "ok" : "accent"}>{j.status}</StatusPill>
+                      {j.submissionId ? (
+                        <div className="mt-0.5 text-[10px] text-[var(--sge-ink-3)]">RIL {work.submissions.find((x) => x.id === j.submissionId)?.rilJmsNo} · status from the upload</div>
+                      ) : (
+                        <div className="mt-0.5 text-[10px] text-[var(--sge-warn)]">not submitted to RIL yet</div>
+                      )}
                       {s.canConfirm && nextJmsStatuses(j.status, s.isBoss).length ? (
                         // Only the next RIL stage (Owner / Super Admin may also step back one); PAID comes from Payments
                         <select

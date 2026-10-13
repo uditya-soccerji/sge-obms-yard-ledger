@@ -29,13 +29,13 @@ import { Textarea } from "@/components/ui/textarea";
 import { ALL_SITES, entrySiteId } from "@/lib/site-scope";
 import { MoneyCard } from "@/components/work/money-card";
 import { useStore } from "@/lib/store";
+import { useWork } from "@/lib/work/store";
 import type { WageLedgerEntry } from "@/lib/types";
 
 function FinancePage() {
   const {
     state,
     addFinance,
-    markJmsPayment,
     addWageEntry,
     acknowledgeFinanceAlert,
     flagFinanceAlertToSic,
@@ -64,8 +64,6 @@ function FinancePage() {
   const entrySite = entrySitePick || entrySiteId(state);
   const siteCode = (id: string) => state.sites.find((s) => s.id === id)?.code ?? "";
   const [flagSic, setFlagSic] = useState(false);
-  const [payMsg, setPayMsg] = useState<string | null>(null);
-  const [paying, setPaying] = useState<Record<string, string>>({});
 
   const today = todayDate();
   const todayEntries = state.finance.filter((f) => f.date === today);
@@ -75,11 +73,11 @@ function FinancePage() {
   const incomeToday = todayEntries
     .filter((f) => f.kind === "income")
     .reduce((s, f) => s + f.amount, 0);
-  const expectedJms = state.jmsPackages.reduce(
-    (s, p) => s + p.expectedIncome,
-    0
-  );
-  const unpaid = state.jmsPackages.filter((p) => !p.paymentReceived);
+  // Internal JMS approved by SIC and not paid yet (Work is the one JMS record)
+  const { work } = useWork();
+  const siteOfJms = (planLineId: string) => work.planLines.find((l) => l.id === planLineId)?.siteId ?? "";
+  const unpaid = work.jms.filter((j) => !j.payment && (state.currentSiteId === "all" || siteOfJms(j.planLineId) === state.currentSiteId));
+  const expectedJms = unpaid.reduce((s, j) => s + j.amount, 0);
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -162,7 +160,7 @@ function FinancePage() {
       <Panel>
         <div className="mb-3 flex items-center justify-between">
           <h3 className="font-heading text-sm font-bold">
-            JMS payment tracking
+            JMS approved, not paid yet
           </h3>
           <Link href="/jms">
             <Button size="sm" variant="outline">
@@ -170,68 +168,29 @@ function FinancePage() {
             </Button>
           </Link>
         </div>
-        {payMsg ? <p className="mb-2 text-xs text-[var(--sge-ink-2)]">{payMsg}</p> : null}
-        {state.jmsPackages.length === 0 ? (
-          <EmptyState
-            title="No JMS packages"
-            detail="Admin upload notifies Finance automatically."
-          />
+        {unpaid.length === 0 ? (
+          <EmptyState title="Nothing due" detail="Every SIC-approved JMS has its payment recorded." />
         ) : (
-          state.jmsPackages.map((p) => (
-            <div
-              key={p.id}
-              className="mb-2 flex flex-wrap items-center justify-between gap-2 rounded-md border border-[var(--sge-line)] px-3 py-2 text-sm"
-            >
-              <div>
-                <div className="font-medium">{p.label}</div>
-                <div className="font-mono text-[11px] text-[var(--sge-ink-3)]">
-                  expected {formatINR(p.expectedIncome)} · {p.status}
-                  {p.paymentReceived && p.paymentAmount != null ? ` · received ${formatINR(p.paymentAmount)}` : ""}
+          <div className="space-y-1">
+            {unpaid
+              .slice()
+              .sort((a, b) => a.confirmedOn.localeCompare(b.confirmedOn))
+              .slice(0, 12)
+              .map((j) => (
+                <div key={j.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-[var(--sge-line)] px-3 py-1.5 text-sm">
+                  <span>
+                    JMS {j.jmsNo} · {j.serviceCode} · {j.qty} m²
+                    <span className="ml-1 font-mono text-[11px] text-[var(--sge-ink-3)]">approved {j.confirmedOn} · {j.status}</span>
+                  </span>
+                  <span className="font-mono">{formatINR(j.amount)}</span>
                 </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <StatusPill tone={p.paymentReceived ? "ok" : "warn"}>
-                  {p.paymentReceived ? "received" : "due"}
-                </StatusPill>
-                {!p.paymentReceived && p.status !== "sic_approved" ? (
-                  <span className="text-xs text-[var(--sge-ink-3)]">Waiting for SIC approval</span>
-                ) : null}
-                {!p.paymentReceived && p.status === "sic_approved" ? (
-                  paying[p.id] != null ? (
-                    <form
-                      className="flex items-center gap-1"
-                      onSubmit={(e) => {
-                        e.preventDefault();
-                        const r = markJmsPayment(p.id, true, { amount: Number(paying[p.id]) });
-                        setPayMsg(r.ok ? `Payment recorded for ${p.label}.` : r.error ?? "Couldn't record the payment");
-                        if (r.ok) setPaying((x) => { const n = { ...x }; delete n[p.id]; return n; });
-                      }}
-                    >
-                      <Input className="h-8 w-32" type="number" min="0" step="0.01" aria-label="Amount received" value={paying[p.id]} onChange={(e) => setPaying((x) => ({ ...x, [p.id]: e.target.value }))} />
-                      <Button size="sm" type="submit">Save</Button>
-                    </form>
-                  ) : (
-                    <Button size="sm" onClick={() => setPaying((x) => ({ ...x, [p.id]: String(p.expectedIncome) }))}>
-                      Mark received
-                    </Button>
-                  )
-                ) : null}
-                {!p.paymentReceived && p.status === "sic_approved" ? (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => {
-                      const r = markJmsPayment(p.id, false);
-                      setPayMsg(r.ok ? `${p.label} flagged to SIC as still due.` : r.error ?? "Couldn't flag it");
-                    }}
-                  >
-                    Flag due → SIC
-                  </Button>
-                ) : null}
-              </div>
-            </div>
-          ))
+              ))}
+            {unpaid.length > 12 ? <p className="text-xs text-[var(--sge-ink-3)]">… and {unpaid.length - 12} more</p> : null}
+          </div>
         )}
+        <Link href="/work?t=payments">
+          <Button size="sm" className="mt-3">Record payments in Work → Payments</Button>
+        </Link>
       </Panel>
 
       <Panel>

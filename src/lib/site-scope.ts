@@ -48,7 +48,6 @@ export function scopeState(s: AppState): AppState {
 
   const labourerSite = new Map(s.labourers.map((l) => [l.id, l.siteId]));
   const staffSite = new Map(s.staff.map((x) => [x.id, x.siteId]));
-  const jmsSite = new Map(s.jmsPackages.map((p) => [p.id, p.siteId]));
   const epSite = new Map(s.labourers.map((l) => [l.epNumber, l.siteId]));
 
   const keep = (own: string | undefined | null, ...linked: (string | undefined)[]) => {
@@ -66,16 +65,11 @@ export function scopeState(s: AppState): AppState {
     safetyDays: s.safetyDays.filter((d) => keep(d.siteId)),
     finance: s.finance.filter((f) => keep(f.siteId)),
     predictions: s.predictions.filter((p) => keep(p.siteId)),
-    billing: s.billing.filter((b) => keep(b.siteId)),
     compliance: s.compliance.filter((c) => keep(c.siteId)),
     transfers: s.transfers.filter((t) => keep(t.siteId)),
     acplPunches: s.acplPunches.filter((p) => keep(p.siteId, epSite.get(p.epNumber))),
     acplMatches: s.acplMatches.filter((m) =>
       keep(m.siteId, m.labourerId ? labourerSite.get(m.labourerId) : undefined, epSite.get(m.epNumber))
-    ),
-    jmsPackages: s.jmsPackages.filter((p) => keep(p.siteId)),
-    workRatings: s.workRatings.filter((r) =>
-      keep(r.siteId, jmsSite.get(r.jmsPackageId) ?? undefined, staffSite.get(r.supervisorId))
     ),
     wageLedger: s.wageLedger.filter((w) =>
       keep(
@@ -84,9 +78,7 @@ export function scopeState(s: AppState): AppState {
         w.staffId ? staffSite.get(w.staffId) : undefined
       )
     ),
-    financeAlerts: s.financeAlerts.filter((a) =>
-      keep(a.siteId, a.jmsPackageId ? jmsSite.get(a.jmsPackageId) ?? undefined : undefined)
-    ),
+    financeAlerts: s.financeAlerts.filter((a) => keep(a.siteId)),
     equipmentRequests: s.equipmentRequests.filter((r) => keep(r.siteId)),
   };
 }

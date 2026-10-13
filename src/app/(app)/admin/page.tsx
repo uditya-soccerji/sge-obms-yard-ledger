@@ -12,6 +12,7 @@ import {
 } from "@/components/shared/ui-bits";
 import { Button } from "@/components/ui/button";
 import { useStore } from "@/lib/store";
+import { useWork } from "@/lib/work/store";
 import { useSiteReports } from "@/lib/work/use-reports";
 
 function AdminHomePage() {
@@ -22,9 +23,9 @@ function AdminHomePage() {
   const openAcpl = state.acplMatches.filter(
     (m) => m.resolveStatus === "open" && m.flag !== "match"
   ).length;
-  const jmsOpen = state.jmsPackages.filter(
-    (p) => p.status === "uploaded" || p.status === "sic_review"
-  ).length;
+  // Internal JMS still to upload as submitted, plus uploads not linked yet
+  const { work } = useWork();
+  const jmsOpen = work.jms.filter((j) => !j.submissionId).length + work.submissions.filter((s) => !s.jmsId).length;
 
   return (
     <div className="sge-enter space-y-6">
@@ -36,7 +37,7 @@ function AdminHomePage() {
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <KpiTile label="SIC DPR queue" value={String(pendingDpr)} tone="accent" />
         <KpiTile label="ACPL open flags" value={String(openAcpl)} tone="warn" />
-        <KpiTile label="JMS in flight" value={String(jmsOpen)} />
+        <KpiTile label="JMS to upload / link" value={String(jmsOpen)} />
         <KpiTile
           label="Rate book lines"
           value={String(state.rateLines.length)}

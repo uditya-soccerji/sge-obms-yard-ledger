@@ -205,6 +205,49 @@ export interface Jms {
   ratePending?: boolean;
   /** Every status change: who, when, from → to */
   statusLog?: { at: string; by: string; from: JmsStatus; to: JmsStatus; note?: string }[];
+  /** The JMS submitted to RIL this internal JMS is compared with (docs §10) */
+  submissionId?: string;
+}
+
+/** RIL's status flow for a submitted JMS (docs §14) — the internal flow plus a reject at A1. */
+export type SubmissionStatus = JmsStatus | "A1 REJECT";
+
+export interface JmsSubmissionItem {
+  serviceCode: string;
+  description: string;
+  qty: number;
+  uom: "M2" | "M3";
+  rate: number;
+  amount: number;
+}
+
+/**
+ * The JMS pack submitted to RIL, uploaded by Admin (Excel figures, PDF proof).
+ * Compared with the internal JMS, never merged (Owner decision 2). Re-uploading
+ * the same RIL JMS no. updates it (docs §14).
+ */
+export interface JmsSubmission {
+  id: string;
+  /** RIL's JMS no., 7 digits, unique */
+  rilJmsNo: string;
+  siteId: string;
+  plant: string;
+  woNo: string;
+  foNo?: string;
+  periodFrom: string;
+  periodTo: string;
+  items: JmsSubmissionItem[];
+  qty: number;
+  amount: number;
+  status: SubmissionStatus;
+  statusLog: { status: SubmissionStatus; at: string; by: string }[];
+  invoiceNo?: string;
+  /** File names until bills / packs are kept in Supabase Storage */
+  files: { excelName?: string; pdfName?: string };
+  uploadedBy: string;
+  uploadedAt: string;
+  /** The internal JMS it is linked to */
+  jmsId?: string;
 }
 
 /** Paint batch: in the SGE store (supervisorId null) or issued to a supervisor. */
@@ -230,6 +273,8 @@ export interface WorkState {
   reports: DprReport[];
   dprs: DprEntry[];
   jms: Jms[];
+  /** JMS submitted to RIL (uploaded), compared with the internal JMS */
+  submissions: JmsSubmission[];
   paint: PaintBatch[];
   expenses: Expense[];
   /** Activity log + notifications (docs §19), newest last */

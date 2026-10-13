@@ -16,338 +16,290 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { effectivePermission } from "@/lib/permissions";
+import { ALL_SITES, entrySiteId } from "@/lib/site-scope";
 import { useStore } from "@/lib/store";
 import { useWork } from "@/lib/work/store";
-import { reportsAsDprDocuments } from "@/lib/work/legacy-view";
-import type { JmsLine } from "@/lib/types";
+import { compareJms, linkCandidates, parseSubmissionItems, supervisorRatings } from "@/lib/work/jms-compare";
+import { JMS_FLOW } from "@/lib/work/logic";
+import type { SubmissionStatus } from "@/lib/work/types";
 
-function uid(prefix: string) {
-  return `${prefix}-${Math.random().toString(36).slice(2, 9)}`;
-}
+const STATUSES: SubmissionStatus[] = [...JMS_FLOW.filter((s) => s !== "PAID"), "A1 REJECT"];
+const selectCls = "mt-1 h-9 w-full rounded-md border border-[var(--sge-line)] bg-[var(--sge-paper)] px-2 text-sm";
 
+/**
+ * JMS (docs §10, §14; merge plan Step 6): the internal JMS is what SIC closed
+ * in Work; the submitted JMS is the pack sent to RIL, uploaded here. The two
+ * are compared — every difference is flagged — and ratings come from them.
+ */
 function JmsPage() {
-  const {
-    state,
-    currentAccount,
-    uploadJmsPackage,
-    matchJmsLines,
-    reviewJmsPackage,
-    computeRatings,
-    markJmsPayment,
-  } = useStore();
-  const { work } = useWork();
-  const [label, setLabel] = useState("JMS Oct W2 — COKER");
-  const [period, setPeriod] = useState("2026-10-W2");
-  const [paste, setPaste] = useState(
-    `Pipe rack B-12 painting,COKER,painting,400,m2,450
-V-204 blasting,COKER,blasting,150,m2,380
-FS-01 scaffold,COKER,scaffolding,840,m3,85`
-  );
-  // One note and one "amount received" box per package
-  const [notes, setNotes] = useState<Record<string, string>>({});
-  const [paying, setPaying] = useState<Record<string, string>>({});
-  const [msg, setMsg] = useState<string | null>(null);
+  const { state, fullState, currentAccount, addWageEntry } = useStore();
+  const { work, uploadSubmission, linkSubmission, unlinkSubmission } = useWork();
   const role = state.currentRole;
   const canUpload = effectivePermission(currentAccount, role, "jms", "upload");
-  const canApprove = effectivePermission(currentAccount, role, "jms", "approve");
-  const canPay = effectivePermission(currentAccount, role, "finance", "create");
+  const canLink = canUpload || effectivePermission(currentAccount, role, "jms", "approve");
+  const canPost = role === "owner" || role === "super_admin";
+  const allSites = state.currentSiteId === ALL_SITES;
+  const onSite = (siteId: string) => allSites || siteId === state.currentSiteId;
+  const siteCode = (id: string) => fullState.sites.find((s) => s.id === id)?.code ?? id;
+  const lineOf = (planLineId: string) => work.planLines.find((l) => l.id === planLineId);
 
-  const pkgs = state.jmsPackages;
-  const ratings = state.workRatings;
+  const subs = work.submissions.filter((s) => onSite(s.siteId)).sort((a, b) => b.uploadedAt.localeCompare(a.uploadedAt));
+  const internal = work.jms.filter((j) => onSite(lineOf(j.planLineId)?.siteId ?? ""));
+  const notSubmitted = internal.filter((j) => !j.submissionId);
+  const noInternal = subs.filter((s) => !s.jmsId);
+  const withDiffs = subs.filter((s) => {
+    const j = s.jmsId ? work.jms.find((x) => x.id === s.jmsId) : undefined;
+    return j && compareJms(j, s, work).length > 0;
+  });
+  const ratings = supervisorRatings({ ...work, jms: internal });
 
-  function parseLines(text: string): JmsLine[] {
-    return text
-      .trim()
-      .split(/\r?\n/)
-      .filter(Boolean)
-      .map((line) => {
-        const [description, plant, activity, qty, unit, rate] = line
-          .split(",")
-          .map((p) => p.trim());
-        const q = Number(qty) || 0;
-        const r = Number(rate) || 0;
-        return {
-          id: uid("jl"),
-          description: description || "Line",
-          plant: plant || "",
-          activity: (activity as JmsLine["activity"]) || "painting",
-          qty: q,
-          unit: (unit as "m2" | "m3") || "m2",
-          rateInr: r,
-          amountInr: q * r,
-        };
-      });
-  }
+  // Upload form
+  const formSite = entrySiteId(state);
+  const plants = fullState.sites.find((s) => s.id === formSite)?.plants ?? [];
+  const wo = work.workOrders.find((w) => w.siteId === formSite);
+  const [f, setF] = useState({ rilJmsNo: "", plant: "", woNo: "", foNo: "", periodFrom: "", periodTo: "", status: "JMS SUBMITTED" as SubmissionStatus, invoiceNo: "", excelName: "", pdfName: "", items: "" });
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [linkPick, setLinkPick] = useState<Record<string, string>>({});
+  const set = (patch: Partial<typeof f>) => setF((x) => ({ ...x, ...patch }));
 
-  function handleUpload() {
-    const lines = parseLines(paste);
-    if (!lines.length) return;
-    const id = uploadJmsPackage({
-      label,
-      period,
-      uploadedAt: todayDate(),
-      uploadedBy: state.currentUserId ?? "st-admin",
-      status: "uploaded",
-      lines,
+  function upload(e: React.FormEvent) {
+    e.preventDefault();
+    const parsed = parseSubmissionItems(f.items);
+    if (parsed.error) return setMsg({ ok: false, text: parsed.error });
+    const r = uploadSubmission({
+      rilJmsNo: f.rilJmsNo,
+      siteId: formSite,
+      plant: f.plant,
+      woNo: f.woNo || wo?.woNo || "",
+      foNo: f.foNo || wo?.foNo || undefined,
+      periodFrom: f.periodFrom,
+      periodTo: f.periodTo,
+      items: parsed.items,
+      status: f.status,
+      invoiceNo: f.invoiceNo || undefined,
+      files: { excelName: f.excelName || undefined, pdfName: f.pdfName || undefined },
     });
-    setMsg(`JMS package uploaded (${id}) — Finance notified.`);
+    if (!r.ok) return setMsg({ ok: false, text: r.error });
+    const existed = work.submissions.some((s) => s.rilJmsNo === f.rilJmsNo.trim());
+    setMsg({ ok: true, text: existed ? `RIL JMS ${f.rilJmsNo} updated (same number = stage update).` : `RIL JMS ${f.rilJmsNo} uploaded.` });
+    set({ rilJmsNo: "", items: "", invoiceNo: "", excelName: "", pdfName: "" });
   }
 
   return (
     <div className="sge-enter space-y-6">
       <SectionHeader
-        title="JMS & work ratings"
-        subtitle="Admin uploads measured / billed JMS → match to supervisor DPR work → SIC verify → incentive ratings."
+        title="JMS — internal vs submitted to RIL"
+        subtitle="Internal JMS = what SIC closed in Work. Submitted JMS = the pack sent to RIL, uploaded by Admin. They are compared, never merged; every difference is flagged."
       />
 
-      <div className="grid gap-3 sm:grid-cols-4">
-        <KpiTile label="Packages" value={String(pkgs.length)} />
-        <KpiTile
-          label="Expected income"
-          value={formatINR(pkgs.reduce((s, p) => s + p.expectedIncome, 0))}
-          tone="accent"
-        />
-        <KpiTile label="Ratings" value={String(ratings.length)} tone="ok" />
-        <KpiTile
-          label="Unpaid JMS"
-          value={String(pkgs.filter((p) => !p.paymentReceived).length)}
-          tone="warn"
-        />
+      <div className="grid gap-3 sm:grid-cols-5">
+        <KpiTile label="Internal JMS" value={String(internal.length)} hint={formatINR(internal.reduce((t, j) => t + j.amount, 0))} />
+        <KpiTile label="Submitted to RIL" value={String(subs.length)} hint={formatINR(subs.reduce((t, s) => t + s.amount, 0))} tone="accent" />
+        <KpiTile label="With differences" value={String(withDiffs.length)} tone={withDiffs.length ? "warn" : "ok"} />
+        <KpiTile label="Not submitted yet" value={String(notSubmitted.length)} tone={notSubmitted.length ? "warn" : "ok"} />
+        <KpiTile label="No internal JMS" value={String(noInternal.length)} />
       </div>
 
       {msg ? (
-        <div className="rounded-md border border-[var(--sge-ok)]/30 bg-[var(--sge-ok-wash)] px-3 py-2 text-sm text-[var(--sge-ok)]">
-          {msg}
+        <div className={msg.ok ? "rounded-md border border-[var(--sge-ok)]/30 bg-[var(--sge-ok-wash)] px-3 py-2 text-sm text-[var(--sge-ok)]" : "rounded-md border border-[var(--sge-crit)]/30 bg-[var(--sge-crit-wash)] px-3 py-2 text-sm text-[var(--sge-crit)]"}>
+          {msg.text}
         </div>
       ) : null}
 
-      {canUpload && (
+      {canUpload ? (
         <Panel>
-          <h3 className="mb-3 font-heading text-sm font-bold">
-            Upload JMS (CSV paste)
-          </h3>
-          <div className="mb-3 grid gap-3 sm:grid-cols-2">
+          <h3 className="mb-3 font-heading text-sm font-bold">Upload a submitted JMS · {siteCode(formSite)}</h3>
+          <form className="grid gap-3 sm:grid-cols-4" onSubmit={upload}>
             <div>
-              <Label>Label</Label>
-              <Input
-                className="mt-1"
-                value={label}
-                onChange={(e) => setLabel(e.target.value)}
-              />
+              <Label>RIL JMS no.</Label>
+              <Input className="mt-1 font-mono" inputMode="numeric" maxLength={7} placeholder="7 digits" value={f.rilJmsNo} onChange={(e) => set({ rilJmsNo: e.target.value.replace(/\D/g, "") })} />
             </div>
             <div>
-              <Label>Period</Label>
-              <Input
-                className="mt-1"
-                value={period}
-                onChange={(e) => setPeriod(e.target.value)}
-              />
+              <Label>Plant</Label>
+              <select className={selectCls} value={f.plant} onChange={(e) => set({ plant: e.target.value })}>
+                <option value="">Pick…</option>
+                {plants.map((p) => <option key={p} value={p}>{p}</option>)}
+              </select>
             </div>
-          </div>
-          <Label>Lines: desc, plant, activity, qty, unit, rate (rate 0 → this site&apos;s rate book; no match is flagged, never guessed)</Label>
-          <Textarea
-            className="mt-1 mb-3 font-mono text-xs"
-            rows={5}
-            value={paste}
-            onChange={(e) => setPaste(e.target.value)}
-          />
-          <Button type="button" onClick={handleUpload}>
-            Upload & notify Finance
-          </Button>
+            <div>
+              <Label>WO no.</Label>
+              <Input className="mt-1" placeholder={wo?.woNo ?? ""} value={f.woNo} onChange={(e) => set({ woNo: e.target.value })} />
+            </div>
+            <div>
+              <Label>RIL status</Label>
+              <select className={selectCls} value={f.status} onChange={(e) => set({ status: e.target.value as SubmissionStatus })}>
+                {STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
+              </select>
+            </div>
+            <div>
+              <Label>Period from</Label>
+              <Input type="date" className="mt-1" max={todayDate()} value={f.periodFrom} onChange={(e) => set({ periodFrom: e.target.value })} />
+            </div>
+            <div>
+              <Label>Period to</Label>
+              <Input type="date" className="mt-1" max={todayDate()} value={f.periodTo} onChange={(e) => set({ periodTo: e.target.value })} />
+            </div>
+            <div>
+              <Label>Excel (figures)</Label>
+              <Input type="file" accept=".xls,.xlsx,.csv" className="mt-1" onChange={(e) => set({ excelName: e.target.files?.[0]?.name ?? "" })} />
+            </div>
+            <div>
+              <Label>PDF (signed proof)</Label>
+              <Input type="file" accept=".pdf" className="mt-1" onChange={(e) => set({ pdfName: e.target.files?.[0]?.name ?? "" })} />
+            </div>
+            <div className="sm:col-span-3">
+              <Label>Items — one per line: service code, description, qty, uom, rate</Label>
+              <Textarea className="mt-1 font-mono text-xs" rows={3} placeholder="3378150, APLY MPS1 HANDTOOL BRUSH, 681.765, M2, 169.78" value={f.items} onChange={(e) => set({ items: e.target.value })} />
+            </div>
+            <div>
+              <Label>Invoice no. (when RIL has one)</Label>
+              <Input className="mt-1" value={f.invoiceNo} onChange={(e) => set({ invoiceNo: e.target.value })} />
+              <Button type="submit" className="mt-3 w-full">Upload</Button>
+            </div>
+          </form>
+          <p className="mt-2 text-[11px] text-[var(--sge-ink-3)]">
+            The same RIL JMS no. again updates that JMS (its status moves on and the change is logged). A new upload is linked to its internal JMS when exactly one fits (site, plant, service item, period); otherwise link it below. Only file names are kept until Supabase Storage is set up.
+          </p>
         </Panel>
-      )}
+      ) : null}
 
-      {pkgs.length === 0 ? (
-        <EmptyState
-          title="No JMS packages"
-          detail="Admin uploads measured work sheets here."
-        />
-      ) : (
-        pkgs.map((pkg) => (
-          <Panel key={pkg.id}>
-            <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
-              <div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <h3 className="font-heading text-base font-bold">{pkg.label}</h3>
-                  <StatusPill
-                    tone={
-                      pkg.status === "sic_approved"
-                        ? "ok"
-                        : pkg.status === "sic_rejected"
-                          ? "crit"
-                          : "accent"
-                    }
-                  >
-                    {pkg.status.replace("_", " ")}
-                  </StatusPill>
-                  {pkg.paymentReceived ? (
-                    <StatusPill tone="ok">paid</StatusPill>
-                  ) : (
-                    <StatusPill tone="warn">payment due</StatusPill>
-                  )}
-                </div>
-                <div className="mt-1 font-mono text-xs text-[var(--sge-ink-3)]">
-                  {pkg.period} · expected {formatINR(pkg.expectedIncome)} · by{" "}
-                  {pkg.uploadedBy}
-                </div>
-              </div>
-              <div className="flex flex-wrap gap-1">
-                {canUpload || canApprove ? (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => {
-                      matchJmsLines(pkg.id, reportsAsDprDocuments(work));
-                      setMsg("Lines matched to approved DPR work on the same site, plant and period.");
-                    }}
-                  >
-                    Match → DPR
-                  </Button>
-                ) : null}
-                {canApprove && (pkg.status === "uploaded" || pkg.status === "sic_review") && (
-                  <>
-                    <Button
-                      size="sm"
-                      onClick={() => {
-                        reviewJmsPackage(pkg.id, "sic_approved", notes[pkg.id]?.trim() || "Verified vs DPR");
-                        setMsg("JMS SIC-approved — Finance notified.");
-                      }}
-                    >
-                      SIC approve
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => {
-                        if (!notes[pkg.id]?.trim()) return setMsg("Give a reason for rejecting this JMS.");
-                        reviewJmsPackage(pkg.id, "sic_rejected", notes[pkg.id].trim());
-                        setMsg("JMS rejected.");
-                      }}
-                    >
-                      Reject
-                    </Button>
-                  </>
-                )}
-                {canApprove && pkg.status === "sic_approved" ? (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => {
-                      const r = computeRatings(pkg.id, reportsAsDprDocuments(work));
-                      setMsg(r.ok ? "Work ratings computed — this package's incentive drafts were replaced, not added again." : r.error ?? "Couldn't compute ratings");
-                    }}
-                  >
-                    Compute ratings
-                  </Button>
-                ) : null}
-                {canPay && pkg.status === "sic_approved" && !pkg.paymentReceived ? (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => setPaying((p) => ({ ...p, [pkg.id]: p[pkg.id] ?? String(pkg.expectedIncome) }))}
-                  >
-                    Mark paid
-                  </Button>
-                ) : null}
-              </div>
-            </div>
-
-            {paying[pkg.id] != null && !pkg.paymentReceived ? (
-              <form
-                className="mb-3 flex flex-wrap items-end gap-2 rounded-md border border-[var(--sge-line)] p-2"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  const r = markJmsPayment(pkg.id, true, { amount: Number(paying[pkg.id]), note: "Bank credit noted" });
-                  setMsg(r.ok ? "Payment recorded." : r.error ?? "Couldn't record the payment");
-                  if (r.ok) setPaying((p) => { const n = { ...p }; delete n[pkg.id]; return n; });
-                }}
-              >
-                <div>
-                  <Label>Amount received ₹</Label>
-                  <Input className="mt-1 w-44" type="number" min="0" step="0.01" value={paying[pkg.id]} onChange={(e) => setPaying((p) => ({ ...p, [pkg.id]: e.target.value }))} />
-                </div>
-                <Button type="submit" size="sm">Save payment</Button>
-                <span className="text-xs text-[var(--sge-ink-3)]">Expected {formatINR(pkg.expectedIncome)}</span>
-              </form>
-            ) : null}
-            {pkg.paymentReceived && pkg.paymentAmount != null ? (
-              <p className="mb-3 text-xs text-[var(--sge-ink-2)]">Received {formatINR(pkg.paymentAmount)} against expected {formatINR(pkg.expectedIncome)}.</p>
-            ) : null}
-
-            {canApprove && (pkg.status === "uploaded" || pkg.status === "sic_review") && (
-              <div className="mb-3">
-                <Label>SIC note (required to reject)</Label>
-                <Textarea
-                  className="mt-1"
-                  rows={2}
-                  value={notes[pkg.id] ?? ""}
-                  onChange={(e) => setNotes((n) => ({ ...n, [pkg.id]: e.target.value }))}
-                />
-              </div>
-            )}
-
-            <div className="space-y-2">
-              {pkg.lines.map((line) => (
-                <div
-                  key={line.id}
-                  className="rounded-md border border-[var(--sge-line)] px-3 py-2 text-sm"
-                >
-                  <div className="flex flex-wrap justify-between gap-2">
-                    <span className="font-medium">{line.description}</span>
-                    <span className="font-mono">
-                      {line.qty} {line.unit} · {line.rateMissing ? <span className="text-[var(--sge-crit)]">rate missing — add it to the rate book</span> : formatINR(line.amountInr)}
-                    </span>
+      <Panel>
+        <h3 className="mb-3 font-heading text-sm font-bold">Submitted JMS</h3>
+        {subs.length === 0 ? (
+          <EmptyState title="Nothing uploaded yet" detail="Admin uploads each JMS pack sent to RIL." />
+        ) : (
+          <div className="space-y-2">
+            {subs.map((s) => {
+              const j = s.jmsId ? work.jms.find((x) => x.id === s.jmsId) : undefined;
+              const diffs = j ? compareJms(j, s, work) : [];
+              const cands = j ? [] : linkCandidates(s, work);
+              return (
+                <div key={s.id} className="rounded-md border border-[var(--sge-line)] px-3 py-2 text-sm">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-mono font-semibold">RIL {s.rilJmsNo}</span>
+                      <StatusPill tone={s.status === "A1 REJECT" ? "crit" : s.status === "PAID" ? "ok" : "accent"}>{s.status}</StatusPill>
+                      {j ? (
+                        diffs.length ? <StatusPill tone="warn">differs from JMS {j.jmsNo}</StatusPill> : <StatusPill tone="ok">matches JMS {j.jmsNo}</StatusPill>
+                      ) : (
+                        <StatusPill>no internal JMS linked</StatusPill>
+                      )}
+                    </div>
+                    <span className="font-mono text-xs">{s.qty} · {formatINR(s.amount)}</span>
                   </div>
                   <div className="mt-1 font-mono text-[11px] text-[var(--sge-ink-3)]">
-                    {line.activity} · {line.plant}
-                    {line.matchedDprId
-                      ? ` · matched ${line.matchedWorkLineIds?.length ?? 1} DPR line(s) · claimed ${line.dprClaimedQty} · ratio ${((line.matchRatio ?? 0) * 100).toFixed(0)}%`
-                      : " · unmatched"}
+                    {siteCode(s.siteId)} · {s.plant} · {s.periodFrom} – {s.periodTo} · WO {s.woNo}
+                    {s.invoiceNo ? ` · inv ${s.invoiceNo}` : ""} · {s.items.map((i) => i.serviceCode).join(", ")}
+                    {s.files.excelName ? ` · ${s.files.excelName}` : ""}{s.files.pdfName ? ` · ${s.files.pdfName}` : ""}
+                    {` · by ${s.uploadedBy} ${s.uploadedAt.slice(0, 10)}`}
                   </div>
+                  {diffs.length ? (
+                    <ul className="mt-1 text-[11px] text-[var(--sge-warn)]">
+                      {diffs.map((d) => <li key={d.field}>{d.field}: ours {d.internal} · RIL {d.submitted}</li>)}
+                    </ul>
+                  ) : null}
+                  {s.statusLog.length > 1 ? (
+                    <div className="mt-1 text-[11px] text-[var(--sge-ink-3)]">
+                      Status trail: {s.statusLog.map((l) => `${l.status} (${l.at.slice(0, 10)}, ${l.by})`).join(" → ")}
+                    </div>
+                  ) : null}
+                  {canLink ? (
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      {j ? (
+                        <Button size="sm" variant="ghost" onClick={() => { const r = unlinkSubmission(s.id); setMsg(r.ok ? { ok: true, text: "Unlinked." } : { ok: false, text: r.error }); }}>
+                          Unlink
+                        </Button>
+                      ) : (
+                        <>
+                          <select className="h-8 rounded-md border border-[var(--sge-line)] bg-[var(--sge-paper)] px-2 text-xs" value={linkPick[s.id] ?? ""} onChange={(e) => setLinkPick((x) => ({ ...x, [s.id]: e.target.value }))}>
+                            <option value="">{cands.length ? "Link to internal JMS…" : "No matching internal JMS"}</option>
+                            {cands.map((c) => <option key={c.id} value={c.id}>JMS {c.jmsNo} · {c.qty} m² · {c.periodFrom} – {c.periodTo}</option>)}
+                          </select>
+                          <Button size="sm" variant="outline" disabled={!linkPick[s.id]} onClick={() => { const r = linkSubmission(s.id, linkPick[s.id]); setMsg(r.ok ? { ok: true, text: "Linked — differences are shown on the row." } : { ok: false, text: r.error }); }}>
+                            Link
+                          </Button>
+                        </>
+                      )}
+                    </div>
+                  ) : null}
                 </div>
-              ))}
-            </div>
+              );
+            })}
+          </div>
+        )}
+      </Panel>
 
-            {ratings.filter((r) => r.jmsPackageId === pkg.id).length > 0 ? (
-              <div className="mt-4 border-t border-[var(--sge-line)] pt-3">
-                <h4 className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--sge-ink-3)]">
-                  Work ratings
-                </h4>
-                {ratings
-                  .filter((r) => r.jmsPackageId === pkg.id)
-                  .map((r) => {
-                    const name = state.staff.find(
-                      (s) => s.id === r.supervisorId
-                    )?.name;
-                    return (
-                      <div
-                        key={r.id}
-                        className="mb-2 rounded-md border border-[var(--sge-line)] px-3 py-2 text-sm"
+      <Panel>
+        <h3 className="mb-3 font-heading text-sm font-bold">Internal JMS not submitted to RIL yet</h3>
+        {notSubmitted.length === 0 ? (
+          <p className="text-sm text-[var(--sge-ink-3)]">Every internal JMS has a submission.</p>
+        ) : (
+          <div className="space-y-1 font-mono text-xs">
+            {notSubmitted.slice(0, 40).map((j) => {
+              const line = lineOf(j.planLineId);
+              return (
+                <div key={j.id}>
+                  JMS {j.jmsNo} · {siteCode(line?.siteId ?? "")} · {line?.plant} · {j.serviceCode} · {j.qty} m² · {formatINR(j.amount)} · confirmed {j.confirmedOn}
+                </div>
+              );
+            })}
+            {notSubmitted.length > 40 ? <div>… and {notSubmitted.length - 40} more</div> : null}
+          </div>
+        )}
+      </Panel>
+
+      <Panel>
+        <h3 className="mb-1 font-heading text-sm font-bold">Supervisor ratings</h3>
+        <p className="mb-3 text-[11px] text-[var(--sge-ink-3)]">
+          Worked out each time from linked JMS: how close RIL&apos;s submitted quantity is to the internal JMS, less a point per two sent-back DPRs or jobs. Posting an incentive is the Owner&apos;s call.
+        </p>
+        {ratings.length === 0 ? (
+          <EmptyState title="No ratings yet" detail="Ratings appear once internal JMS are linked to their RIL submissions." />
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="text-left text-[10px] uppercase tracking-wide text-[var(--sge-ink-3)]">
+              <tr>
+                <th className="py-1">Supervisor</th>
+                <th>JMS</th>
+                <th className="text-right">Internal m²</th>
+                <th className="text-right">RIL m²</th>
+                <th className="text-right">Match</th>
+                <th className="text-right">Sent back</th>
+                <th className="text-right">Score</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {ratings.map((r) => (
+                <tr key={r.supervisorId} className="border-t border-[var(--sge-line)]">
+                  <td className="py-1.5">{fullState.staff.find((x) => x.id === r.supervisorId)?.name ?? r.supervisorId}</td>
+                  <td>{r.jmsCount}</td>
+                  <td className="text-right font-mono">{r.internalQty}</td>
+                  <td className="text-right font-mono">{r.submittedQty}</td>
+                  <td className="text-right font-mono">{(r.ratio * 100).toFixed(1)}%</td>
+                  <td className="text-right font-mono">{r.sentBack}</td>
+                  <td className="text-right"><StatusPill tone={r.score >= 4 ? "ok" : r.score >= 3 ? "accent" : "warn"}>{r.score}/5</StatusPill></td>
+                  <td className="text-right">
+                    {canPost ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => {
+                          if (!window.confirm(`Post a ${formatINR(r.suggestedIncentive)} incentive to the wage ledger?`)) return;
+                          addWageEntry({ staffId: r.supervisorId, date: todayDate(), kind: "incentive", amount: r.suggestedIncentive, note: `JMS rating incentive · score ${r.score}/5`, flaggedToSic: false });
+                          setMsg({ ok: true, text: "Incentive posted to the wage ledger." });
+                        }}
                       >
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="font-semibold">{name}</span>
-                          <StatusPill tone="accent">score {r.score}/5</StatusPill>
-                          <span className="font-mono text-xs text-[var(--sge-ink-3)]">
-                            supv {formatINR(r.suggestedSupervisorIncentive)} ·
-                            labour pool {formatINR(r.suggestedLabourIncentive)}
-                          </span>
-                        </div>
-                        <div className="mt-1 text-xs text-[var(--sge-ink-2)]">
-                          JMS {r.jmsAcceptedQty} / DPR {r.dprClaimedQty} · att{" "}
-                          {r.attendanceIntegrity} · eq {r.equipmentCare} · req{" "}
-                          {r.requestHygiene}
-                          {r.qualityFlags.length
-                            ? ` · flags: ${r.qualityFlags.join(", ")}`
-                            : ""}
-                        </div>
-                      </div>
-                    );
-                  })}
-              </div>
-            ) : null}
-          </Panel>
-        ))
-      )}
+                        Post {formatINR(r.suggestedIncentive)}
+                      </Button>
+                    ) : null}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </Panel>
     </div>
   );
 }

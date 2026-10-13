@@ -13,6 +13,7 @@ import {
 } from "@/components/shared/ui-bits";
 import { Button } from "@/components/ui/button";
 import { useStore } from "@/lib/store";
+import { useWork } from "@/lib/work/store";
 import { useSiteReports } from "@/lib/work/use-reports";
 import { workedCount } from "@/lib/attendance";
 
@@ -24,9 +25,10 @@ function SicHomePage() {
   const todayDocs = reports.filter((d) => d.date === today);
   const attend = state.attendance.filter((a) => a.date === today);
   const present = workedCount(attend, today);
-  const jmsReview = state.jmsPackages.filter(
-    (p) => p.status === "uploaded" || p.status === "sic_review"
-  );
+  // Cycles waiting for the SIC to close into an internal JMS (Work)
+  const { work } = useWork();
+  const waitingJobs = work.jobs.filter((j) => j.status === "awaiting_sic" && (state.currentSiteId === "all" || work.planLines.find((l) => l.id === j.planLineId)?.siteId === state.currentSiteId));
+  const jmsReview = waitingJobs;
   const financeFlags = state.financeAlerts.filter((a) => a.flaggedToSic && !a.acknowledged);
 
   return (
@@ -86,22 +88,13 @@ function SicHomePage() {
 
       <div className="grid gap-4 lg:grid-cols-3">
         <Panel>
-          <h3 className="mb-2 font-heading text-sm font-bold">JMS packages</h3>
-          {state.jmsPackages.map((b) => (
-            <div key={b.id} className="mb-2 flex justify-between text-sm">
-              <span className="truncate pr-2">{b.label}</span>
-              <StatusPill
-                tone={
-                  b.status === "sic_approved"
-                    ? "ok"
-                    : b.status === "sic_rejected"
-                      ? "crit"
-                      : "accent"
-                }
-              >
-                {b.status.replace("_", " ")}
-              </StatusPill>
-            </div>
+          <h3 className="mb-2 font-heading text-sm font-bold">Cycles waiting to close</h3>
+          {waitingJobs.length === 0 ? <p className="text-sm text-[var(--sge-ink-3)]">None waiting.</p> : null}
+          {waitingJobs.map((j) => (
+            <Link key={j.id} href="/work?t=jobs" className="mb-2 flex justify-between text-sm">
+              <span className="truncate pr-2">{j.jobNo} · {j.location}</span>
+              <StatusPill tone="warn">close → JMS</StatusPill>
+            </Link>
           ))}
           <Link href="/jms">
             <Button size="sm" variant="outline" className="mt-2">

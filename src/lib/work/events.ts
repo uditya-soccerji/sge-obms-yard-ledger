@@ -24,6 +24,9 @@ export type EventKind =
   | "expense_added"
   | "expense_voided"
   | "jms_status"
+  | "jms_submitted"
+  | "jms_linked"
+  | "jms_difference"
   | "wo_warning";
 
 export interface WorkEvent {
@@ -79,6 +82,9 @@ export const KIND_LABEL: Record<EventKind, string> = {
   expense_added: "Cost added",
   expense_voided: "Cost voided",
   jms_status: "JMS status",
+  jms_submitted: "JMS uploaded (submitted to RIL)",
+  jms_linked: "JMS linked",
+  jms_difference: "Internal vs submitted JMS differ",
   wo_warning: "Work order warning",
 };
 
@@ -111,7 +117,11 @@ export function isFor(e: WorkEvent, v: Viewer): boolean {
       // The supervisor who has to fix it; money isn't involved yet
       return mine;
     case "jms_status":
+    case "jms_submitted":
+    case "jms_linked":
       return v.role === "finance" || v.role === "sic";
+    case "jms_difference":
+      return v.role === "sic" || v.role === "admin" || v.role === "finance";
     case "wo_warning":
       return v.role === "sic" || v.role === "finance";
     case "plan_added":
