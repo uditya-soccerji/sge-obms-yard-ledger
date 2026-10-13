@@ -10,6 +10,8 @@ Answers from the module-by-module review. Not built yet; implemented together at
 - **Daily wage:** a min–max range per trade, set in Master Data.
 - **Required fields:** mobile (10 digits, starts 6–9), trade sub-category (when the trade has them), contractor, supervisor.
 - **Delete:** Owner / Super Admin can delete; everyone else can only deactivate.
+- **Skill level (decided 2026-10-13):** every labourer has a skill level: Highly skilled, Skilled, Semi-skilled or Unskilled.
+- **Bulk upload (decided 2026-10-13):** labourers can be added from a CSV (Excel → Save As → CSV). An EP already used, now or in the past, is refused; the same Name + Trade + Skill as someone registered is flagged as a possible duplicate and added only if the user confirms.
 
 ## 2. Users & logins
 - **Username:** lowercase, 3–20 chars, a–z / 0–9 / dot, no spaces (e.g. `uditya`, `r.mehta`).

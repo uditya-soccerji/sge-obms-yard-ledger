@@ -20,6 +20,8 @@ import { ROLES } from "@/lib/roles";
 import { useStore } from "@/lib/store";
 import { useWork } from "@/lib/work/store";
 import { hasPickRight, withPickRight } from "@/lib/crew";
+import { EP_RE, normEp, SKILL_LEVELS } from "@/lib/labour-import";
+import { LabourImport } from "./labour-import";
 import type { CatalogItem, MaterialItem } from "@/lib/master/types";
 import type { Labourer, PlantDetail, RoleId, Site, UserAccount } from "@/lib/types";
 import {
@@ -952,6 +954,7 @@ function LabourSheet({
   const { notify } = useWork();
   const [q, setQ] = useState("");
   const [crewMsg, setCrewMsg] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
   const supsOf = (siteId: string) => state.staff.filter((x) => x.role === "supervisor" && x.siteId === siteId);
   const nameOf = (id: string) => state.staff.find((x) => x.id === id)?.name ?? id;
 
@@ -981,7 +984,7 @@ function LabourSheet({
       if (!showInactive && !l.active) return false;
       if (!matchScope(l.siteId, activeSite, scope)) return false;
       if (!q.trim()) return true;
-      const hay = `${l.name} ${l.epNumber} ${l.trade} ${l.gatePass}`.toLowerCase();
+      const hay = `${l.name} ${l.epNumber} ${l.trade} ${l.skill ?? ""} ${(l.epHistory ?? []).map((h) => h.ep).join(" ")}`.toLowerCase();
       return hay.includes(q.trim().toLowerCase());
     });
   }, [state.labourers, activeSite, scope, showInactive, q]);
@@ -1017,12 +1020,20 @@ function LabourSheet({
         <Button size="sm" onClick={addBlank}>
           Add labourer
         </Button>
+        <Button size="sm" variant="outline" onClick={() => setImporting(true)}>
+          Upload CSV
+        </Button>
         <span className="text-xs text-[var(--sge-ink-3)]">{rows.length} rows</span>
         {crewMsg ? <span className="text-xs text-[var(--sge-crit)]">{crewMsg}</span> : null}
       </div>
-      <div className="grid grid-cols-[1.4fr_0.8fr_0.8fr_1fr_0.9fr_4.5rem_5.5rem] gap-2 border-b border-[var(--sge-line)] px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--sge-ink-3)]">
+      {importing ? <LabourImport onClose={() => setImporting(false)} /> : null}
+      {/* B10: the register scrolls sideways on narrow screens instead of squeezing columns */}
+      <div className="overflow-x-auto">
+      <div className="min-w-[1000px]">
+      <div className="grid grid-cols-[minmax(10rem,1.4fr)_minmax(7rem,0.8fr)_minmax(7rem,0.7fr)_minmax(9rem,1fr)_minmax(8rem,0.9fr)_minmax(9rem,0.9fr)_4.5rem_4rem] [&>*]:min-w-0 gap-2 border-b border-[var(--sge-line)] px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--sge-ink-3)]">
         <span>Name</span>
         <span>Trade</span>
+        <span>Skill</span>
         <span>Contractor</span>
         <span>Supervisor</span>
         <span>EP</span>
@@ -1034,7 +1045,7 @@ function LabourSheet({
         rowHeight={44}
         height={Math.min(520, Math.max(180, rows.length * 44 + 8))}
         render={(l: Labourer) => (
-          <div className="grid h-full grid-cols-[1.4fr_0.8fr_0.8fr_1fr_0.9fr_4.5rem_5.5rem] items-center gap-2 border-b border-[var(--sge-line)] px-2 text-sm">
+          <div className="grid h-full grid-cols-[minmax(10rem,1.4fr)_minmax(7rem,0.8fr)_minmax(7rem,0.7fr)_minmax(9rem,1fr)_minmax(8rem,0.9fr)_minmax(9rem,0.9fr)_4.5rem_4rem] [&>*]:min-w-0 items-center gap-2 border-b border-[var(--sge-line)] px-2 text-sm">
             <Input
               value={l.name}
               onChange={(e) => updateLabourer(l.id, { name: e.target.value })}
@@ -1047,6 +1058,19 @@ function LabourSheet({
               {trades.map((t) => (
                 <option key={t.id} value={t.id}>
                   {t.label}
+                </option>
+              ))}
+            </select>
+            <select
+              aria-label={`Skill for ${l.name}`}
+              className="h-8 rounded-sm border border-[var(--sge-line)] bg-[var(--sge-paper)] text-xs"
+              value={l.skill ?? ""}
+              onChange={(e) => updateLabourer(l.id, { skill: (e.target.value || undefined) as Labourer["skill"] })}
+            >
+              <option value="">—</option>
+              {SKILL_LEVELS.map((x) => (
+                <option key={x.id} value={x.id}>
+                  {x.label}
                 </option>
               ))}
             </select>
@@ -1079,10 +1103,7 @@ function LabourSheet({
                 </option>
               ))}
             </select>
-            <Input
-              value={l.epNumber}
-              onChange={(e) => updateLabourer(l.id, { epNumber: e.target.value })}
-            />
+            <EpCell labourer={l} onSave={(ep) => updateLabourer(l.id, { epNumber: ep })} />
             <Input
               value={String(l.wageDaily)}
               onChange={(e) =>
@@ -1101,7 +1122,36 @@ function LabourSheet({
           </div>
         )}
       />
+      </div>
+      </div>
     </Panel>
+  );
+}
+
+/**
+ * EP box that saves when you leave it (or press Enter), so the EP history only
+ * records real changes, not every keystroke (docs §1, B09). Old EPs show on hover.
+ */
+function EpCell({ labourer, onSave }: { labourer: Labourer; onSave: (ep: string) => void }) {
+  const [draft, setDraft] = useState<string | null>(null);
+  const value = draft ?? labourer.epNumber;
+  const commit = () => {
+    if (draft !== null && normEp(draft) !== normEp(labourer.epNumber)) onSave(draft);
+    setDraft(null);
+  };
+  const history = labourer.epHistory?.length
+    ? `Old EPs: ${labourer.epHistory.map((h) => `${h.ep} (until ${h.until})`).join(", ")}`
+    : undefined;
+  return (
+    <Input
+      aria-label={`EP for ${labourer.name}`}
+      title={history}
+      className={cn("font-mono text-xs", draft !== null && !EP_RE.test(normEp(draft)) && "border-[var(--sge-crit)]")}
+      value={value}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => e.key === "Enter" && commit()}
+    />
   );
 }
 

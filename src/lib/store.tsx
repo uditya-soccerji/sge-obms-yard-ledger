@@ -19,6 +19,7 @@ import { dprCrew, validateDprForSubmit } from "./dpr-validate";
 import { approveBlock, checkCrewRequest } from "./crew";
 import { reviewedAsFor, reviewLine, siteSicId } from "./dpr-review";
 import { checkExpiry, kindDef, nextTag } from "./equipment";
+import { EP_RE, normEp } from "./labour-import";
 import { migrateRequestStatus, REQUEST_STATUS_LABEL, REQUEST_STEPS, stepBlock, type RequestAction } from "./requests";
 import { scoreFromMatchRatio } from "./estimate";
 import { effectivePermission } from "./permissions";
@@ -192,9 +193,12 @@ interface StoreApi {
         | "contractorId"
         | "epNumber"
         | "gatePass"
+        | "skill"
       >
     >
   ) => void;
+  /** Bulk add from the CSV upload (B09) */
+  importLabourers: (rows: Omit<Labourer, "id">[], fileName: string) => { ok: boolean; error?: string; added: number };
   upsertContractor: (row: Contractor) => string;
   setContractorActive: (id: string, active: boolean) => void;
   upsertCatalogItem: (
@@ -1730,18 +1734,45 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           | "contractorId"
           | "epNumber"
           | "gatePass"
+          | "skill"
         >
       >
     ) => {
-      setState((s) => !can(s, "labourer", "update") && !can(s, "master", "update") ? s : ({
-        ...s,
-        labourers: s.labourers.map((l) =>
-          l.id === id ? { ...l, ...patch } : l
-        ),
-      }));
+      setState((s) => {
+        if (!can(s, "labourer", "update") && !can(s, "master", "update")) return s;
+        const today = new Date().toISOString().slice(0, 10);
+        return {
+          ...s,
+          labourers: s.labourers.map((l) => {
+            if (l.id !== id) return l;
+            // docs §1: a new EP archives the old one with its date (only a real, well-formed EP)
+            const old = l.epNumber?.trim();
+            const changed = patch.epNumber !== undefined && old && patch.epNumber.trim().toUpperCase() !== old.toUpperCase();
+            const archive = changed && EP_RE.test(normEp(old)) ? [...(l.epHistory ?? []), { ep: normEp(old), until: today }] : l.epHistory;
+            return { ...l, ...patch, ...(patch.epNumber !== undefined ? { epNumber: normEp(patch.epNumber) } : {}), ...(archive ? { epHistory: archive } : {}) };
+          }),
+        };
+      });
     },
     []
   );
+
+  /** Add many labourers at once (B09 CSV upload). Rows are already checked by checkImport. */
+  const importLabourers = useCallback((rows: Omit<Labourer, "id">[], fileName: string) => {
+    const cur = stateRef.current;
+    if (!can(cur, "labourer", "create") && !can(cur, "master", "update")) return { ...DENIED, added: 0 };
+    if (!rows.length) return { ok: false as const, error: "Nothing to add", added: 0 };
+    // Last guard: never add an EP that is already used (current or old)
+    const used = new Set(cur.labourers.flatMap((l) => [normEp(l.epNumber ?? ""), ...(l.epHistory ?? []).map((h) => normEp(h.ep))]));
+    const clash = rows.find((r) => used.has(normEp(r.epNumber)));
+    if (clash) return { ok: false as const, error: `EP ${clash.epNumber} is already used — check the file again`, added: 0 };
+    const made = rows.map((r) => ({ ...r, id: uid("lb") }));
+    setState((s) => {
+      const next = { ...s, labourers: [...made, ...s.labourers] };
+      return { ...next, auditLog: [makeAudit(next, "master", "import", `${made.length} labourers from ${fileName}`), ...s.auditLog] };
+    });
+    return { ok: true as const, added: made.length };
+  }, []);
 
   /** Issue new items into a supervisor's setup (docs §7, B05). Tagged kinds get one record per item. */
   const issueEquipment = useCallback(
@@ -2715,6 +2746,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       addTrade,
       updateLabourer,
       addLabourer,
+      importLabourers,
       upsertContractor,
       setContractorActive,
       upsertCatalogItem,
@@ -2778,6 +2810,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       addTrade,
       updateLabourer,
       addLabourer,
+      importLabourers,
       upsertContractor,
       setContractorActive,
       upsertCatalogItem,

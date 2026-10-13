@@ -17,6 +17,8 @@ Screenshots, when saved as files, go in `docs/bugs/` as `B<nn>-<n>.png`. Never i
 | B06 | 2026-10-13 | Store / Central store · dashboard | Equipment status changes reach SIC + site store + central store; requests board with urgent first and status buttons | fixed |
 | B07 | 2026-10-13 | Supervisor (Prasan Da) · MTF · DPR → Painting/blasting work | Line needs plant, location, activity, area m², MPS, paint type and litres per paint type | fixed |
 | B08 | 2026-10-13 | Supervisor · DPR → Save / Submit | Save and Submit should notify SIC and Admin | fixed |
+| B09 | 2026-10-13 | Super Admin · DTA · Master Data → Labourers | Feature: bulk labourer upload (CSV from Excel) with skill level and duplicate checks | fixed |
+| B10 | 2026-10-13 | Super Admin · Master Data → Labourers | Name and EP boxes squeezed to ~22 px (Supervisor column from B03 overflowed the row) | fixed |
 
 ## Details
 <!-- One section per bug:
@@ -227,4 +229,25 @@ Screenshots, when saved as files, go in `docs/bugs/` as `B<nn>-<n>.png`. Never i
   - Raised from New DPR (Save draft / Save & submit) and the DPR page (Save draft / Submit). Clicking the notification opens that DPR.
   - Buttons renamed "Save & submit" / "Submit" (it now goes to SIC and Admin); the submit message says "the SIC and Admin are notified".
 - Verified on `npm run dev`: as Super Admin, saved a draft DPR for K. Solanki (DTA · CRUDE) → event "DPR 2026-10-13 · CRUDE saved as draft"; marked his 3 crew and submitted from the DPR page → "DPR submitted — the SIC and Admin are notified", event "… submitted — review", status submitted. As @admin the bell showed the submit under **instant** and "1 DPR draft saved" in the **daily summary**. `tsc` + `eslint src` clean.
+
+### B09: Bulk labourer upload (CSV) with skill level and duplicate checks
+- Reported: 2026-10-13 · Role: Super Admin · Site: DTA · Page: Master Data → Labourers. The owner added a labourer by hand (fine) and wants to add many at once.
+- Ask: an Excel upload for many labourers; add a **Skill level**; check duplicates on **EP number (old and new)** and on **Name + Trade + Skill level**. CSV is fine.
+- Fix (branch `fix/bugs-2026-10-13`):
+  - `Labourer.skill` (Highly skilled / Skilled / Semi-skilled / Unskilled) and `Labourer.epHistory` ([{ ep, until }]). Changing an EP archives the old one with the date (§1); the EP box now saves on Enter / leaving it, so a half-typed EP never lands in history. EP is stored upper-case with no spaces. Old EPs show on hover and are searchable.
+  - New **Skill** column in the register.
+  - **Upload CSV** (`src/components/master/labour-import.tsx`, rules in `src/lib/labour-import.ts`): Download template → choose file (Excel → Save As → CSV) → preview with every row checked → **Add N labourers** adds only the good rows (+ ticked possible duplicates) to the active site, in one go, with one audit entry.
+  - Checks: Name, EP (PP + 10 digits), Trade (Master Data), Skill, Contractor (Master Data) required; Supervisor optional (must be a supervisor on that site → sets the standing crew, §20); Daily wage optional (₹ and commas allowed).
+  - Duplicates: EP already used as a **current or old EP** → refused ("already belongs to Ramesh Kumar (old EP until …)"); same EP twice in the file → refused; **same Name + Trade + Skill** as someone registered (or an earlier line) → "possible duplicate", added only if ticked. The store re-checks EPs before adding.
+- Verified on `npm run dev` (Super Admin, DTA, local data):
+  - Set Ramesh Kumar skill Skilled and EP PP5920188421 → PP5920188499: history = [PP5920188421 until 2026-10-13], hover shows it.
+  - Uploaded a 10-row test file → 2 ready, 1 possible duplicate, 7 errors. Each check fired: current EP, old EP (`pp 5920188421` matched after tidying), bad EP format, unknown trade, missing skill, unknown contractor + supervisor, EP twice in file. "Ramesh  Kumar / painter / skilled" flagged as a possible duplicate; `"Patel, Test"` and `"1,000"` read correctly.
+  - Ticked the possible duplicate → "Add 3 labourers" → "Added 3 labourers to DTA". Records have skill, trade, supervisor (V. Chauhan / none / K. Solanki), wage 1000; audit "import · 3 labourers from labour-test.csv".
+  - `tsc` + `eslint src` clean.
+- Not done: true .xlsx reading (CSV from Excel instead, no new library). Labourers still live per browser (not Supabase).
+
+### B10: Labourer register columns squeezed
+- Reported: 2026-10-13 (owner's screenshot): rows started at the Trade box; Name and EP were too narrow to read.
+- Cause: the dropdowns (Trade / Contractor / Supervisor) took their full text width, and grid children couldn't shrink, squeezing Name and EP to ~22 px.
+- Fix: fixed minimum column widths, children allowed to shrink, and the register scrolls sideways on narrow screens (min width 1,000 px). Verified: Name 160 px, EP 144 px.
 

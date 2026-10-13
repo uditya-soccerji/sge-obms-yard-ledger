@@ -291,7 +291,13 @@ export interface Labourer {
   wageDaily: number;
   equipmentIds: string[];
   active: boolean;
+  /** Skill level (B09, owner 2026-10-13) */
+  skill?: SkillLevel;
+  /** Old EP numbers, newest last; the current one is `epNumber` (docs §1) */
+  epHistory?: { ep: string; until: string }[];
 }
+
+export type SkillLevel = "highly_skilled" | "skilled" | "semi_skilled" | "unskilled";
 
 export interface AttendanceRecord {
   id: string;
