@@ -2,8 +2,8 @@
 
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { canCloseJob, canVoidExpense, JMS_FLOW, currentMonthOf, EXPENSE_CATEGORIES, entryDiffs, finalStage, isMonthClosed, jobJmsQty, lineStatus, nextJmsStatuses, nextJobNo, nextMonth, pickWorkOrder, round3, validMembers, woUsage } from "./logic";
-import { createWorkSeed, WORK_STORAGE_KEY } from "./seed";
-import { daysAgo, today } from "../today";
+import { createEmptyWork, createWorkSeed, WORK_STORAGE_KEY, WORK_TODAY } from "./seed";
+import { daysAgo, setDemoToday, today } from "../today";
 import { applyScenario, type ScenarioId } from "./scenarios";
 import { useStore } from "../store";
 import type { RoleId } from "../types";
@@ -36,8 +36,11 @@ interface WorkApi {
   /** Void a cost with a reason: it stays on record but leaves the P&L (docs §8) */
   removeExpense: (id: string, reason: string) => Result;
   loadScenario: (id: ScenarioId) => void;
+  /** Load the DTA Aug–Sep demo and replay it on its demo date (Owner / Super Admin) */
+  loadDemo: () => void;
   /** Mark every current event as seen by this account (bell) */
   markSeen: (accountId: string) => void;
+  /** Start fresh: an empty current month on the real date (Owner / Super Admin) */
   resetWork: () => void;
 }
 
@@ -50,7 +53,7 @@ function uid(prefix: string) {
 const NOT_ALLOWED: Result = { ok: false, error: "Your role can't do this" };
 
 export function WorkProvider({ children }: { children: React.ReactNode }) {
-  const [work, setWork] = useState<WorkState>(createWorkSeed);
+  const [work, setWork] = useState<WorkState>(() => createEmptyWork(today().slice(0, 7)));
   const [hydrated, setHydrated] = useState(false);
   const ref = React.useRef(work);
   ref.current = work;
@@ -453,10 +456,17 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
     return { ok: true };
   }, [log]);
 
-  /** Test helper: load a prepared state on top of fresh seed data. */
+  /** Test helper: load a prepared state on top of the demo data, on the demo date. */
   const loadScenario = useCallback((id: ScenarioId) => {
     if (!rights().isBoss) return;
+    setDemoToday(WORK_TODAY);
     setWork(applyScenario(createWorkSeed(), id));
+  }, []);
+
+  const loadDemo = useCallback(() => {
+    if (!rights().isBoss) return;
+    setDemoToday(WORK_TODAY);
+    setWork(createWorkSeed());
   }, []);
 
   const markSeen = useCallback((accountId: string) => {
@@ -465,12 +475,13 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
 
   const resetWork = useCallback(() => {
     if (!rights().isBoss) return;
-    setWork(createWorkSeed());
+    setDemoToday(null);
+    setWork(createEmptyWork(today().slice(0, 7)));
   }, []);
 
   const api = useMemo<WorkApi>(
-    () => ({ work, hydrated, addPlanLine, startJob, addDpr, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, markSeen, resetWork }),
-    [work, hydrated, addPlanLine, startJob, addDpr, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, markSeen, resetWork]
+    () => ({ work, hydrated, addPlanLine, startJob, addDpr, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork }),
+    [work, hydrated, addPlanLine, startJob, addDpr, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork]
   );
   return <WorkContext.Provider value={api}>{children}</WorkContext.Provider>;
 }
