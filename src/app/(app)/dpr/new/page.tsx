@@ -19,6 +19,8 @@ import {
   defaultDprSubmitterType,
 } from "@/lib/paint-lifecycle";
 import { useStore } from "@/lib/store";
+import { dprSaveEvent } from "@/lib/dpr-review";
+import { useWork } from "@/lib/work/store";
 import { dprCrew, validateDprForSubmit } from "@/lib/dpr-validate";
 import { entrySiteId } from "@/lib/site-scope";
 import type { DprDocument, DprSubmitterType } from "@/lib/types";
@@ -32,6 +34,7 @@ const TYPE_LABEL: Record<DprSubmitterType, string> = {
 
 function NewDprPage() {
   const { state, saveDpr, submitDpr } = useStore();
+  const { notify } = useWork();
   const router = useRouter();
 
   const staff = useMemo(
@@ -124,6 +127,8 @@ function NewDprPage() {
     const r = saveDpr(next);
     if (!r.ok) return setProblems([r.error ?? "Save blocked"]);
     if (andSubmit) submitDpr(next.id);
+    // B08: SIC + Admin are told (submit at once, a draft in the daily summary)
+    notify(dprSaveEvent(andSubmit ? "dpr_submitted" : "dpr_saved", next, state.staff));
     router.push(`/dpr/${next.id}`);
   }
 
@@ -216,7 +221,7 @@ function NewDprPage() {
           Save draft
         </Button>
         <Button type="button" onClick={() => handleSave(true)}>
-          Save & submit to SIC
+          Save & submit
         </Button>
       </div>
     </div>

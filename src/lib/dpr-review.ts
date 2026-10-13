@@ -79,3 +79,24 @@ export function reviewLine(
     as === "admin_for_sic" ? ` on behalf of ${doc.reviewedOnBehalfOf ? `${nameOf(doc.reviewedOnBehalfOf)} (SIC)` : "the SIC"}` : "";
   return `${verb} by ${who}${forWhom}`;
 }
+
+/**
+ * Bell event when a DPR is saved or submitted (docs §5, B08): the site's SIC and
+ * Admin are told. Submit is instant; a draft save goes into the daily summary.
+ */
+export function dprSaveEvent(
+  kind: "dpr_saved" | "dpr_submitted",
+  doc: Pick<DprDocument, "id" | "date" | "plant" | "siteId" | "submitterId" | "submitterType">,
+  staff: Pick<StaffMember, "id" | "name">[]
+) {
+  const who = staff.find((s) => s.id === doc.submitterId)?.name ?? doc.submitterId;
+  return {
+    kind,
+    siteId: doc.siteId,
+    subjectStaffId: doc.submitterId,
+    title: `DPR ${doc.date} · ${doc.plant || "—"} ${kind === "dpr_submitted" ? "submitted — review" : "saved as draft"}`,
+    detail: `${who} · ${doc.submitterType.replace("_", " / ")}`,
+    tab: `/dpr/${doc.id}`,
+    refId: doc.id,
+  };
+}

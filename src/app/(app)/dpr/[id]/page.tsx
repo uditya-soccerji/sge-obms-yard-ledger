@@ -16,7 +16,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { dprCrew, validateDprForSubmit } from "@/lib/dpr-validate";
 import { useStore } from "@/lib/store";
 import { effectivePermission } from "@/lib/permissions";
-import { reviewEvent, reviewLine } from "@/lib/dpr-review";
+import { dprSaveEvent, reviewEvent, reviewLine } from "@/lib/dpr-review";
 import { useWork } from "@/lib/work/store";
 import type { DprDocument } from "@/lib/types";
 
@@ -73,6 +73,7 @@ function DprDetailPage() {
       setMsg(r.error ?? "Save blocked");
       return;
     }
+    notify(dprSaveEvent("dpr_saved", doc, state.staff));
     setDraft(null);
     setMsg("DPR saved as draft.");
   }
@@ -90,8 +91,9 @@ function DprDetailPage() {
       return;
     }
     submitDpr(doc.id);
+    notify(dprSaveEvent("dpr_submitted", doc, state.staff));
     setDraft(null);
-    setMsg("DPR submitted to SIC — frozen until review.");
+    setMsg("DPR submitted — the SIC and Admin are notified; frozen until review.");
   }
 
   function handleReview(decision: "sic_approved" | "sic_rejected") {
@@ -182,7 +184,7 @@ function DprDetailPage() {
           </Button>
           {canSubmit ? (
             <Button type="button" onClick={handleSubmit}>
-              Submit to SIC
+              Submit
             </Button>
           ) : null}
         </div>

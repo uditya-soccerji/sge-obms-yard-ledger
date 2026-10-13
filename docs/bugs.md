@@ -16,7 +16,7 @@ Screenshots, when saved as files, go in `docs/bugs/` as `B<nn>-<n>.png`. Never i
 | B05 | 2026-10-13 | Supervisor · DPR → Equipment assigned | Equipment needs a detailed per-supervisor "setup" list (kinds, expiry, FEFO/FIFO), with expiry added by the supervisor | open (ready to build) |
 | B06 | 2026-10-13 | Store / Central store · dashboard | Equipment status changes reach SIC + site store + central store; requests board with urgent first and status buttons | open (ready to build) |
 | B07 | 2026-10-13 | Supervisor (Prasan Da) · MTF · DPR → Painting/blasting work | Line needs plant, location, activity, area m², MPS, paint type and litres per paint type | fixed |
-| B08 | 2026-10-13 | Supervisor · DPR → Save / Submit | Save and Submit should notify SIC and Admin | open (ready to build) |
+| B08 | 2026-10-13 | Supervisor · DPR → Save / Submit | Save and Submit should notify SIC and Admin | fixed |
 
 ## Details
 <!-- One section per bug:
@@ -190,4 +190,9 @@ Screenshots, when saved as files, go in `docs/bugs/` as `B<nn>-<n>.png`. Never i
 - Today: the old DPR desk writes no notification events; Work events cover jobs, JMS and paint only.
 - Fix plan: events `dpr_saved` and `dpr_submitted` for the site's SIC and Admin(s). Submit is instant (§19). Rename the button "Save & submit" (it goes to SIC and Admin).
 - Answer (2026-10-13): a **draft save** goes into the **daily summary**; **submit** is instant.
+- Fix (2026-10-13, branch `fix/bugs-2026-10-13`):
+  - New bell events `dpr_submitted` (instant) and `dpr_saved` (daily summary), built by `dprSaveEvent` in `src/lib/dpr-review.ts`. Who sees them (`isFor`, `src/lib/work/events.ts`): the site's SIC and Admin, plus the submitter; Owner / SA see everything as before.
+  - Raised from New DPR (Save draft / Save & submit) and the DPR page (Save draft / Submit). Clicking the notification opens that DPR.
+  - Buttons renamed "Save & submit" / "Submit" (it now goes to SIC and Admin); the submit message says "the SIC and Admin are notified".
+- Verified on `npm run dev`: as Super Admin, saved a draft DPR for K. Solanki (DTA · CRUDE) → event "DPR 2026-10-13 · CRUDE saved as draft"; marked his 3 crew and submitted from the DPR page → "DPR submitted — the SIC and Admin are notified", event "… submitted — review", status submitted. As @admin the bell showed the submit under **instant** and "1 DPR draft saved" in the **daily summary**. `tsc` + `eslint src` clean.
 
