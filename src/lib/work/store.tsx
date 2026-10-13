@@ -6,6 +6,7 @@ import { createEmptyWork, createWorkSeed, WORK_STORAGE_KEY, WORK_TODAY } from ".
 import { daysAgo, nowTime, setDemoToday, today } from "../today";
 import { applyScenario, type ScenarioId } from "./scenarios";
 import { useStore } from "../store";
+import { remoteAudit } from "../supabase/remote";
 import type { RoleId } from "../types";
 import { reasonText, type WorkEvent } from "./events";
 import { entryArea } from "./logic";
@@ -136,11 +137,26 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
       const ev: WorkEvent = { ...e, id: `ev-${seq}`, seq, at: new Date().toISOString(), day: today(), actorName: actor.current.name, actorRole: actor.current.role, impersonatedBy: actor.current.impersonatedBy };
       return { ...s, events: [...s.events, ev] };
     });
+    // Merge plan Step 11: the same event goes to the shared audit_log (Test tools reset never touches it)
+    void remoteAudit({
+      userId: actor.current.accountId,
+      username: actor.current.name,
+      role: actor.current.role,
+      siteId: e.siteId || null,
+      module: "work",
+      action: e.kind,
+      detail: e.detail ? `${e.title} — ${e.detail}` : e.title,
+      impersonatedBy: actor.current.impersonatedBy ?? null,
+    });
   }, []);
   const siteOfJob = (w: WorkState, job: Job) => w.planLines.find((l) => l.id === job.planLineId)?.siteId ?? "";
 
   useEffect(() => {
     try {
+      // Merge plan Step 10: older Work keys are never read again
+      for (const k of Object.keys(localStorage)) {
+        if (k.startsWith("sge-work-v") && k !== WORK_STORAGE_KEY) localStorage.removeItem(k);
+      }
       const raw = localStorage.getItem(WORK_STORAGE_KEY);
       if (raw) {
         const saved = JSON.parse(raw) as WorkState;

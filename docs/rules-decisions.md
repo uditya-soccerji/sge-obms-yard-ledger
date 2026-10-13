@@ -69,7 +69,7 @@ Answers from the module-by-module review. Not built yet; implemented together at
 - **Status:** supervisor flags a fault; the store manager repairs it and changes the status back.
 
 ## 8. Finance
-- **Who adds entries:** Owner / Super Admin only (Finance, SIC, Admin, Store not chosen).
+- **Who adds entries:** Owner, Super Admin and Finance (§18 widened it from Owner / SA; SIC, Admin, Store not chosen). Entries are Work costs (merge plan Step 9); income is only ever a JMS payment.
 - **Approval:** none — entries post when saved.
 - **Required:** date, time, amount, category (fixed list in Master Data), vendor (from vendor list), payment mode (cash / UPI / bank / credit), remark, bill / receipt photo.
 - **Edits:** the person who entered it can edit the same day; after that only the Owner. All edits logged.
@@ -270,3 +270,12 @@ Taken without a fresh Owner answer; change here if the Owner disagrees.
 - **Super Admin protection** (§2): only a Super Admin creates or changes a Super Admin, nobody deactivates themselves, and one active Super Admin always remains — checked in the app and in the admin-users function. Deactivated users are banned in auth and signed out within ~3 minutes.
 - **Labourers:** EP (PP + 10 digits) unique; Aadhaar optional, 12 digits, unique, visible to Owner / Super Admin / HR only; mobile optional; contractor, supervisor, site and a wage above zero required. Gate pass is no longer shown. Owner / Super Admin may delete a labourer with no attendance, wages or login; otherwise deactivate.
 - **Reset** asks first and resets the Work data as well.
+
+## 22. One data model per business object (merge plan built, 2026-10-13)
+GitHub PRs #15–#20 built the merge plan (X1). Each object now lives once, in Work:
+- **DPR:** the daily report (`DprReport`) carries attendance, permit / TBT, equipment, requests and the scaffold / safety / store bodies; painting & blasting quantities are job lines under it. Closing a job needs its DPRs submitted; confirming the JMS needs every DPR approved (the SIC can "Approve all listed" after seeing them).
+- **JMS:** the internal JMS (closed by SIC) and the JMS submitted to RIL (uploaded by Admin) are compared, never merged. The same RIL JMS no. updates its upload. Ratings are worked out from them; the Owner posts an incentive explicitly.
+- **Paint:** batches carry PR → PO → RIL store → SGE store; issue creates our 941, month reco our 942 (litres = DPR use), posting our 261. RIL's numbers are reference only; RIL litres on a 942 drive the variance alert.
+- **Money:** costs are Work costs with the §8 fields; same-day edits by the person who entered them, later the Owner; every edit kept.
+- **Audit:** every audit line and Work event also goes to the shared Supabase `audit_log` (once migration 004 is applied, through `write_audit()`); the audit page reads it when the backend is on.
+- Kept on purpose: job lines keep `supervisorId` / `enteredBy` (history lines from before reports have no report); the wage ledger stays payroll and never enters P&L.

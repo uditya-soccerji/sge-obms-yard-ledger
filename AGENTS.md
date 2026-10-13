@@ -24,7 +24,7 @@ Actual = Σ JMS on the plan line · Remaining = Plan − Actual · unfinished wo
 - **Backend started (Supabase project `sge-obms`, Mumbai).** Live in Supabase: logins (username + password; hidden email `<username>@obms.internal`), `profiles` (roles, sites), `sites`, `master_items` (Master Data catalog) and `audit_log`, all with RLS. Owner/Super Admin user management goes through the `admin-users` edge function (`supabase/functions/admin-users`). **Everything else** (Work module, DPRs, labourers, attendance, finance…) is still browser `localStorage`. Without the env vars the app falls back to the old local mock login.
 - Demo logins are in `README.md` (e.g. `uditya` / `password` = Super Admin). They are demo seed values, not secrets.
 - The **Work** module (`/work`) implements the flow above with real DTA Aug-2026 figures, plus **Payments** (SIC-approved vs received per JMS), **P&L** (cash basis; labour from DPR crews, fixed costs shared by labour-days) and **Test tools** (View as, scenarios, reset — Owner/Super Admin), a header **notification bell** ("Waiting for me", instant approvals/problems, daily summary, 24 h escalation) and an **Activity log** tab (Owner/Super Admin). Every Work action writes an event via `log()` in `work/store.tsx`; who sees it is decided in `work/events.ts` (`isFor`). The Owner home and Finance show the same "Approved vs received" card.
-- Older demo screens (Operations, DPR desk, attendance, finance) use a separate store and are not yet joined to the Work module.
+- **One data model (merge plan built, PRs #15–#20):** DPRs, JMS, paint and money live once, in Work (`lib/work/*`). The DPR desk, approvals, JMS, Store, Finance, Owner / SIC / Supervisor homes all read and write Work. The main store keeps people, sites, attendance, ACPL, requests, equipment, safety days, payroll (wage ledger), Master Data and the audit log. Work starts empty on the current month; the DTA Aug–Sep demo loads from Test tools.
 - Decided next (not built): Supabase backend (new project, Mumbai), Vercel (team "Shree Gayatri Ent"), ACPL/eSSL/JMS-book uploads, Gujarati + Hindi labels, a simplified navigation (options A/B/C — **owner hasn't picked yet**, B "four fixed tabs" recommended).
 - Full business rules: **`docs/rules-decisions.md`** (§1–§18). Build order + data model: **`docs/build-plan.md`**. Read the relevant section before changing behaviour.
 
@@ -43,7 +43,7 @@ npx eslint src
 npm run build
 ```
 Windows note: Node is at `C:\Program Files\nodejs`. If `npm` isn't found in a shell, add it to `PATH`.
-After pulling changes that touch seed data, click **Reset** (header, Owner / Super Admin only; it asks first and resets both the main and the Work data) — old browser data is kept otherwise. Storage keys: main `sge-obms-ops-v12`, Work `sge-work-v7`.
+After pulling changes that touch seed data, click **Reset** (header, Owner / Super Admin only; it asks first and resets both the main and the Work data) — old browser data is kept otherwise. Storage keys: main `sge-obms-ops-v16`, Work `sge-work-v11` (older keys are cleared on load).
 
 ## 5. Layout
 ```
@@ -63,7 +63,7 @@ src/
     shared/require-module.tsx route guard: every signed-in page is wrapped in guarded("<module>", Page)
     ui/*                     shadcn primitives — don't restyle, compose
   lib/
-    store.tsx                main app store (users, sites, labourers, finance, legacy DPR…)
+    store.tsx                main app store (users, sites, labourers, attendance, ACPL, requests, equipment, wages, audit)
     seed.ts, seed-sites.ts   main demo data (six sites)
     site-scope.ts            ALL_SITES, scopeState(), entrySiteId()
     desk.ts, roles.ts, permissions.ts  nav + role access (store actions check can(s, module, action) too)
@@ -73,7 +73,12 @@ src/
     work/types.ts            Work data model
     work/logic.ts            ALL Work calculations (pure functions)
     work/seed.ts             Work demo data from real DTA documents
-    work/store.tsx           WorkProvider: actions + localStorage (key sge-work-v5); checks workRights() itself
+    work/store.tsx           WorkProvider: actions + localStorage (key in work/seed.ts); checks workRights() itself
+    work/reports.ts          daily reports (the one DPR): blank report, deadline / late, pending reports per job
+    work/jms-compare.ts      internal vs submitted JMS: compareJms, linkCandidates, supervisorRatings
+    work/paint-steps.ts      paint lifecycle + our 941/942/261 steps, reco rows, variance vs RIL
+    work/money.ts            day spend / received for the home screens
+    work/use-reports.ts      reports on the header site (what DPR screens list)
     work/permissions.ts      workRights(role): who may plan / enter / confirm / issue paint / see money
     work/scenarios.ts        test scenarios (pure WorkState transforms)
 docs/
