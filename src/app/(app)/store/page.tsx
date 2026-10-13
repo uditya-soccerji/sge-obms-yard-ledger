@@ -19,10 +19,22 @@ import {
   canEditMovement942261,
 } from "@/lib/paint-lifecycle";
 import { useStore } from "@/lib/store";
-import type { PaintLifecycleStage } from "@/lib/types";
+import { paintVariance } from "@/lib/paint-variance";
+import { useState } from "react";
+import type { PaintLifecycleStage, StaffMember } from "@/lib/types";
 
 function StoreHomePage() {
-  const { state, advancePaintStage, updatePaintLine } = useStore();
+  const { state, advancePaintStage, updatePaintLine, setEquipmentStatus } = useStore();
+  const [boardMsg, setBoardMsg] = useState<string | null>(null);
+  const [faults, setFaults] = useState<Record<string, string>>({});
+  const isStore = state.currentRole === "store" || state.currentRole === "super_admin";
+  // Paint goes to painting & blasting supervisors
+  const supervisors = state.staff.filter((s) => s.role === "supervisor" && (s.supervisorType ?? "painting_blasting") === "painting_blasting");
+  const materials = state.masterCatalog.materials;
+  const advance = (id: string) => {
+    const res = advancePaintStage(id);
+    setBoardMsg(res.ok ? null : res.error ?? "Couldn't move it");
+  };
 
   const byStage = PAINT_STAGE_ORDER.map((stage) => ({
     stage,
@@ -134,14 +146,20 @@ function StoreHomePage() {
             </p>
           </div>
         </div>
+        {boardMsg ? (
+          <div className="mb-2 rounded-md border border-[var(--sge-crit)]/30 bg-[var(--sge-crit-wash)] px-3 py-2 text-sm text-[var(--sge-crit)]">
+            {boardMsg}
+          </div>
+        ) : null}
         <div className="flex gap-3 overflow-x-auto pb-2">
           {byStage.map(({ stage, lines }) => (
             <StageColumn
               key={stage}
               stage={stage}
               lines={lines}
-              onAdvance={advancePaintStage}
+              onAdvance={advance}
               onUpdate={updatePaintLine}
+              supervisors={supervisors}
             />
           ))}
         </div>
@@ -165,12 +183,12 @@ function StoreHomePage() {
                   <th>942 / 261</th>
                   <th>RIL posted</th>
                   <th>SGE used</th>
-                  <th>Δ</th>
+                  <th>Δ (tolerance)</th>
                 </tr>
               </thead>
               <tbody>
                 {dualBook.map((l) => {
-                  const delta = (l.sgeUsed ?? 0) - (l.rilPosted ?? 0);
+                  const v = paintVariance(l, materials);
                   return (
                     <tr key={l.id} className="border-t border-[var(--sge-line)]">
                       <td className="py-1.5">
@@ -188,12 +206,10 @@ function StoreHomePage() {
                       <td className="font-mono">{l.rilPosted ?? "—"} L</td>
                       <td className="font-mono">{l.sgeUsed ?? "—"} L</td>
                       <td>
-                        {l.rilPosted != null && l.sgeUsed != null ? (
-                          <StatusPill
-                            tone={Math.abs(delta) >= 8 ? "crit" : "ok"}
-                          >
-                            {delta > 0 ? "+" : ""}
-                            {delta} L
+                        {v ? (
+                          <StatusPill tone={v.over ? "crit" : "ok"}>
+                            {v.litres > 0 ? "+" : ""}
+                            {v.litres} L · {v.pct.toFixed(1)}% (±{v.tolerance}%)
                           </StatusPill>
                         ) : (
                           <StatusPill>pending</StatusPill>
@@ -237,6 +253,38 @@ function StoreHomePage() {
                   {eq.status}
                 </StatusPill>
               </div>
+              {eq.faultNote ? (
+                <div className="mb-2 text-xs text-[var(--sge-crit)]">Fault: {eq.faultNote}</div>
+              ) : null}
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                {eq.status !== "fault" ? (
+                  <>
+                    <Input
+                      className="h-7 flex-1 text-xs"
+                      placeholder="What's wrong? (to report a fault)"
+                      value={faults[eq.id] ?? ""}
+                      onChange={(e) => setFaults((f) => ({ ...f, [eq.id]: e.target.value }))}
+                    />
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 text-xs"
+                      onClick={() => {
+                        const res = setEquipmentStatus(eq.id, "fault", faults[eq.id]);
+                        setBoardMsg(res.ok ? null : res.error ?? null);
+                        if (res.ok) setFaults((f) => ({ ...f, [eq.id]: "" }));
+                      }}
+                    >
+                      Report fault
+                    </Button>
+                  </>
+                ) : null}
+                {isStore && eq.status !== "ok" ? (
+                  <Button size="sm" className="h-7 text-xs" onClick={() => setEquipmentStatus(eq.id, "ok")}>
+                    Mark repaired / checked
+                  </Button>
+                ) : null}
+              </div>
               <ul className="space-y-1 text-sm">
                 {eq.checklist.map((c) => (
                   <li key={c.item} className="flex justify-between">
@@ -253,16 +301,32 @@ function StoreHomePage() {
   );
 }
 
+/** Text box that saves when you leave it, not on every key (one audit line per change) */
+function BlurInput({ value, onSave, ...rest }: { value: string; onSave: (v: string) => void } & Omit<React.ComponentProps<typeof Input>, "value" | "onChange" | "onBlur" | "defaultValue">) {
+  return (
+    <Input
+      key={value}
+      defaultValue={value}
+      onBlur={(e) => {
+        if (e.target.value !== value) onSave(e.target.value);
+      }}
+      {...rest}
+    />
+  );
+}
+
 function StageColumn({
   stage,
   lines,
   onAdvance,
   onUpdate,
+  supervisors,
 }: {
   stage: PaintLifecycleStage;
   lines: ReturnType<typeof useStore>["state"]["paintStock"];
   onAdvance: (id: string) => void;
   onUpdate: ReturnType<typeof useStore>["updatePaintLine"];
+  supervisors: StaffMember[];
 }) {
   return (
     <div className="min-w-[200px] flex-1 rounded-md border border-[var(--sge-line)] bg-[var(--sge-ground)]/60 p-2">
@@ -288,21 +352,46 @@ function StageColumn({
               {line.sapCode} · {line.batch}
             </div>
             <div className="mt-1 font-mono">{line.qtyLitres} L</div>
+            {line.issuedTo && !canEditMovement941(stage) ? (
+              <div className="mt-1 text-[10px] text-[var(--sge-ink-3)]">
+                To {supervisors.find((s) => s.id === line.issuedTo)?.name ?? line.issuedTo}
+                {line.movement941 ? ` · 941 ${line.movement941}` : ""}
+              </div>
+            ) : null}
 
             {canEditMovement941(stage) ? (
+              <>
               <label className="mt-2 block">
                 <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--sge-ink-3)]">
                   941 issue #
                 </span>
-                <Input
+                <BlurInput
                   className="mt-0.5 h-7 font-mono text-[11px]"
                   value={line.movement941 ?? ""}
                   placeholder="941-…"
-                  onChange={(e) =>
-                    onUpdate(line.id, { movement941: e.target.value })
-                  }
+                  onSave={(v) => onUpdate(line.id, { movement941: v })}
                 />
               </label>
+              <label className="mt-1.5 block">
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--sge-ink-3)]">
+                  Issue to
+                </span>
+                <select
+                  className="mt-0.5 h-7 w-full rounded-md border border-[var(--sge-line)] bg-transparent px-1 text-[11px]"
+                  value={line.issuedTo ?? ""}
+                  onChange={(e) => onUpdate(line.id, { issuedTo: e.target.value || undefined })}
+                >
+                  <option value="">Pick a supervisor…</option>
+                  {supervisors
+                    .filter((s) => s.siteId === line.siteId)
+                    .map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name}
+                      </option>
+                    ))}
+                </select>
+              </label>
+              </>
             ) : null}
 
             {canEditMovement942261(stage) ? (
@@ -311,42 +400,37 @@ function StageColumn({
                   <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--sge-ink-3)]">
                     942 consumption #
                   </span>
-                  <Input
+                  <BlurInput
                     className="mt-0.5 h-7 font-mono text-[11px]"
                     value={line.movement942 ?? ""}
                     placeholder="942-…"
-                    onChange={(e) =>
-                      onUpdate(line.id, { movement942: e.target.value })
-                    }
+                    onSave={(v) => onUpdate(line.id, { movement942: v })}
                   />
                 </label>
                 <label className="block">
                   <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--sge-ink-3)]">
                     261 posting #
                   </span>
-                  <Input
+                  <BlurInput
                     className="mt-0.5 h-7 font-mono text-[11px]"
                     value={line.movement261 ?? ""}
                     placeholder="261-…"
-                    onChange={(e) =>
-                      onUpdate(line.id, { movement261: e.target.value })
-                    }
+                    onSave={(v) => onUpdate(line.id, { movement261: v })}
                   />
                 </label>
                 <label className="block">
                   <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--sge-ink-3)]">
                     RIL posted L
                   </span>
-                  <Input
+                  <BlurInput
                     type="number"
+                    min={0}
                     className="mt-0.5 h-7 font-mono text-[11px]"
-                    value={line.rilPosted ?? ""}
+                    value={line.rilPosted != null ? String(line.rilPosted) : ""}
                     placeholder="0"
-                    onChange={(e) =>
+                    onSave={(v) =>
                       onUpdate(line.id, {
-                        rilPosted: e.target.value
-                          ? Number(e.target.value)
-                          : undefined,
+                        rilPosted: v && Number(v) >= 0 ? Number(v) : undefined,
                       })
                     }
                   />

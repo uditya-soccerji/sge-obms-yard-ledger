@@ -217,6 +217,7 @@ export async function remoteLoadMaster(): Promise<MasterCatalog | null> {
         sapCode: r.extra?.sapCode ?? "",
         paintSystem: r.extra?.paintSystem ?? "",
         uom: r.extra?.uom ?? "L",
+        varianceTolerancePct: typeof r.extra?.varianceTolerancePct === "number" ? r.extra.varianceTolerancePct : undefined,
       })),
     storeBooks: plain("storeBooks"),
     fimStages: plain("fimStages"),
@@ -246,7 +247,7 @@ export async function remoteSaveMaster(
       sheet === "contractors"
         ? { gstin: c.gstin ?? "" }
         : sheet === "materials"
-          ? { sapCode: m.sapCode, paintSystem: m.paintSystem, uom: m.uom }
+          ? { sapCode: m.sapCode, paintSystem: m.paintSystem, uom: m.uom, varianceTolerancePct: m.varianceTolerancePct ?? null }
           : {},
   };
   const { error } = await supabase.from("master_items").upsert(row);

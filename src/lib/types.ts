@@ -82,10 +82,14 @@ export interface AuditEntry {
   impersonatedBy?: string | null;
 }
 
+/** docs §9: Open → SIC approves → store fulfils (in full or part) → requester confirms received */
 export type EquipmentRequestStatus =
   | "open"
+  | "sic_approved"
   | "fulfilling"
   | "fulfilled"
+  | "part_filled"
+  | "received"
   | "cancelled";
 
 export interface EquipmentRequest {
@@ -104,6 +108,11 @@ export interface EquipmentRequest {
   fulfilledAt?: string;
   fulfillNote?: string;
   sourceDprId?: string;
+  approvedBy?: string;
+  approvedAt?: string;
+  receivedAt?: string;
+  /** Why it was cancelled or only part-filled (required for those, docs §9) */
+  cancelNote?: string;
 }
 
 export type SupervisorType =
@@ -310,6 +319,8 @@ export interface EquipmentItem {
   expiryDate?: string;
   checklist: { item: string; ok: boolean }[];
   siteId: string;
+  /** Latest fault reported by a supervisor, cleared when the store marks it repaired (docs §7) */
+  faultNote?: string;
 }
 
 /** Legacy thin DPR line kept for paint-variance gist rollups */
@@ -562,6 +573,10 @@ export interface FinanceEntry {
   description: string;
   siteId: string;
   enteredBy: string;
+  /** docs §8 fields (required on new entries) */
+  time?: string;
+  vendor?: string;
+  paymentMode?: "cash" | "upi" | "bank" | "credit";
 }
 
 export interface TelegramDraft {
@@ -572,7 +587,8 @@ export interface TelegramDraft {
   content: string;
   mappedEntity: DraftEntityKind;
   entityId?: string;
-  status: "draft" | "applied";
+  /** needs_review: the message couldn't be read reliably, so nothing was posted */
+  status: "draft" | "applied" | "needs_review";
 }
 
 export interface PredictionAlert {

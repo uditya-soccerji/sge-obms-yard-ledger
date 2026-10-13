@@ -1,7 +1,10 @@
 "use client";
 
 import { guarded } from "@/components/shared/require-module";
-import { today as todayDate } from "@/lib/today";
+import { nowTime, today as todayDate } from "@/lib/today";
+
+/** Fixed list so the ledger can be totalled by category (docs §8) */
+const FINANCE_CATEGORIES = ["Transport", "Food", "Materials", "Tools & spares", "Fuel", "Rent", "Labour", "Client payment", "Other"];
 import { useState } from "react";
 import Link from "next/link";
 import {
@@ -39,7 +42,11 @@ function FinancePage() {
   } = useStore();
   const isFinanceHome = state.currentRole === "finance";
   const [kind, setKind] = useState<"expense" | "income">("expense");
-  const [category, setCategory] = useState("Transport");
+  const [category, setCategory] = useState("");
+  const [vendor, setVendor] = useState("");
+  const [payMode, setPayMode] = useState<"" | "cash" | "upi" | "bank" | "credit">("");
+  const [time, setTime] = useState(nowTime);
+  const [finMsg, setFinMsg] = useState<string | null>(null);
   const [amount, setAmount] = useState("");
   const [description, setDescription] = useState("");
   const [date, setDate] = useState(todayDate);
@@ -48,7 +55,9 @@ function FinancePage() {
   const [wageAmount, setWageAmount] = useState("");
   const [wageNote, setWageNote] = useState("");
   const [wageLabourerPick, setWageLabourer] = useState("");
-  const wageLabourer = wageLabourerPick || state.labourers[0]?.id || "";
+  // No default labourer — a wage line must name who it is for
+  const wageLabourer = wageLabourerPick;
+  const [wageMsg, setWageMsg] = useState<string | null>(null);
   const allSites = state.currentSiteId === ALL_SITES;
   // In All sites the form asks which site; it starts on the header pick
   const [entrySitePick, setEntrySitePick] = useState("");
@@ -74,24 +83,30 @@ function FinancePage() {
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
-    const n = Number(amount);
-    if (!n || !description.trim()) return;
-    addFinance({
+    const res = addFinance({
       date,
+      time,
       kind,
       category,
-      amount: n,
+      amount: Number(amount),
+      vendor,
+      paymentMode: payMode || undefined,
       description,
       siteId: entrySite,
     });
+    setFinMsg(res.ok ? "Saved." : res.error ?? "Couldn't save");
+    if (!res.ok) return;
     setAmount("");
+    setVendor("");
     setDescription("");
   }
 
   function submitWage(e: React.FormEvent) {
     e.preventDefault();
     const n = Number(wageAmount);
-    if (!n) return;
+    if (!wageLabourer) return setWageMsg("Pick the labourer");
+    if (!(n > 0)) return setWageMsg("Amount must be above zero");
+    setWageMsg(null);
     addWageEntry({
       labourerId: wageLabourer,
       date: today,
@@ -273,7 +288,7 @@ function FinancePage() {
                 <Label>Labourer</Label>
                 <Select value={wageLabourer} onValueChange={setWageLabourer}>
                   <SelectTrigger className="mt-1">
-                    <SelectValue />
+                    <SelectValue placeholder="Pick…" />
                   </SelectTrigger>
                   <SelectContent>
                     {state.labourers
@@ -340,6 +355,7 @@ function FinancePage() {
               />
               Flag anomaly to SIC
             </label>
+            {wageMsg ? <div className="text-xs text-[var(--sge-crit)]">{wageMsg}</div> : null}
             <Button type="submit">Add wage line</Button>
           </form>
           <div className="max-h-[280px] space-y-2 overflow-y-auto">
@@ -403,36 +419,70 @@ function FinancePage() {
                 <Input
                   type="date"
                   className="mt-1"
+                  max={today}
                   value={date}
                   onChange={(e) => setDate(e.target.value)}
                 />
               </div>
             </div>
             <div>
-              <Label>Category</Label>
-              <Input
-                className="mt-1"
-                value={category}
-                onChange={(e) => setCategory(e.target.value)}
-              />
+              <Label>Time</Label>
+              <Input type="time" className="mt-1" value={time} onChange={(e) => setTime(e.target.value)} />
+            </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label>Category</Label>
+                <Select value={category} onValueChange={setCategory}>
+                  <SelectTrigger className="mt-1">
+                    <SelectValue placeholder="Pick…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {FINANCE_CATEGORIES.map((c) => (
+                      <SelectItem key={c} value={c}>
+                        {c}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label>Payment mode</Label>
+                <Select value={payMode} onValueChange={(v) => setPayMode(v as typeof payMode)}>
+                  <SelectTrigger className="mt-1">
+                    <SelectValue placeholder="Pick…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="cash">Cash</SelectItem>
+                    <SelectItem value="upi">UPI</SelectItem>
+                    <SelectItem value="bank">Bank transfer</SelectItem>
+                    <SelectItem value="credit">On credit</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+            <div>
+              <Label>{kind === "income" ? "Received from" : "Paid to"}</Label>
+              <Input className="mt-1" value={vendor} onChange={(e) => setVendor(e.target.value)} />
             </div>
             <div>
               <Label>Amount (INR)</Label>
               <Input
                 type="number"
+                min={1}
                 className="mt-1"
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
               />
             </div>
             <div>
-              <Label>Description</Label>
+              <Label>Remark</Label>
               <Textarea
                 className="mt-1"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
               />
             </div>
+            {finMsg ? <div className={finMsg === "Saved." ? "text-xs text-[var(--sge-ok)]" : "text-xs text-[var(--sge-crit)]"}>{finMsg}</div> : null}
             <Button type="submit">Save entry</Button>
           </form>
           <div className="mt-4 max-h-[240px] space-y-2 overflow-y-auto border-t border-[var(--sge-line)] pt-3">
@@ -451,6 +501,7 @@ function FinancePage() {
                     </span>
                   ) : null}
                   {f.category}
+                  {f.vendor ? <span className="text-[var(--sge-ink-3)]"> · {f.vendor}</span> : null}
                 </span>
                 <span className="font-mono">{formatINR(f.amount)}</span>
               </div>

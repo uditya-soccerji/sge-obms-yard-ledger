@@ -306,6 +306,9 @@ function TelegramPage() {
                     <StatusPill>{d.role}</StatusPill>
                     <StatusPill tone="accent">{d.messageType}</StatusPill>
                     <StatusPill tone="ok">→ {d.mappedEntity}</StatusPill>
+                    {d.status === "needs_review" ? (
+                      <StatusPill tone="crit">needs review — nothing posted</StatusPill>
+                    ) : null}
                   </div>
                   <p className="mt-1 text-[var(--sge-ink-2)]">{d.content}</p>
                   <div className="mt-1 font-mono text-[10px] text-[var(--sge-ink-3)]">

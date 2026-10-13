@@ -49,7 +49,7 @@ export function siteRows(s: AppState): SiteRow[] {
           (d) => d.siteId === id && d.status === "submitted"
         ).length,
         openRequests: s.equipmentRequests.filter(
-          (r) => r.siteId === id && (r.status === "open" || r.status === "fulfilling")
+          (r) => r.siteId === id && ["open", "sic_approved", "fulfilling"].includes(r.status)
         ).length,
         kitIssues: s.equipment.filter((e) => e.siteId === id && e.status !== "ok")
           .length,

@@ -31,6 +31,8 @@ export interface MaterialItem extends CatalogItem {
   sapCode: string;
   paintSystem: string;
   uom: string;
+  /** Allowed SGE-used vs RIL-posted difference for this paint, % (docs §6); default 8 */
+  varianceTolerancePct?: number;
 }
 
 export interface Contractor {
