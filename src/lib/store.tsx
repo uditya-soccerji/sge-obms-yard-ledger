@@ -325,6 +325,43 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   }, [state, hydrated]);
 
+  // Merge plan Step 10: data under older keys is never read again — clear it out
+  useEffect(() => {
+    try {
+      for (const k of Object.keys(localStorage)) {
+        if (k.startsWith("sge-obms-ops-") && k !== STORAGE_KEY) localStorage.removeItem(k);
+      }
+    } catch {
+      /* storage blocked */
+    }
+  }, []);
+
+  /**
+   * Merge plan Step 11: every audit line written in this browser also goes to
+   * the shared Supabase audit_log (via write_audit, B1), so the trail survives
+   * Reset and cleared storage and every browser sees the same one. Lines that
+   * were already here when the page loaded (demo seed) are not sent.
+   */
+  const auditSent = React.useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    if (!hydrated) return;
+    if (auditSent.current === undefined) {
+      auditSent.current = state.auditLog[0]?.id ?? null;
+      return;
+    }
+    const fresh: AuditEntry[] = [];
+    for (const a of state.auditLog) {
+      if (a.id === auditSent.current) break;
+      fresh.push(a);
+    }
+    if (!fresh.length) return;
+    auditSent.current = state.auditLog[0].id;
+    if (!supabase) return;
+    for (const a of fresh.reverse()) {
+      void remoteAudit({ userId: a.userId ?? "", username: a.username, role: a.role, siteId: a.siteId, module: String(a.module), action: a.action, detail: a.detail, plant: a.plant, impersonatedBy: a.impersonatedBy });
+    }
+  }, [state.auditLog, hydrated]);
+
   const mockLogin = useCallback((username: string, password: string) => {
     const s = stateRef.current;
     const account = s.users.find(
@@ -417,16 +454,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         impersonatorSnapshot: null,
       };
       const entry = makeAudit(next, "users", "login", `Signed in as ${me.username} (${role})`);
+      // The audit sync below sends this login line to the shared log
       setState({ ...next, auditLog: [entry, ...s.auditLog] });
-      void remoteAudit({
-        userId: me.id,
-        username: me.username,
-        role,
-        siteId,
-        module: "users",
-        action: "login",
-        detail: entry.detail,
-      });
       return { ok: true as const, role };
     },
     [mockLogin]

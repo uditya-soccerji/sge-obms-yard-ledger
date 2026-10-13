@@ -2,7 +2,7 @@
 
 Written 2026-10-12 against `main` @ `fbab583`; revised the same day with the Owner's answers (below).
 Amended 2026-10-13 with the review notes P1–P6 and the fixes already merged (GitHub PRs #6–#13).
-**None of the ten steps is built yet**, but several of their prerequisites now are (see "Already built" below).
+**Built 2026-10-13** — see "Build status" below for the GitHub PR of each step and where the build differs from this plan.
 Plan steps are called **Step 1 … Step 11** so they don't clash with GitHub PR numbers. When a step is opened on GitHub, title it **"Merge step N: …"** and write the GitHub number next to the step here.
 Rules referenced: `docs/rules-decisions.md` §5 DPR, §6 Paint stock, §8 Finance, §10 JMS & billing,
 §17 Build decisions, §18 Accounting / P&L (and §19 notifications where it applies).
@@ -13,6 +13,16 @@ Rules referenced: `docs/rules-decisions.md` §5 DPR, §6 Paint stock, §8 Financ
 3. **Paint 941 / 942 / 261 are RIL's consumption steps.** SGE follows the same steps internally and tracks them, but doesn't generate those numbers. RIL's numbers are typed in **for reference** when RIL gives them. Consumption itself is internal (from our DPRs).
 
 These are also recorded in `docs/rules-decisions.md` (§6, §10, §17).
+
+## Build status (2026-10-13)
+| Step | GitHub PR | Notes |
+|---|---|---|
+| 1 Fresh start | #15 | `createEmptyWork`; Test tools Load demo (sets the demo date) / Start fresh |
+| 2–5 One DPR | #16 | Built together. `DprReport` keeps the DPR desk's field names so the forms carried over; job lines are `DprEntry.reportId`. `addDpr` puts a line on the day's open report (made if none) and marks its crew present. The entry-level Admin-wins rule (`effectiveEntries`) stays, since Admin's day is its own report. |
+| 6–7 JMS | #17 | Built together. The internal JMS keeps its own status flow for payments; a linked submission moves it on (never undoing a payment). |
+| 8 Paint | #18 | Board in `components/work/paint-board.tsx`; August's demo reco comes from the history JMS (no DPR lines then). |
+| 9 Money | #19 | Finance page shows the same cost ledger as the P&L tab; Telegram expenses wait for Finance instead of posting. |
+| 10 Cleanup / docs, 11 Audit | #20 | Old storage keys are removed on load. Job lines keep `supervisorId` / `enteredBy` (history lines have no report). Audit lines and Work events go to Supabase `audit_log` (`write_audit()` once migration 004 is applied, direct insert until then); the audit page reads it when the backend is on. |
 
 ## Already built by the bug-fix PRs (2026-10-12 / 13)
 | Done | Where | Used by |

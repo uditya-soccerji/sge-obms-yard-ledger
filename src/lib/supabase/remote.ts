@@ -5,7 +5,7 @@ import type {
   MasterCatalog,
   MaterialItem,
 } from "../master/types";
-import type { PermissionOverride, RoleId, Site, UserAccount } from "../types";
+import type { AuditEntry, PermissionOverride, RoleId, Site, UserAccount } from "../types";
 
 interface ProfileRow {
   id: string;
@@ -302,6 +302,9 @@ export async function remoteAudit(entry: {
   module: string;
   action: string;
   detail: string;
+  plant?: string | null;
+  /** Super Admin using "View as" (W32) */
+  impersonatedBy?: string | null;
 }) {
   if (!supabase) return;
   // B1: the server fills who did it from the caller's profile (migration 004)
@@ -310,6 +313,8 @@ export async function remoteAudit(entry: {
     p_action: entry.action,
     p_detail: entry.detail,
     p_site_id: entry.siteId,
+    p_plant: entry.plant ?? null,
+    p_impersonated_by: entry.impersonatedBy ?? null,
   });
   if (!rpc.error) return;
   // Until migration 004 is applied the function doesn't exist; fall back to the direct insert
@@ -321,5 +326,31 @@ export async function remoteAudit(entry: {
     module: entry.module,
     action: entry.action,
     detail: entry.detail,
+    plant: entry.plant ?? null,
+    impersonated_by: entry.impersonatedBy ?? null,
   });
+}
+
+/**
+ * The shared audit trail (merge plan Step 11): newest first. Null when there's
+ * no backend (the app then shows this browser's own log). RLS lets only Owner
+ * and Super Admin read it.
+ */
+export async function remoteLoadAudit(limit = 1000): Promise<AuditEntry[] | null> {
+  if (!supabase) return null;
+  const { data, error } = await supabase.from("audit_log").select("*").order("at", { ascending: false }).limit(limit);
+  if (error || !data) return null;
+  return (data as { id: number; at: string; user_id: string | null; username: string; role: string | null; site_id: string | null; plant: string | null; module: string; action: string; detail: string; impersonated_by: string | null }[]).map((r) => ({
+    id: `ra-${r.id}`,
+    at: r.at,
+    userId: r.user_id,
+    username: r.username,
+    role: r.role as AuditEntry["role"],
+    siteId: r.site_id,
+    plant: r.plant,
+    module: r.module,
+    action: r.action,
+    detail: r.detail,
+    impersonatedBy: r.impersonated_by,
+  }));
 }

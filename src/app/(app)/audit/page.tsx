@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   EmptyState,
   Panel,
@@ -18,9 +18,41 @@ import {
 import { canViewModule } from "@/lib/permissions";
 import { ROLES } from "@/lib/roles";
 import { useStore } from "@/lib/store";
+import { useWork } from "@/lib/work/store";
+import { remoteLoadAudit } from "@/lib/supabase/remote";
+import type { AuditEntry } from "@/lib/types";
 
 export default function AuditLogPage() {
   const { state, currentAccount } = useStore();
+  const { work } = useWork();
+  // Shared trail from Supabase (Step 11) when there's a backend; else this browser's log plus the Work events
+  const [remote, setRemote] = useState<AuditEntry[] | null>(null);
+  useEffect(() => {
+    let live = true;
+    void remoteLoadAudit().then((rows) => {
+      if (live) setRemote(rows);
+    });
+    return () => {
+      live = false;
+    };
+  }, []);
+  const auditLog = useMemo<AuditEntry[]>(() => {
+    if (remote) return remote;
+    const workRows: AuditEntry[] = work.events.map((ev) => ({
+      id: ev.id,
+      at: ev.at,
+      userId: null,
+      username: ev.actorName,
+      role: ev.actorRole,
+      siteId: ev.siteId || null,
+      plant: null,
+      module: "work",
+      action: ev.kind,
+      detail: ev.detail ? `${ev.title} — ${ev.detail}` : ev.title,
+      impersonatedBy: ev.impersonatedBy ?? null,
+    }));
+    return [...state.auditLog, ...workRows].sort((a, b) => b.at.localeCompare(a.at));
+  }, [remote, state.auditLog, work.events]);
   const allowed = canViewModule(currentAccount, state.currentRole, "audit");
 
   const [timeFrom, setTimeFrom] = useState("");
@@ -32,21 +64,21 @@ export default function AuditLogPage() {
   const [action, setAction] = useState("all");
 
   const modules = useMemo(
-    () => [...new Set(state.auditLog.map((a) => a.module))].sort(),
-    [state.auditLog]
+    () => [...new Set(auditLog.map((a) => a.module))].sort(),
+    [auditLog]
   );
   const actions = useMemo(
-    () => [...new Set(state.auditLog.map((a) => a.action))].sort(),
-    [state.auditLog]
+    () => [...new Set(auditLog.map((a) => a.action))].sort(),
+    [auditLog]
   );
   const plants = useMemo(
     () =>
-      [...new Set(state.auditLog.map((a) => a.plant).filter(Boolean) as string[])].sort(),
-    [state.auditLog]
+      [...new Set(auditLog.map((a) => a.plant).filter(Boolean) as string[])].sort(),
+    [auditLog]
   );
 
   const filtered = useMemo(() => {
-    return state.auditLog.filter((a) => {
+    return auditLog.filter((a) => {
       if (timeFrom && a.at < timeFrom) return false;
       if (user !== "all" && a.username !== user) return false;
       if (role !== "all" && a.role !== role) return false;
@@ -56,7 +88,7 @@ export default function AuditLogPage() {
       if (action !== "all" && a.action !== action) return false;
       return true;
     });
-  }, [state.auditLog, timeFrom, user, role, site, plant, module, action]);
+  }, [auditLog, timeFrom, user, role, site, plant, module, action]);
 
   if (!allowed) {
     return (
@@ -186,7 +218,7 @@ export default function AuditLogPage() {
 
       <Panel>
         <div className="mb-2 text-xs text-[var(--sge-ink-3)]">
-          Showing {filtered.length} of {state.auditLog.length} events
+          Showing {filtered.length} of {auditLog.length} events
         </div>
         {filtered.length === 0 ? (
           <EmptyState title="No events" detail="Adjust filters or perform actions." />
