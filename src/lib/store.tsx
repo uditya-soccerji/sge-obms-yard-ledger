@@ -147,9 +147,13 @@ interface StoreApi {
         | "supervisorId"
         | "aadhaar"
         | "mobile"
+        | "skill"
+        | "eic"
       >
     >
   ) => { ok: boolean; error?: string };
+  /** Bulk add from the CSV upload, with any new trades (B09) */
+  importLabourers: (rows: Omit<Labourer, "id">[], newTrades: { id: string; label: string }[], fileName: string) => { ok: boolean; error?: string; added: number };
   /** Master Data saves go to the server first when it's configured; local state changes only on success (B5) */
   upsertContractor: (row: Contractor) => Promise<{ ok: boolean; error?: string; id?: string }>;
   setContractorActive: (id: string, active: boolean) => Promise<{ ok: boolean; error?: string }>;
@@ -1102,6 +1106,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           | "supervisorId"
           | "aadhaar"
           | "mobile"
+          | "skill"
+          | "eic"
+          | "epHistory"
         >
       >
     ) => {
@@ -1110,10 +1117,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const before = cur.labourers.find((l) => l.id === id);
       if (!before) return { ok: false, error: "Labourer not found" };
       const merged = { ...before, ...patch };
-      const bad = checkLabourer(merged, cur.labourers);
+      // Imported people may still lack a crew / wage (B09): don't block other edits on that
+      const bad = checkLabourer(merged, cur.labourers, { allowIncomplete: !before.supervisorId || !(before.wageDaily > 0) });
       if (bad) return { ok: false, error: bad };
       patch = { ...patch, ...(patch.epNumber !== undefined ? { epNumber: normalizeEp(patch.epNumber)! } : {}) };
-      const changes = describeChanges(before, patch, ["aadhaar"]);
+      // docs §1: a new EP archives the old one with its date
+      if (patch.epNumber !== undefined && before.epNumber && normalizeEp(before.epNumber) && patch.epNumber !== normalizeEp(before.epNumber)) {
+        patch = { ...patch, epHistory: [...(before.epHistory ?? []), { ep: normalizeEp(before.epNumber)!, until: new Date().toISOString().slice(0, 10) }] };
+      }
+      const changes = describeChanges(before, patch, ["aadhaar", "epHistory"]);
       if (!changes) return { ok: true };
       setState((s) => {
         const next = { ...s, labourers: s.labourers.map((l) => (l.id === id ? { ...l, ...patch } : l)) };
@@ -1161,6 +1173,37 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     },
     []
   );
+
+  /**
+   * Add many labourers at once (B09 CSV upload), plus any trades the file needs
+   * that Master Data doesn't have yet. Rows were checked by checkImport; EPs are
+   * checked again here so nothing already used slips in.
+   */
+  const importLabourers = useCallback((rows: Omit<Labourer, "id">[], newTrades: { id: string; label: string }[], fileName: string) => {
+    const cur = stateRef.current;
+    if (!can(cur, "labourer", "create") && !can(cur, "master", "update")) return { ...DENIED, added: 0 };
+    if (!rows.length) return { ok: false, error: "Nothing to add", added: 0 };
+    const used = new Set(cur.labourers.flatMap((l) => [normalizeEp(l.epNumber), ...(l.epHistory ?? []).map((h) => normalizeEp(h.ep))]).filter(Boolean));
+    const clash = rows.find((r) => used.has(normalizeEp(r.epNumber)));
+    if (clash) return { ok: false, error: `EP ${clash.epNumber} is already used — check the file again`, added: 0 };
+    const made = rows.map((r) => ({ ...r, id: uid("lb"), name: r.name.trim(), epNumber: normalizeEp(r.epNumber)! }));
+    const trades = newTrades.filter((t) => !cur.tradeCatalogue.some((x) => x.id === t.id));
+    setState((s) => {
+      const next = {
+        ...s,
+        labourers: [...made, ...s.labourers],
+        tradeCatalogue: [...s.tradeCatalogue, ...trades.map((t) => ({ id: t.id, label: t.label, subcategories: [], active: true, siteId: null }))],
+      };
+      return {
+        ...next,
+        auditLog: [
+          makeAudit(next, "labourer", "import", `${made.length} labourers from ${fileName}${trades.length ? ` · ${trades.length} new trades` : ""}`),
+          ...s.auditLog,
+        ],
+      };
+    });
+    return { ok: true, added: made.length };
+  }, []);
 
   const upsertContractor = useCallback(async (row: Contractor) => {
     const id = row.id || uid("con");
@@ -1835,6 +1878,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       addTrade,
       updateLabourer,
       addLabourer,
+      importLabourers,
       removeLabourer,
       upsertContractor,
       setContractorActive,
@@ -1884,6 +1928,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       addTrade,
       updateLabourer,
       addLabourer,
+      importLabourers,
       removeLabourer,
       upsertContractor,
       setContractorActive,

@@ -275,7 +275,19 @@ export interface Labourer {
   wageDaily: number;
   equipmentIds: string[];
   active: boolean;
+  /** Skill level (B09, owner 2026-10-13); RIL "CATEGORY" */
+  skill?: SkillLevel;
+  /** Old EP numbers, newest last; the current one is `epNumber` (docs §1) */
+  epHistory?: { ep: string; until: string }[];
+  /** RIL Engineer-in-Charge: reference contact at RIL, shown on the profile (owner 2026-10-14) */
+  eic?: string;
+  /** RIL workman (pass) status, e.g. Valid, Expired, Hibernated (from the RIL export) */
+  rilStatus?: string;
+  /** RIL "Area Of Movement", e.g. "Refining - DTA-ISBL" */
+  rilArea?: string;
 }
+
+export type SkillLevel = "highly_skilled" | "skilled" | "semi_skilled" | "unskilled";
 
 export interface AttendanceRecord {
   id: string;

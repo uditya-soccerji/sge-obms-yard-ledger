@@ -20,6 +20,9 @@ import { MASTER_SHEETS, type MasterSheetId } from "@/lib/master/types";
 import { canAccessMasterData, masterSheetsFor } from "@/lib/desk";
 import { ROLES } from "@/lib/roles";
 import { useStore } from "@/lib/store";
+import { missingFields } from "@/lib/labourers";
+import { rilStatusProblem, SKILL_LEVELS } from "@/lib/labour-import";
+import { LabourImport } from "./labour-import";
 import { buildPlantDetails, parseRpTags, plantRp, sitePlantDetails } from "@/lib/sites";
 import type { CatalogItem, MaterialItem } from "@/lib/master/types";
 import type { Labourer, PlantDetail, RoleId, Site, UserAccount } from "@/lib/types";
@@ -958,7 +961,7 @@ function LabourSheet({
       if (!showInactive && !l.active) return false;
       if (!matchScope(l.siteId, activeSite, scope)) return false;
       if (!q.trim()) return true;
-      const hay = `${l.name} ${l.epNumber} ${l.trade}`.toLowerCase();
+      const hay = `${l.name} ${l.epNumber} ${l.trade} ${l.skill ?? ""} ${l.eic ?? ""} ${l.rilStatus ?? ""} ${(l.epHistory ?? []).map((h) => h.ep).join(" ")}`.toLowerCase();
       return hay.includes(q.trim().toLowerCase());
     });
   }, [state.labourers, activeSite, scope, showInactive, q]);
@@ -1000,7 +1003,9 @@ function LabourSheet({
   }
 
   const sel = "h-8 w-full rounded-sm border border-[var(--sge-line)] bg-[var(--sge-paper)] text-xs";
-  const cols = "grid-cols-[1.3fr_0.8fr_0.8fr_1fr_0.9fr_0.5fr_4rem_6.5rem]";
+  // B10: fixed minimum widths; cells may shrink, the register scrolls sideways on small screens
+  const cols = "grid-cols-[minmax(10rem,1.3fr)_minmax(7rem,0.8fr)_minmax(6.5rem,0.6fr)_minmax(8rem,0.8fr)_minmax(8rem,0.9fr)_minmax(8.5rem,0.9fr)_3.5rem_minmax(7rem,0.7fr)_4.5rem_6.5rem] [&>*]:min-w-0";
+  const [importing, setImporting] = useState(false);
 
   return (
     <Panel>
@@ -1016,6 +1021,9 @@ function LabourSheet({
         </div>
         <Button size="sm" onClick={() => setForm(form ? null : blank())}>
           {form ? "Close form" : "Add labourer"}
+        </Button>
+        <Button size="sm" variant="outline" onClick={() => setImporting(!importing)}>
+          {importing ? "Close upload" : "Upload CSV"}
         </Button>
         <span className="text-xs text-[var(--sge-ink-3)]">{rows.length} rows</span>
       </div>
@@ -1083,13 +1091,18 @@ function LabourSheet({
           </div>
         </div>
       ) : null}
+      {importing ? <LabourImport onClose={() => setImporting(false)} /> : null}
+      <div className="overflow-x-auto">
+      <div className="min-w-[1180px]">
       <div className={cn("grid gap-2 border-b border-[var(--sge-line)] px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--sge-ink-3)]", cols)}>
         <span>Name</span>
         <span>Trade</span>
+        <span>Skill</span>
         <span>Contractor</span>
         <span>Supervisor</span>
         <span>EP</span>
         <span>Site</span>
+        <span>RIL pass · EIC</span>
         <span>Wage</span>
         <span />
       </div>
@@ -1099,10 +1112,23 @@ function LabourSheet({
         height={Math.min(520, Math.max(180, rows.length * 44 + 8))}
         render={(l: Labourer) => (
           <div className={cn("grid h-full items-center gap-2 border-b border-[var(--sge-line)] px-2 text-sm", cols)}>
-            <BlurInput value={l.name} onSave={(v) => report(updateLabourer(l.id, { name: v }))} />
+            <div className="flex min-w-0 items-center gap-1">
+              <BlurInput value={l.name} onSave={(v) => report(updateLabourer(l.id, { name: v }))} />
+              {missingFields(l).length ? (
+                <span title={`Still to fill: ${missingFields(l).join(", ")}`} className="shrink-0 rounded-sm bg-[var(--sge-warn-wash)] px-1 text-[10px] font-semibold text-[var(--sge-brass-ink)]">
+                  {missingFields(l).length}
+                </span>
+              ) : null}
+            </div>
             <select className={sel} value={l.trade} onChange={(e) => report(updateLabourer(l.id, { trade: e.target.value }))}>
               {trades.map((t) => (
                 <option key={t.id} value={t.id}>{t.label}</option>
+              ))}
+            </select>
+            <select aria-label={`Skill for ${l.name}`} className={sel} value={l.skill ?? ""} onChange={(e) => report(updateLabourer(l.id, { skill: (e.target.value || undefined) as Labourer["skill"] }))}>
+              <option value="">—</option>
+              {SKILL_LEVELS.map((x) => (
+                <option key={x.id} value={x.id}>{x.label}</option>
               ))}
             </select>
             <select className={sel} value={l.contractorId ?? ""} onChange={(e) => report(updateLabourer(l.id, { contractorId: e.target.value }))}>
@@ -1116,12 +1142,22 @@ function LabourSheet({
                 <option key={x.id} value={x.id}>{x.name}</option>
               ))}
             </select>
-            <BlurInput
-              className="font-mono text-xs"
-              value={l.epNumber}
-              onSave={(v) => report(updateLabourer(l.id, { epNumber: normalizeEp(v) ?? v }))}
-            />
+            <span title={l.epHistory?.length ? `Old EPs: ${l.epHistory.map((h) => `${h.ep} (until ${h.until})`).join(", ")}` : undefined}>
+              <BlurInput
+                className="font-mono text-xs"
+                value={l.epNumber}
+                onSave={(v) => report(updateLabourer(l.id, { epNumber: normalizeEp(v) ?? v }))}
+              />
+            </span>
             <span className="text-xs">{siteCode(l.siteId)}</span>
+            <span className="truncate text-[11px]" title={[l.rilStatus && `RIL pass: ${l.rilStatus}`, l.rilArea && `Area: ${l.rilArea}`, l.eic && `EIC: ${l.eic}`].filter(Boolean).join(" · ") || undefined}>
+              {l.rilStatus ? (
+                <span className={rilStatusProblem(l.rilStatus) ? "font-semibold text-[var(--sge-crit)]" : "text-[var(--sge-ok)]"}>{l.rilStatus}</span>
+              ) : (
+                <span className="text-[var(--sge-ink-3)]">—</span>
+              )}
+              {l.eic ? <span className="block truncate text-[var(--sge-ink-3)]">{l.eic}</span> : null}
+            </span>
             <BlurInput
               type="number"
               min={1}
@@ -1148,6 +1184,8 @@ function LabourSheet({
           </div>
         )}
       />
+      </div>
+      </div>
     </Panel>
   );
 }

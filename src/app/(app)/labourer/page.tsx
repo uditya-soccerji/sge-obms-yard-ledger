@@ -17,6 +17,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useStore } from "@/lib/store";
+import { skillLabel } from "@/lib/labour-import";
 import { WORKING } from "@/lib/attendance";
 import { useMemo, useState } from "react";
 
@@ -131,15 +132,26 @@ function LabourerHomePage() {
             <div className="mt-2 grid grid-cols-2 gap-2 text-sm">
               <div>
                 <div className="text-[11px] uppercase text-[var(--sge-ink-3)]">
-                  Gate pass
+                  RIL pass
                 </div>
-                <div className="font-mono font-semibold">{labourer.gatePass}</div>
+                <div className={labourer.rilStatus && /expired|hibernat/i.test(labourer.rilStatus) ? "font-semibold text-[var(--sge-crit)]" : "font-semibold"}>
+                  {labourer.rilStatus ?? "—"}
+                </div>
               </div>
               <div>
                 <div className="text-[11px] uppercase text-[var(--sge-ink-3)]">
                   EP
                 </div>
                 <div className="font-mono font-semibold">{labourer.epNumber}</div>
+              </div>
+              {/* Owner 2026-10-14: EIC is the RIL contact, a fixed reference on the profile */}
+              <div>
+                <div className="text-[11px] uppercase text-[var(--sge-ink-3)]">EIC (RIL contact)</div>
+                <div className="text-sm">{labourer.eic ?? "—"}</div>
+              </div>
+              <div>
+                <div className="text-[11px] uppercase text-[var(--sge-ink-3)]">Skill</div>
+                <div className="text-sm">{skillLabel(labourer.skill)}</div>
               </div>
               <div className="col-span-2">
                 <div className="text-[11px] uppercase text-[var(--sge-ink-3)]">

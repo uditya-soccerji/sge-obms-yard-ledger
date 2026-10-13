@@ -10,6 +10,9 @@ Answers from the module-by-module review. Not built yet; implemented together at
 - **Daily wage:** a min–max range per trade, set in Master Data.
 - **Required fields:** mobile (10 digits, starts 6–9), trade sub-category (when the trade has them), contractor, supervisor.
 - **Delete:** Owner / Super Admin can delete; everyone else can only deactivate.
+- **Skill level (decided 2026-10-13):** Highly skilled, Skilled, Semi-skilled or Unskilled (RIL's "CATEGORY").
+- **Bulk upload (decided 2026-10-13/14):** CSV upload of our template or RIL's Employee Details export. An EP already used, now or in the past, is refused; the same Name + Trade + Skill as someone registered is a possible duplicate, added only when confirmed. People without a supervisor, wage or Aadhaar yet come in as incomplete and are flagged until filled.
+- **RIL details on the profile (decided 2026-10-14):** EIC (RIL Engineer-in-Charge, a reference contact, fixed text), RIL pass status (Valid / Expired / Hibernated / Terminated…) and RIL area of movement. Terminated → inactive. Site from the area: DTA, PCG (incl. SEZ) or SOLAR.
 
 ## 2. Users & logins
 - **Username:** lowercase, 3–20 chars, a–z / 0–9 / dot, no spaces (e.g. `uditya`, `r.mehta`).

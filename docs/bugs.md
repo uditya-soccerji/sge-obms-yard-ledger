@@ -2,7 +2,7 @@
 
 **Now on branch `fix/bugs-2026-10-14`, made from the latest `main` @ `7cfbdde`** (after the merge plan, PRs #12–#20).
 The first round of fixes was built on the old `main` (branch `fix/bugs-2026-10-13`, kept for reference, never merged) and is being **ported** here one by one.
-Port status: B01 ✅ already on `main` · B02 ✅ ported · B03 ⏳ · B04 ⏳ · B05 ⏳ · B06 ⏳ (top up `main`'s request flow) · B07 ⏳ · B08 ⏳ (add Admin + draft saves) · B09 ⏳ · B10 ⏳.
+Port status: B01 ✅ already on `main` · B02 ✅ ported · B03 ⏳ · B04 ⏳ · B05 ⏳ · B06 ⏳ (top up `main`'s request flow) · B07 ⏳ · B08 ⏳ (add Admin + draft saves) · B09 ✅ ported (+ RIL export, EIC) · B10 ✅ ported.
 
 Status: **open** (recorded) · **confirmed** (reproduced on the live site) · **fixed** (on this branch, checked on `npm run dev`) · **needs owner** (business-rule question) · **deployed**.
 Screenshots, when saved as files, go in `docs/bugs/` as `B<nn>-<n>.png`. Never include Aadhaar, bank or wage details.
@@ -251,4 +251,23 @@ Screenshots, when saved as files, go in `docs/bugs/` as `B<nn>-<n>.png`. Never i
 - Reported: 2026-10-13 (owner's screenshot): rows started at the Trade box; Name and EP were too narrow to read.
 - Cause: the dropdowns (Trade / Contractor / Supervisor) took their full text width, and grid children couldn't shrink, squeezing Name and EP to ~22 px.
 - Fix: fixed minimum column widths, children allowed to shrink, and the register scrolls sideways on narrow screens (min width 1,000 px). Verified: Name 160 px, EP 144 px.
+
+### B09 / B10 on the new `main` (2026-10-14)
+- Ported onto `main`'s labourer register, which already has its own add form, `checkLabourer` (`lib/labourers.ts`) and `normalizeEp` (`lib/ep.ts`). The upload reuses those rules.
+- New labourer fields: `skill`, `epHistory` (old EP archived with its date when it changes; `checkLabourer` also refuses an old EP), and, from the owner on 2026-10-14, **`eic`** (RIL Engineer-in-Charge, a reference contact shown as fixed text on the profile), **`rilStatus`** (Workman Status) and **`rilArea`** (Area Of Movement).
+- The upload (`lib/labour-import.ts`, `components/master/labour-import.tsx`) reads our template **and RIL's "Employee Details" export as it is** (Full Name, Worker ID, Trade, CATEGORY, Select EIC, Workman Status, Area Of Movement). Owner's choices, 2026-10-14:
+  - site from the area: Refining / OM&SH DTA → DTA, PCG and SEZ → PCG, Solar / NEI / Polysilicon / Glass → **SOLAR** (new site), otherwise the screen's site;
+  - "(Do Not Use)_X" trades filed under X; missing trades can be added to Master Data in the same step;
+  - "#N/A" category → skill blank (flagged);
+  - Terminated → inactive, Expired / Hibernated → active but shown in red;
+  - no contractor → Shree Gayatri Enterprise (own);
+  - no Aadhaar / supervisor / wage in the file → imported as **incomplete** (`checkLabourer(..., { allowIncomplete })`), with a count badge in the register ("still to fill: supervisor, wage, Aadhaar, skill").
+- Register (B10): fixed minimum column widths, sideways scroll, new Skill and "RIL pass · EIC" columns (hover = status, area, EIC). Search also finds skill, EIC, status and old EPs. Profile page shows RIL pass, EIC and skill.
+- **Owner's file imported into the local test app** (`App Dump/employees_list.xlsx` → `employees_list.csv`, same columns; served once to the page, never put in the repo):
+  - 1,825 rows → **1,781 added** (DTA 1,354 · PCG 215 · SOLAR 212) + **40 new trades**; 1 Terminated added as inactive; EIC on all 1,781.
+  - Skill: semi-skilled 805, unskilled 437, skilled 319, highly skilled 4, blank 216.
+  - Skipped: **5** with a bad or missing EP (2 garbled, 3 blank).
+  - Held back: **39** possible duplicates (same name, trade and skill as another row, each with its own Worker ID). Waiting for the owner.
+  - The register runs smoothly at 1,404 rows on DTA; no console errors. `tsc` + `eslint src` clean.
+- Note: the SOLAR site was added in the local app only. On the live site it's added in Master Data → Sites at deploy time (a live database write).
 
