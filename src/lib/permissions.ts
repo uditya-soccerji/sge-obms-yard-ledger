@@ -11,6 +11,7 @@ export type PermissionKey = `${ModuleId}:${PermissionAction}`;
 /** Default rights matrix per role (locked ACL picks). */
 const ROLE_MATRIX: Record<RoleId, Partial<Record<ModuleId, PermissionAction[]>>> = {
   super_admin: {
+    equipment: ["view", "create", "update"],
     crew: ["view", "approve", "update"],
     owner: ["view"],
     sic: ["view", "approve"],
@@ -36,6 +37,7 @@ const ROLE_MATRIX: Record<RoleId, Partial<Record<ModuleId, PermissionAction[]>>>
     master: ["view", "create", "update", "admin"],
   },
   owner: {
+    equipment: ["view", "create", "update"],
     owner: ["view"],
     crew: ["view", "approve", "update"],
     sic: ["view", "approve"],
@@ -63,6 +65,7 @@ const ROLE_MATRIX: Record<RoleId, Partial<Record<ModuleId, PermissionAction[]>>>
     master: ["view", "create", "update", "admin"],
   },
   sic: {
+    equipment: ["view", "create", "update"],
     // SIC changes crews and approves supervisors' requests (docs §20)
     crew: ["view", "approve"],
     sic: ["view"],
@@ -108,6 +111,8 @@ const ROLE_MATRIX: Record<RoleId, Partial<Record<ModuleId, PermissionAction[]>>>
     rates: ["view"],
   },
   supervisor: {
+    // Own setup only; may set an item's expiry (docs §7, B05)
+    equipment: ["view", "update"],
     supervisor: ["view", "create", "update", "submit"],
     // Sees own crew; picking labourers ("create") is granted per person by Owner / SA (docs §20)
     crew: ["view"],
@@ -118,6 +123,8 @@ const ROLE_MATRIX: Record<RoleId, Partial<Record<ModuleId, PermissionAction[]>>>
     submissions: ["view", "create", "submit"],
   },
   store: {
+    // Store issues items into supervisors' setups and keeps them up to date (docs §7, B05)
+    equipment: ["view", "create", "update"],
     store: ["view", "create", "update", "submit"],
     dpr: ["view", "create", "update", "submit", "upload"],
     requests: ["view", "update", "approve"],

@@ -19,6 +19,7 @@ import {
   canEditMovement942261,
 } from "@/lib/paint-lifecycle";
 import { useStore } from "@/lib/store";
+import { kindDef } from "@/lib/equipment";
 import type { PaintLifecycleStage } from "@/lib/types";
 
 function StoreHomePage() {
@@ -210,7 +211,7 @@ function StoreHomePage() {
 
       <Panel>
         <h3 className="mb-3 font-heading text-sm font-bold">
-          Equipment checklist — hopper / compressor / airless / harness
+          Equipment checklist — all site kit (setups: Operations → Equipment)
         </h3>
         <div className="grid gap-3 md:grid-cols-2">
           {state.equipment.map((eq) => (
@@ -222,7 +223,7 @@ function StoreHomePage() {
                 <div>
                   <div className="font-semibold">{eq.tag}</div>
                   <div className="text-xs capitalize text-[var(--sge-ink-3)]">
-                    {eq.type} · checked {eq.lastCheck}
+                    {kindDef(eq.type).label}{eq.qty ? ` × ${eq.qty}` : ""} · checked {eq.lastCheck}
                   </div>
                 </div>
                 <StatusPill

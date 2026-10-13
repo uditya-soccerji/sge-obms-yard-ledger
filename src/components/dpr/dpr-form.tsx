@@ -30,6 +30,7 @@ import type {
 import { useStore } from "@/lib/store";
 import { useWork } from "@/lib/work/store";
 import { sitePlantDetails } from "@/lib/site-scope";
+import { kindDef } from "@/lib/equipment";
 import { lineLitres, mpsNumber, mpsOptions, normLitres, normWarning, paintChoicesFor } from "@/lib/dpr-paint";
 import { ATTENDANCE_OPTIONS, otHours, timeProblem, WORKING } from "@/lib/attendance";
 
@@ -124,7 +125,11 @@ export function DprForm({
     [state.labourers, value.submitterId, value.submitterType]
   );
 
-  const equipment = state.equipment.filter((e) => e.siteId === value.siteId);
+  // B05: a field DPR checks the submitter's own setup; with no setup yet, the site's unassigned kit
+  const siteKit = state.equipment.filter((e) => e.siteId === value.siteId);
+  const ownSetup = siteKit.filter((e) => e.supervisorId === value.submitterId);
+  const fieldDpr = value.submitterType === "painting_blasting" || value.submitterType === "scaffolding";
+  const equipment = !fieldDpr ? siteKit : ownSetup.length ? ownSetup : siteKit.filter((e) => !e.supervisorId);
   // The DPR's site plants (docs §3: every DPR picks one of its site's plants)
   const site = state.sites.find((x) => x.id === value.siteId);
   const plants = site?.plants ?? [];
@@ -397,7 +402,7 @@ export function DprForm({
                     onCheckedChange={() => toggleEquipment(eq.id)}
                   />
                   <span>
-                    {eq.tag} · {eq.type}
+                    {eq.tag} · {kindDef(eq.type).label}{eq.qty ? ` × ${eq.qty}` : ""}
                   </span>
                 </div>
                 <div className="flex items-center gap-2 text-xs">

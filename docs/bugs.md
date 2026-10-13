@@ -13,7 +13,7 @@ Screenshots, when saved as files, go in `docs/bugs/` as `B<nn>-<n>.png`. Never i
 | B02 | 2026-10-13 | Super Admin · MTF · Master Data → Sites | Feature: plants need locations under them, and each plant/location needs an RP (MTF runs RP2 and RP5) | fixed (migration to apply at deploy) |
 | B03 | 2026-10-13 | Supervisor (Prasan Da, viewed as) · MTF · DPR → New | New supervisor's DPR shows an empty Labour attendance, and there's no way to give them labourers | fixed (shared database still to do) |
 | B04 | 2026-10-13 | Admin · DPR approvals | Admin approves DPR work quantities on SIC's behalf; both logged | fixed |
-| B05 | 2026-10-13 | Supervisor · DPR → Equipment assigned | Equipment needs a detailed per-supervisor "setup" list (kinds, expiry, FEFO/FIFO), with expiry added by the supervisor | open (ready to build) |
+| B05 | 2026-10-13 | Supervisor · DPR → Equipment assigned | Equipment needs a detailed per-supervisor "setup" list (kinds, expiry, FEFO/FIFO), with expiry added by the supervisor | fixed |
 | B06 | 2026-10-13 | Store / Central store · dashboard | Equipment status changes reach SIC + site store + central store; requests board with urgent first and status buttons | open (ready to build) |
 | B07 | 2026-10-13 | Supervisor (Prasan Da) · MTF · DPR → Painting/blasting work | Line needs plant, location, activity, area m², MPS, paint type and litres per paint type | fixed |
 | B08 | 2026-10-13 | Supervisor · DPR → Save / Submit | Save and Submit should notify SIC and Admin | fixed |
@@ -162,6 +162,22 @@ Screenshots, when saved as files, go in `docs/bugs/` as `B<nn>-<n>.png`. Never i
 - Fix plan: kinds list in Master Data (the 9 above, extendable). Item fields: tag (§7 `TYPE-SITE-##`), kind, assigned supervisor, issued on, expiry, status, qty for consumables (gloves, PPE kits), and a history of status/expiry changes. Setup view per supervisor with a FEFO/FIFO toggle and expiry badges (§7: warn 15 days before). The DPR lists only the supervisor's own setup. The supervisor can set or adjust an expiry; that's logged and the store is notified (B06).
 - Answers (2026-10-13): **IFR** is a protective **body suit**, about **₹5,000** each, so it's tracked per item, with its value. **Gloves and PPE kits** are counted **separately**: each is its own line with its own quantity (and expiry), not one tag per pair.
 - Added to the fix plan: an optional **unit value (₹)** per kind (IFR ₹5,000) so the setup shows what a supervisor holds in rupees. Kinds are either **tagged** (one record each: compressor, hopper, airless, harness, IFR, helmet, rope access) or **counted** (quantity + expiry per batch: gloves, PPE kits).
+
+- Fix (2026-10-13, branch `fix/bugs-2026-10-13`):
+  - Kinds (`src/lib/equipment.ts`, `EQUIPMENT_KINDS`): Compressor, Hopper, Airless spray painting machine, Harness, PPE kit (counted), IFR body suit (tagged, ₹5,000), Helmet, Gloves (counted), Rope access kit. Kept as a code list for now, not yet a Master Data sheet.
+  - `EquipmentItem` gains `supervisorId` (whose setup), `qty` (counted kinds), `issuedOn` (FIFO) and `history` (who / when / what). Pure helpers: `setupOf`, `sortSetup` (FEFO / FIFO), `equipExpiryState` (15-day warning, §7), `setupValue`, `nextTag` (TYPE-SITE-##), `checkExpiry`.
+  - Rights: new `equipment` module. SIC, Store, Owner, SA `view / create / update`; supervisor `view / update` (own setup, expiry only).
+  - Store actions: `issueEquipment` (tagged → one tag each, counted → one batch with qty), `assignEquipment` (site item into / out of a setup), `setEquipmentExpiry` (own item for a supervisor). Each writes item history and the audit log.
+  - **Operations → Equipment** (`/equipment`, `src/components/equipment/setup-desk.tsx`). SIC / Store / Owner / SA pick a supervisor, issue items (next tag shown) and add site items to the setup. A supervisor sees **My setup**. Both get the FEFO / FIFO toggle, expiry badges (EXPIRED / soon), "value held", and a click-to-open detail with expiry edit and full history.
+  - Bell `equipment_changed` → SIC and Store of the site. A Store login on all sites = the central store (B06), so it already hears every site. An expiry already past is a problem (instant); other changes go to the daily summary.
+  - DPR (painting / scaffolding): Equipment assigned lists the submitter's own setup; with no setup yet, the site's unassigned kit. Store / safety DPRs keep the site list. Readable kind labels on the DPR and Store page.
+  - Seed: DTA's hopper, compressor and airless go to V. Chauhan, its harnesses to K. Solanki; other sites alternate between their two supervisors (fresh browsers only).
+- Verified on `npm run dev`:
+  - As @store (DTA): 5 site items listed as not in any setup. Added HOP-DTA-03 and CMP-DTA-01 to V. Chauhan's setup; issued IFR × 2 (exp 2027-03-31) → "IFR-DTA-01, IFR-DTA-02"; gloves × 20 (exp 2026-10-20) → one batch GLV-DTA-01. Qty 0 refused. Setup: 5 items, "2 expiring / expired", "Value held ₹10,000", FEFO order CMP (EXPIRED) → GLV (soon) → HOP → IFR, IFR. Hint shows the real next tag (CMP-DTA-02).
+  - As @paint (V. Chauhan): **My setup** with no Issue box / no Return to store. Set CMP-DTA-01 expiry → "Expiry 2026-10-08 → 2027-04-08". History shows that and "A. Joshi · site store → V. Chauhan". New DPR's Equipment assigned = exactly his 5 items ("IFR-DTA-01 · IFR (body suit)", "GLV-DTA-01 · Gloves × 20").
+  - As @sic: the daily summary shows "5 Equipment changed".
+  - `tsc` + `eslint src` clean.
+- Not done: equipment, like labourers, is still saved per browser (not Supabase).
 
 ### B06: Equipment status → SIC + site store + central store; store requests board
 - Ask: any change in equipment status is shown to the **SIC**, the **Store manager of that site** and a **Central store manager** who sees all sites. Requests for **issue or exchange** appear on the store dashboard, **urgent first**, with buttons/filters: **SIC approval pending, fulfilled, not fulfilled, rejected**.

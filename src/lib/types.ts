@@ -36,7 +36,9 @@ export type ModuleId =
   | "rates"
   | "master"
   /** Supervisor crews: who works under whom (docs §20) */
-  | "crew";
+  | "crew"
+  /** Supervisor equipment setups (docs §7, B05) */
+  | "equipment";
 
 export type PermissionAction =
   | "view"
@@ -319,9 +321,20 @@ export interface PaintStockLine {
   updatedAt: string;
 }
 
+export type EquipmentKind =
+  | "hopper"
+  | "compressor"
+  | "airless"
+  | "harness"
+  | "ppe_kit"
+  | "ifr"
+  | "helmet"
+  | "gloves"
+  | "rope_access";
+
 export interface EquipmentItem {
   id: string;
-  type: "hopper" | "compressor" | "airless" | "harness";
+  type: EquipmentKind;
   tag: string;
   status: "ok" | "due" | "fault";
   assignedTo?: string;
@@ -330,6 +343,14 @@ export interface EquipmentItem {
   expiryDate?: string;
   checklist: { item: string; ok: boolean }[];
   siteId: string;
+  /** Supervisor (staff id) whose setup holds this item (docs §7, B05) */
+  supervisorId?: string;
+  /** Counted kinds (gloves, PPE kits): how many in this batch */
+  qty?: number;
+  /** When it was issued into the supervisor's setup (FIFO order) */
+  issuedOn?: string;
+  /** Every change to this item: who, when, what (B05) */
+  history?: { at: string; by: string; change: string }[];
 }
 
 /** Legacy thin DPR line kept for paint-variance gist rollups */

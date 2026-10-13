@@ -514,6 +514,9 @@ export function seedOtherSites(): SiteSeedRows {
         lastCheck: YDAY,
         expiryDate: e.expiry,
         siteId: sid,
+        // Demo setups (B05): items alternate between the site's two supervisors
+        supervisorId: `st-${k}-sup${(i % 2) + 1}`,
+        issuedOn: "2026-09-01",
         checklist: [
           { item: "Visual inspection", ok: e.status !== "fault" },
           { item: "Certificate valid", ok: e.status === "ok" },

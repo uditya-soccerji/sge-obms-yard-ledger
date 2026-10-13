@@ -30,7 +30,9 @@ export type EventKind =
   | "dpr_reviewed"
   // DPR saved / submitted (B08): the site's SIC and Admin
   | "dpr_saved"
-  | "dpr_submitted";
+  | "dpr_submitted"
+  // Equipment setup change (B05): SIC + store of the site (a Store login with all sites = central store)
+  | "equipment_changed";
 
 export interface WorkEvent {
   id: string;
@@ -91,6 +93,7 @@ export const KIND_LABEL: Record<EventKind, string> = {
   dpr_reviewed: "DPR reviewed",
   dpr_saved: "DPR draft saved",
   dpr_submitted: "DPR submitted",
+  equipment_changed: "Equipment changed",
 };
 
 const onSite = (v: Viewer, siteId: string) => v.siteIds.length === 0 || v.siteIds.includes(siteId);
@@ -142,6 +145,9 @@ export function isFor(e: WorkEvent, v: Viewer): boolean {
     case "dpr_submitted":
       // §5 (B08): saving or submitting a DPR notifies the site's SIC and Admin
       return mine || v.role === "sic" || v.role === "admin";
+    case "equipment_changed":
+      // §7 (B05/B06): SIC, the site's store and the central store (a Store login on all sites)
+      return mine || v.role === "sic" || v.role === "store";
   }
 }
 

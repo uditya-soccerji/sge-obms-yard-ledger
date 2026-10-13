@@ -18,6 +18,7 @@ import {
 import { dprCrew, validateDprForSubmit } from "./dpr-validate";
 import { approveBlock, checkCrewRequest } from "./crew";
 import { reviewedAsFor, reviewLine, siteSicId } from "./dpr-review";
+import { checkExpiry, kindDef, nextTag } from "./equipment";
 import { scoreFromMatchRatio } from "./estimate";
 import { effectivePermission } from "./permissions";
 import { PAINT_STAGE_ORDER } from "./paint-lifecycle";
@@ -46,6 +47,8 @@ import { checkSeat, checkSites } from "./users";
 import type {
   AcplMatchRow,
   CrewRequest,
+  EquipmentItem,
+  EquipmentKind,
   AcplPunchRow,
   AcplResolveStatus,
   AppState,
@@ -160,6 +163,10 @@ interface StoreApi {
     input: Omit<RateLine, "id" | "superseded"> & { id?: string; superseded?: boolean }
   ) => string;
   updateTrade: (id: string, patch: Partial<TradeDefinition>) => void;
+  /** Equipment setups (docs §7, B05) */
+  issueEquipment: (input: { kind: EquipmentKind; supervisorId: string; qty: number; expiryDate?: string }) => { ok: boolean; error?: string; tags: string[] };
+  assignEquipment: (itemId: string, supervisorId: string) => { ok: boolean; error?: string };
+  setEquipmentExpiry: (itemId: string, date: string) => { ok: boolean; error?: string; change?: string };
   /** Crews (docs §20) */
   assignCrew: (
     labourerIds: string[],
@@ -1736,6 +1743,106 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     []
   );
 
+  /** Issue new items into a supervisor's setup (docs §7, B05). Tagged kinds get one record per item. */
+  const issueEquipment = useCallback(
+    (input: { kind: EquipmentKind; supervisorId: string; qty: number; expiryDate?: string }) => {
+      const cur = stateRef.current;
+      if (!can(cur, "equipment", "create")) return { ...DENIED, tags: [] as string[] };
+      const sup = cur.staff.find((x) => x.id === input.supervisorId && x.role === "supervisor");
+      if (!sup) return { ok: false as const, error: "Pick a supervisor", tags: [] as string[] };
+      if (!(input.qty > 0) || !Number.isInteger(input.qty)) return { ok: false as const, error: "Quantity must be a whole number above 0", tags: [] as string[] };
+      if (input.expiryDate) {
+        const bad = checkExpiry(input.expiryDate);
+        if (bad) return { ok: false as const, error: bad, tags: [] as string[] };
+      }
+      const site = cur.sites.find((x) => x.id === sup.siteId);
+      const def = kindDef(input.kind);
+      const now = new Date().toISOString();
+      const by = cur.currentUserId ?? "system";
+      const made: EquipmentItem[] = [];
+      const count = def.tracking === "counted" ? 1 : input.qty;
+      for (let i = 0; i < count; i++) {
+        const tag = nextTag(input.kind, site?.code ?? "SITE", [...cur.equipment, ...made]);
+        made.push({
+          id: uid("eq"),
+          type: input.kind,
+          tag,
+          status: "ok",
+          lastCheck: now.slice(0, 10),
+          ...(input.expiryDate ? { expiryDate: input.expiryDate } : {}),
+          checklist: [],
+          siteId: sup.siteId,
+          supervisorId: sup.id,
+          ...(def.tracking === "counted" ? { qty: input.qty } : {}),
+          issuedOn: now.slice(0, 10),
+          history: [{ at: now, by, change: `Issued to ${sup.name}${def.tracking === "counted" ? ` · qty ${input.qty}` : ""}` }],
+        });
+      }
+      setState((s) => {
+        const next = { ...s, equipment: [...s.equipment, ...made] };
+        return {
+          ...next,
+          auditLog: [
+            makeAudit(next, "equipment", "issue", `${made.map((m) => m.tag).join(", ")} (${def.label}${def.tracking === "counted" ? ` × ${input.qty}` : ""}) → ${sup.name}`),
+            ...s.auditLog,
+          ],
+        };
+      });
+      return { ok: true as const, tags: made.map((m) => m.tag) };
+    },
+    []
+  );
+
+  /** Put an existing site item into a supervisor's setup, or take it out ("" = site store). */
+  const assignEquipment = useCallback((itemId: string, supervisorId: string) => {
+    const cur = stateRef.current;
+    if (!can(cur, "equipment", "create")) return DENIED;
+    const item = cur.equipment.find((e) => e.id === itemId);
+    if (!item) return { ok: false as const, error: "Item not found" };
+    const sup = supervisorId ? cur.staff.find((x) => x.id === supervisorId && x.role === "supervisor") : undefined;
+    if (supervisorId && (!sup || sup.siteId !== item.siteId)) return { ok: false as const, error: "Pick a supervisor on the item's site" };
+    const from = item.supervisorId ? cur.staff.find((x) => x.id === item.supervisorId)?.name ?? item.supervisorId : "site store";
+    const to = sup?.name ?? "site store";
+    const now = new Date().toISOString();
+    setState((s) => {
+      const next = {
+        ...s,
+        equipment: s.equipment.map((e) =>
+          e.id === itemId
+            ? { ...e, supervisorId: sup?.id, issuedOn: sup ? now.slice(0, 10) : e.issuedOn, history: [...(e.history ?? []), { at: now, by: s.currentUserId ?? "system", change: `${from} → ${to}` }] }
+            : e
+        ),
+      };
+      return { ...next, auditLog: [makeAudit(next, "equipment", "assign", `${item.tag}: ${from} → ${to}`), ...s.auditLog] };
+    });
+    return { ok: true as const };
+  }, []);
+
+  /** Set an item's expiry: the supervisor on their own setup, or SIC / store / Owner / SA (B05). Logged. */
+  const setEquipmentExpiry = useCallback((itemId: string, date: string) => {
+    const cur = stateRef.current;
+    if (!can(cur, "equipment", "update")) return DENIED;
+    const item = cur.equipment.find((e) => e.id === itemId);
+    if (!item) return { ok: false as const, error: "Item not found" };
+    const manager = can(cur, "equipment", "create");
+    if (!manager && item.supervisorId !== cur.currentUserId) return { ok: false as const, error: "Only your own setup" };
+    const bad = checkExpiry(date);
+    if (bad) return { ok: false as const, error: bad };
+    if (date === item.expiryDate) return { ok: false as const, error: "That's already the expiry" };
+    const now = new Date().toISOString();
+    const change = `Expiry ${item.expiryDate ?? "—"} → ${date}`;
+    setState((s) => {
+      const next = {
+        ...s,
+        equipment: s.equipment.map((e) =>
+          e.id === itemId ? { ...e, expiryDate: date, history: [...(e.history ?? []), { at: now, by: s.currentUserId ?? "system", change }] } : e
+        ),
+      };
+      return { ...next, auditLog: [makeAudit(next, "equipment", "expiry", `${item.tag}: ${change}`), ...s.auditLog] };
+    });
+    return { ok: true as const, change };
+  }, []);
+
   /** SIC / Owner / SA put labourers on a supervisor's crew (docs §20). Reports who moved off another crew. */
   const assignCrew = useCallback((labourerIds: string[], supervisorId: string) => {
     const cur = stateRef.current;
@@ -2614,6 +2721,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       setCatalogActive,
       upsertSite,
       assignCrew,
+      issueEquipment,
+      assignEquipment,
+      setEquipmentExpiry,
       removeFromCrew,
       requestCrew,
       releaseCrew,
@@ -2674,6 +2784,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       setCatalogActive,
       upsertSite,
       assignCrew,
+      issueEquipment,
+      assignEquipment,
+      setEquipmentExpiry,
       removeFromCrew,
       requestCrew,
       releaseCrew,
