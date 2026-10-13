@@ -524,7 +524,36 @@ export function createSeedState(): AppState {
         client: "Sikka Ports & Terminals Limited",
         enabled: true,
         rpTags: ["RP2", "RP5"],
-        plants: ["MTF", "ARMA"],
+        plants: ["MTF", "ARMA", "RRTF"],
+        // From the owner's MTF location sheet (2026-10-13); every location takes its plant's RP
+        plantDetails: [
+          {
+            name: "MTF",
+            rp: "RP5",
+            locations: [
+              { name: "LFP to Saipem" },
+              { name: "Saipem to DTA product (CT vicinity)" },
+              { name: "Crude ISBL" },
+              { name: "Haul road" },
+              { name: "Culvert-2" },
+            ],
+          },
+          { name: "ARMA", rp: "RP2", locations: [] },
+          {
+            name: "RRTF",
+            rp: "RP5",
+            locations: [
+              { name: "North culvert" },
+              { name: "RRTF ISBL/OSBL CORRIDOR" },
+              { name: "LPG RAIL GANTRY" },
+              { name: "LPG RACK" },
+              { name: "RIL-1" },
+              { name: "RIL-2" },
+              { name: "South culvert" },
+              { name: "Street-3 end culvert" },
+            ],
+          },
+        ],
       },
       {
         id: "site-marine",

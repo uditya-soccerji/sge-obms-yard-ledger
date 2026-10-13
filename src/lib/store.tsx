@@ -37,7 +37,7 @@ import type { CatalogItem, Contractor, MasterCatalog, MaterialItem } from "./mas
 import { createSeedState, STORAGE_KEY } from "./seed";
 import type { DprReport } from "./work/types";
 import { ALL_SITES, canSeeAllSites, canSwitchSites, entrySiteId, landingSite, scopeState } from "./site-scope";
-import { checkSite } from "./sites";
+import { checkPlantRps, checkSite } from "./sites";
 import { normalizeEp } from "./ep";
 import { checkLabourer, describeChanges } from "./labourers";
 import { daysAgo } from "./today";
@@ -293,6 +293,7 @@ function migrateState(parsed: Partial<AppState>): AppState {
             ...s,
             rpTags: s.rpTags ?? [],
             plants: s.plants ?? [],
+            plantDetails: s.plantDetails ?? [],
           }))
         : seed.sites,
     wageLedger: parsed.wageLedger ?? seed.wageLedger,
@@ -1305,7 +1306,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const upsertSite = useCallback(async (input: AppState["sites"][number]) => {
     if (!can(stateRef.current, "master", "update")) return DENIED;
     const site = { ...input, code: input.code.trim().toUpperCase(), name: input.name.trim(), plants: input.plants.map((p) => p.trim()).filter(Boolean) };
-    const bad = checkSite(site, stateRef.current.sites);
+    const bad = checkSite(site, stateRef.current.sites) ?? checkPlantRps(site.rpTags, site.plantDetails ?? []);
     if (bad) return { ok: false, error: bad };
     const saved = await remoteSaveSite(site);
     if (!saved.ok) return saved;
