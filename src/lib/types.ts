@@ -199,13 +199,6 @@ export type DprSubmitterType =
   | "safety"
   | "store";
 
-export type DprStatus =
-  | "draft"
-  | "submitted"
-  | "sic_approved"
-  | "sic_rejected"
-  | "locked";
-
 export type AcplMatchFlag =
   | "match"
   | "dpr_only"
@@ -329,24 +322,6 @@ export interface EquipmentItem {
 }
 
 /** Legacy thin DPR line kept for paint-variance gist rollups */
-export interface DprEntry {
-  id: string;
-  date: string;
-  type: "painting" | "blasting" | "scaffolding";
-  supervisorId: string;
-  siteId: string;
-  plant: string;
-  location: string;
-  mpsScheme?: number;
-  areaM2?: number;
-  volumeM3?: number;
-  paintLitres?: number;
-  crewCount: number;
-  note: string;
-  permitOk: boolean;
-  tbtDone: boolean;
-}
-
 export interface DprLabourMark {
   labourerId: string;
   status: AttendanceStatus;
@@ -368,17 +343,6 @@ export interface DprRequest {
   description: string;
   qty?: number;
   urgent?: boolean;
-}
-
-export interface DprPaintWorkLine {
-  id: string;
-  plant: string;
-  bay: string;
-  activity: "painting" | "blasting";
-  areaM2: number;
-  mpsScheme?: number;
-  paintLitres?: number;
-  note?: string;
 }
 
 export interface DprScaffoldWorkLine {
@@ -509,40 +473,6 @@ export interface DprStoreBody {
   issues: { toSupervisorId: string; sapCode: string; qtyLitres: number; note?: string }[];
   receipts: { sapCode: string; qtyLitres: number; note?: string }[];
   sparesMovement: { item: string; direction: "in" | "out"; qty: number; note?: string }[];
-}
-
-/** Full shared DPR document (v2 verification model) */
-export interface DprDocument {
-  id: string;
-  date: string;
-  siteId: string;
-  plant: string;
-  submitterId: string;
-  submitterType: DprSubmitterType;
-  status: DprStatus;
-  labourMarks: DprLabourMark[];
-  equipmentMarks: DprEquipmentMark[];
-  requests: DprRequest[];
-  nextDayPlan: string;
-  note: string;
-  telegramDraftLines: string[];
-  paintWork?: DprPaintWorkLine[];
-  scaffoldWork?: DprScaffoldWorkLine[];
-  safetyBody?: DprSafetyBody;
-  storeBody?: DprStoreBody;
-  /** Work permit seen and in force (docs §5: required before submitting) */
-  permitOk?: boolean;
-  /** Toolbox talk held with the crew (docs §5: required before submitting) */
-  tbtDone?: boolean;
-  /** Why the DPR reports no quantity, when it reports none (docs §5) */
-  zeroReason?: string;
-  /** Owner / Super Admin unlocks of an approved DPR, with the reason (docs §5) */
-  unlocks?: { by: string; at: string; reason: string }[];
-  sicNote?: string;
-  sicReviewedBy?: string;
-  sicReviewedAt?: string;
-  createdAt: string;
-  updatedAt: string;
 }
 
 export interface WorkPlanItem {
@@ -800,9 +730,6 @@ export interface AppState {
   attendance: AttendanceRecord[];
   paintStock: PaintStockLine[];
   equipment: EquipmentItem[];
-  /** Legacy thin DPR lines (paint gist); prefer dprDocuments for verification */
-  dprs: DprEntry[];
-  dprDocuments: DprDocument[];
   workPlans: WorkPlanItem[];
   safetyDays: SafetyChecklistDay[];
   finance: FinanceEntry[];

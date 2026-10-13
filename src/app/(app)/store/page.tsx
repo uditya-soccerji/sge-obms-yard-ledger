@@ -20,12 +20,14 @@ import {
   canEditMovement942261,
 } from "@/lib/paint-lifecycle";
 import { useStore } from "@/lib/store";
+import { useSiteReports } from "@/lib/work/use-reports";
 import { paintVariance } from "@/lib/paint-variance";
 import { useState } from "react";
 import type { PaintLifecycleStage, StaffMember } from "@/lib/types";
 
 function StoreHomePage() {
   const { state, advancePaintStage, updatePaintLine, setEquipmentStatus } = useStore();
+  const reports = useSiteReports();
   const [boardMsg, setBoardMsg] = useState<string | null>(null);
   const [faults, setFaults] = useState<Record<string, string>>({});
   const isStore = state.currentRole === "store" || state.currentRole === "super_admin";
@@ -49,7 +51,7 @@ function StoreHomePage() {
       (p.rilPosted != null && p.sgeUsed != null && p.rilPosted > 0)
   );
 
-  const storeDprs = state.dprDocuments.filter((d) => d.submitterType === "store");
+  const storeDprs = reports.filter((d) => d.submitterType === "store");
 
   return (
     <div className="sge-enter space-y-6">

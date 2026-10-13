@@ -12,9 +12,14 @@ import {
 } from "@/components/shared/ui-bits";
 import { Button } from "@/components/ui/button";
 import { useStore } from "@/lib/store";
+import { useSiteReports } from "@/lib/work/use-reports";
+import { useWork } from "@/lib/work/store";
+import { reportArea } from "@/lib/work/reports";
 
 function SupervisorHomePage() {
   const { state } = useStore();
+  const reports = useSiteReports();
+  const { work } = useWork();
 
   const supervisorId =
     state.currentUserId &&
@@ -44,7 +49,7 @@ function SupervisorHomePage() {
       (p.stage === "issued" || p.stage === "consumed" || p.stage === "reco")
   );
 
-  const myDocs = state.dprDocuments.filter(
+  const myDocs = reports.filter(
     (d) => d.submitterId === supervisorId && d.submitterType === myDprType
   );
   const myPlans = state.workPlans.filter((d) => d.supervisorId === supervisorId);
@@ -122,9 +127,7 @@ function SupervisorHomePage() {
               <div className="mt-1 font-mono text-[11px] text-[var(--sge-ink-3)]">
                 labour {d.labourMarks.length} · eq {d.equipmentMarks.length} · req{" "}
                 {d.requests.length}
-                {d.paintWork?.length
-                  ? ` · ${d.paintWork.reduce((n, w) => n + w.areaM2, 0)} m²`
-                  : ""}
+                {reportArea(work, d.id) ? ` · ${reportArea(work, d.id)} m²` : ""}
                 {d.scaffoldWork?.length
                   ? ` · ${d.scaffoldWork.reduce((n, w) => n + w.standingM3, 0)} m³`
                   : ""}

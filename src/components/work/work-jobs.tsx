@@ -11,6 +11,8 @@ import { canCloseJob, effectiveEntries, entryArea, entryDiffs, finalStage, jobSt
 import { daysAgo } from "@/lib/today";
 import { today } from "@/lib/today";
 import { useWork } from "@/lib/work/store";
+import { pendingReports, reportOpen } from "@/lib/work/reports";
+import Link from "next/link";
 import type { Job, Member, Stage } from "@/lib/work/types";
 import { STAGES } from "@/lib/work/types";
 import { cn } from "@/lib/utils";
@@ -20,7 +22,7 @@ type Filter = "open" | "awaiting_sic" | "closed";
 
 export function WorkJobs() {
   const { state } = useStore();
-  const { requestClose, confirmJms, rejectClose } = useWork();
+  const { requestClose, confirmJms, rejectClose, reviewReport } = useWork();
   const s = useWorkScope();
   const { work } = s;
   const [filter, setFilter] = useState<Filter>("open");
@@ -81,6 +83,9 @@ export function WorkJobs() {
         const jms = work.jms.find((x) => x.id === job.jmsId);
         const diffs = entryDiffs(entries);
         const counted = new Set(effectiveEntries(entries).map((e) => e.id));
+        const reportOfEntry = (id?: string) => work.reports.find((r) => r.id === id);
+        const pending = pendingReports(job, work);
+        const toReview = pending.filter((r) => r.status === "submitted");
         return (
           <Panel key={job.id}>
             <div className="flex flex-wrap items-start justify-between gap-3">
@@ -146,6 +151,40 @@ export function WorkJobs() {
               </div>
             </div>
 
+            {job.status !== "closed" && pending.length ? (
+              <div className="mt-3 rounded-sm border border-[var(--sge-warn)]/40 bg-[var(--sge-warn-wash)] p-2.5 text-xs">
+                <div className="mb-1 font-semibold text-[var(--sge-warn)]">
+                  {pending.some(reportOpen) ? "DPRs still with the supervisor" : "DPRs waiting for SIC review"} — the JMS can be confirmed once every DPR is approved
+                </div>
+                {pending.map((r) => {
+                  const lines = work.dprs.filter((d) => d.reportId === r.id);
+                  const worked = r.labourMarks.filter((m) => m.status === "present" || m.status === "half" || m.status === "overtime").length;
+                  return (
+                    <div key={r.id} className="flex flex-wrap items-center gap-2 font-mono">
+                      <Link className="text-[var(--sge-brass-ink)] underline" href={`/dpr/${r.id}`}>{r.date} · {r.plant}</Link>
+                      <span>{r.status === "submitted" ? "submitted" : r.status === "sic_rejected" ? "sent back" : "draft"}</span>
+                      <span>· crew {worked}/{r.labourMarks.length}</span>
+                      <span>· {fmtM2(lines.reduce((t, e) => t + entryArea(e), 0))} m²</span>
+                      <span>· {lines.reduce((t, e) => t + e.litres, 0)} L</span>
+                    </div>
+                  );
+                })}
+                {s.canConfirm && toReview.length && !pending.some(reportOpen) ? (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="mt-2"
+                    onClick={() => {
+                      const bad = toReview.map((r) => reviewReport(r.id, "sic_approved", "")).find((x) => !x.ok);
+                      setMsg(bad && !bad.ok ? { ok: false, msg: bad.error } : { ok: true, msg: `${toReview.length} DPR(s) approved — each one is logged. Now confirm the JMS.` });
+                    }}
+                  >
+                    Approve all {toReview.length} listed
+                  </Button>
+                ) : null}
+              </div>
+            ) : null}
+
             {sendBack?.jobId === job.id ? (
               <form
                 className="mt-3 flex flex-wrap items-end gap-2 rounded-sm border border-[var(--sge-crit)]/40 bg-[var(--sge-crit-wash)]/50 p-2.5"
@@ -199,6 +238,7 @@ export function WorkJobs() {
                       <th className="px-2 py-1.5 text-right">DFT</th>
                       <th className="px-2 py-1.5 text-right">Crew</th>
                       <th className="px-2 py-1.5 text-left">Entered by</th>
+                      <th className="px-2 py-1.5 text-left">DPR</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -216,6 +256,15 @@ export function WorkJobs() {
                           {e.enteredByName ? <span className="text-[var(--sge-ink-3)]"> · {e.enteredByName}</span> : null}
                           {counted.has(e.id) ? null : <span className="ml-1 text-[var(--sge-ink-3)]">· not counted (Admin&apos;s figure used)</span>}
                         </td>
+                        <td className="px-2 py-1.5">
+                          {reportOfEntry(e.reportId) ? (
+                            <Link className="text-[var(--sge-brass-ink)] underline" href={`/dpr/${e.reportId}`}>
+                              {reportOfEntry(e.reportId)!.status.replace("sic_", "").replace("rejected", "sent back")}
+                            </Link>
+                          ) : (
+                            <span className="text-[var(--sge-ink-3)]">history</span>
+                          )}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -223,7 +272,7 @@ export function WorkJobs() {
               </div>
             ) : null}
 
-            {dprFor === job.id ? <DprForm job={job} onDone={(m) => { setMsg(m); if (m.ok) setDprFor(null); }} /> : null}
+            {dprFor === job.id ? <JobEntryForm job={job} onDone={(m) => { setMsg(m); if (m.ok) setDprFor(null); }} /> : null}
           </Panel>
         );
       })}
@@ -235,14 +284,19 @@ export function WorkJobs() {
 
 const blankMember = (): Member => ({ name: "", nos: 1, side: 1, length: 0, cf: 0 });
 
-function DprForm({ job, onDone }: { job: Job; onDone: (m: { ok: boolean; msg: string }) => void }) {
+/**
+ * One job line (members, paint, crew) — used on the Work job card and inside
+ * the DPR desk form. The line goes on the day's open report, or on `reportId`.
+ */
+export function JobEntryForm({ job, onDone, reportId, fixedDate }: { job: Job; onDone: (m: { ok: boolean; msg: string }) => void; reportId?: string; fixedDate?: string }) {
   const { state: appState } = useStore();
   const { addDpr } = useWork();
   const s = useWorkScope();
   const line = s.line(job.planLineId)!;
   const it = s.item(line.serviceCode);
   const fin = finalStage(job);
-  const [date, setDate] = useState(today());
+  const [pickedDate, setDate] = useState(today());
+  const date = fixedDate ?? pickedDate;
   const done = jobStageAreas(job, s.work.dprs);
   const [stage, setStage] = useState<Stage>(job.stages.find((x) => done[x] <= 0) ?? job.stages[0]);
   const [members, setMembers] = useState<Member[]>([blankMember()]);
@@ -272,9 +326,9 @@ function DprForm({ job, onDone }: { job: Job; onDone: (m: { ok: boolean; msg: st
         const rows = validMembers(members);
         if (rows.error) return setErr(rows.error);
         if (stage === fin && it?.paints.length && !(Number(dft) > 0)) return setErr("Actual DFT is required at final shade");
-        const r = addDpr({ date, jobId: job.id, stage, members, paintSap: lit > 0 ? paintSap : undefined, litres: lit, dft: Number(dft) || undefined, enteredBy: s.enteredBy, crew });
+        const r = addDpr({ date, jobId: job.id, reportId, stage, members, paintSap: lit > 0 ? paintSap : undefined, litres: lit, dft: Number(dft) || undefined, enteredBy: s.enteredBy, crew });
         if (!r.ok) return setErr(r.error);
-        onDone({ ok: true, msg: `DPR entry saved: ${fmtM2(area)} m² ${STAGES.find((x) => x.id === stage)?.label} on ${job.jobNo}.` });
+        onDone({ ok: true, msg: `Saved: ${fmtM2(area)} m² ${STAGES.find((x) => x.id === stage)?.label} on ${job.jobNo}.${reportId ? "" : " It's on today's DPR — submit it to SIC from the DPR desk."}` });
       }}
     >
       <div className="grid gap-3 sm:grid-cols-3">
@@ -287,6 +341,7 @@ function DprForm({ job, onDone }: { job: Job; onDone: (m: { ok: boolean; msg: st
             min={canBackdate ? job.startDate : [daysAgo(1), job.startDate].sort().pop()}
             max={today()}
             value={date}
+            disabled={!!fixedDate}
             onChange={(e) => setDate(e.target.value)}
           />
         </div>

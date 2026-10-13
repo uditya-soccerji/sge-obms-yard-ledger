@@ -16,15 +16,17 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { SafetyDprForm } from "@/components/dpr/safety-dpr-form";
-import { blankSafetyBody } from "@/lib/safety-dpr";
 import type {
   AttendanceStatus,
-  DprDocument,
-  DprPaintWorkLine,
   DprRequest,
   DprScaffoldWorkLine,
-  DprSubmitterType,
 } from "@/lib/types";
+import type { DprReport } from "@/lib/work/types";
+import { blankReport, reportOpen } from "@/lib/work/reports";
+import { useWork } from "@/lib/work/store";
+import { entryArea, round3 } from "@/lib/work/logic";
+import { STAGES } from "@/lib/work/types";
+import { JobEntryForm } from "@/components/work/work-jobs";
 import { useStore } from "@/lib/store";
 import { ATTENDANCE_OPTIONS, otHours, timeProblem, WORKING } from "@/lib/attendance";
 
@@ -32,77 +34,16 @@ function uid(prefix: string) {
   return `${prefix}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
-export function blankDpr(opts: {
-  submitterId: string;
-  submitterType: DprSubmitterType;
-  siteId: string;
-}): DprDocument {
-  const now = new Date().toISOString();
-  return {
-    id: uid("dprd"),
-    date: todayDate(),
-    siteId: opts.siteId,
-    // Picked from the site's plant list (docs §3), never assumed
-    plant: "",
-    submitterId: opts.submitterId,
-    submitterType: opts.submitterType,
-    status: "draft",
-    labourMarks: [],
-    equipmentMarks: [],
-    requests: [],
-    nextDayPlan: "",
-    note: "",
-    telegramDraftLines: [],
-    paintWork:
-      opts.submitterType === "painting_blasting"
-        ? [
-            {
-              id: uid("pw"),
-              plant: "",
-              bay: "",
-              activity: "painting",
-              areaM2: 0,
-              mpsScheme: 2,
-              paintLitres: 0,
-            },
-          ]
-        : undefined,
-    scaffoldWork:
-      opts.submitterType === "scaffolding"
-        ? [
-            {
-              id: uid("sw"),
-              plant: "",
-              location: "",
-              erectM3: 0,
-              dismantleM3: 0,
-              standingM3: 0,
-            },
-          ]
-        : undefined,
-    safetyBody:
-      opts.submitterType === "safety" ? blankSafetyBody() : undefined,
-    storeBody:
-      opts.submitterType === "store"
-        ? {
-            stockByPlant: [{ plant: "", paintLitres: 0 }],
-            issues: [],
-            receipts: [],
-            sparesMovement: [],
-          }
-        : undefined,
-    createdAt: now,
-    updatedAt: now,
-  };
-}
+/** A new daily report (kept under the old name for the DPR desk pages). */
+export const blankDpr = blankReport;
 
 export function DprForm({
   value,
   onChange,
   readOnly,
 }: {
-  value: DprDocument;
-  onChange: (next: DprDocument) => void;
+  value: DprReport;
+  onChange: (next: DprReport) => void;
   readOnly?: boolean;
 }) {
   const { state } = useStore();
@@ -490,14 +431,7 @@ export function DprForm({
         )}
       </Panel>
 
-      {value.submitterType === "painting_blasting" && value.paintWork ? (
-        <PaintWorkEditor
-          lines={value.paintWork}
-          plants={plants}
-          readOnly={readOnly}
-          onChange={(paintWork) => onChange({ ...value, paintWork })}
-        />
-      ) : null}
+      {value.submitterType === "painting_blasting" ? <JobLines report={value} readOnly={readOnly} /> : null}
 
       {value.submitterType === "scaffolding" && value.scaffoldWork ? (
         <ScaffoldWorkEditor
@@ -601,161 +535,101 @@ export function DprForm({
   );
 }
 
-function PaintWorkEditor({
-  lines,
-  plants,
-  onChange,
-  readOnly,
-}: {
-  lines: DprPaintWorkLine[];
-  plants: string[];
-  onChange: (lines: DprPaintWorkLine[]) => void;
-  readOnly?: boolean;
-}) {
+/**
+ * Painting & blasting quantities on a DPR are job lines (merge plan Step 4):
+ * each picks an open job on this plant and a stage, with measured members,
+ * paint and crew — the same line the Work job card adds. They move the job on.
+ */
+function JobLines({ report, readOnly }: { report: DprReport; readOnly?: boolean }) {
+  const { work, removeEntry } = useWork();
+  const [adding, setAdding] = useState<string>("");
+  const [msg, setMsg] = useState<{ ok: boolean; msg: string } | null>(null);
+  const saved = work.reports.some((r) => r.id === report.id);
+  const lines = work.dprs.filter((d) => d.reportId === report.id);
+  const jobs = work.jobs.filter((j) => {
+    const line = work.planLines.find((l) => l.id === j.planLineId);
+    return j.status === "open" && j.supervisorId === report.submitterId && line?.siteId === report.siteId && line.plant === report.plant;
+  });
+  const jobNo = (id: string) => work.jobs.find((j) => j.id === id)?.jobNo ?? id;
+  const editable = !readOnly && saved && reportOpen(report);
+  const job = jobs.find((j) => j.id === adding);
   return (
     <Panel>
-      <div className="mb-3 flex items-center justify-between">
-        <h3 className="font-heading text-sm font-bold uppercase tracking-wide text-[var(--sge-ink-3)]">
-          Painting / blasting work
-        </h3>
-        {!readOnly ? (
-          <Button
-            size="sm"
-            variant="outline"
-            type="button"
-            onClick={() =>
-              onChange([
-                ...lines,
-                {
-                  id: uid("pw"),
-                  plant: lines[lines.length - 1]?.plant ?? "",
-                  bay: "",
-                  activity: "painting",
-                  areaM2: 0,
-                  mpsScheme: 2,
-                  paintLitres: 0,
-                },
-              ])
-            }
-          >
-            Add line
-          </Button>
-        ) : null}
-      </div>
-      <div className="space-y-3">
-        {lines.map((line, idx) => (
-          <div
-            key={line.id}
-            className="grid gap-2 rounded-md border border-[var(--sge-line)] p-3 sm:grid-cols-3"
-          >
-            <div>
-              <Label>Plant</Label>
-              <select
-                className="mt-1 h-9 w-full rounded-md border border-[var(--sge-line)] bg-[var(--sge-paper)] px-2 text-sm"
-                disabled={readOnly}
-                value={line.plant}
-                onChange={(e) => onChange(lines.map((l, i) => (i === idx ? { ...l, plant: e.target.value } : l)))}
-              >
-                <option value="">Pick plant…</option>
-                {plants.map((p) => <option key={p} value={p}>{p}</option>)}
-              </select>
-            </div>
-            <div>
-              <Label>Bay / location</Label>
-              <Input
-                className="mt-1"
-                disabled={readOnly}
-                value={line.bay}
-                onChange={(e) => {
-                  const next = lines.map((l, i) =>
-                    i === idx ? { ...l, bay: e.target.value } : l
-                  );
-                  onChange(next);
-                }}
-              />
-            </div>
-            <div>
-              <Label>Activity</Label>
-              <Select
-                disabled={readOnly}
-                value={line.activity}
-                onValueChange={(v) => {
-                  const next = lines.map((l, i) =>
-                    i === idx
-                      ? { ...l, activity: v as "painting" | "blasting" }
-                      : l
-                  );
-                  onChange(next);
-                }}
-              >
-                <SelectTrigger className="mt-1">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="painting">Painting</SelectItem>
-                  <SelectItem value="blasting">Blasting</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label>Area m²</Label>
-              <Input
-                type="number"
-                className="mt-1"
-                disabled={readOnly}
-                value={line.areaM2}
-                onChange={(e) => {
-                  const next = lines.map((l, i) =>
-                    i === idx ? { ...l, areaM2: Number(e.target.value) } : l
-                  );
-                  onChange(next);
-                }}
-              />
-            </div>
-            <div>
-              <Label>MPS</Label>
-              <Input
-                type="number"
-                className="mt-1"
-                disabled={readOnly}
-                value={line.mpsScheme ?? ""}
-                onChange={(e) => {
-                  const next = lines.map((l, i) =>
-                    i === idx
-                      ? { ...l, mpsScheme: Number(e.target.value) }
-                      : l
-                  );
-                  onChange(next);
-                }}
-              />
-            </div>
-            <div>
-              <Label>Paint litres</Label>
-              <Input
-                type="number"
-                className="mt-1"
-                disabled={readOnly}
-                value={line.paintLitres ?? ""}
-                onChange={(e) => {
-                  const next = lines.map((l, i) =>
-                    i === idx
-                      ? { ...l, paintLitres: Number(e.target.value) }
-                      : l
-                  );
-                  onChange(next);
-                }}
-              />
-            </div>
-            {!readOnly && lines.length > 1 ? (
-              <div className="flex items-end">
-                <Button type="button" size="sm" variant="ghost" onClick={() => onChange(lines.filter((_, i) => i !== idx))}>
-                  Remove line
-                </Button>
+      <h3 className="mb-3 font-heading text-sm font-bold uppercase tracking-wide text-[var(--sge-ink-3)]">
+        Painting / blasting — job lines
+      </h3>
+      {lines.length === 0 ? (
+        <p className="text-sm text-[var(--sge-ink-3)]">No job lines yet.</p>
+      ) : (
+        <table className="mb-3 w-full text-xs">
+          <thead className="text-left text-[10px] uppercase tracking-wide text-[var(--sge-ink-3)]">
+            <tr>
+              <th className="py-1">Job</th>
+              <th>Stage</th>
+              <th className="text-right">m²</th>
+              <th className="text-right">Litres</th>
+              <th className="text-right">Crew</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {lines.map((e) => (
+              <tr key={e.id} className="border-t border-[var(--sge-line)]">
+                <td className="py-1.5 font-mono">{jobNo(e.jobId)}</td>
+                <td>{STAGES.find((x) => x.id === e.stage)?.label}</td>
+                <td className="text-right font-mono">{round3(entryArea(e))}</td>
+                <td className="text-right font-mono">{e.litres || "—"}</td>
+                <td className="text-right font-mono">{e.crew?.length ?? 0}</td>
+                <td className="text-right">
+                  {editable ? (
+                    <Button type="button" size="sm" variant="ghost" onClick={() => { const r = removeEntry(e.id); setMsg(r.ok ? null : { ok: false, msg: r.error }); }}>
+                      Remove
+                    </Button>
+                  ) : null}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      {!saved && !readOnly ? (
+        <p className="text-xs text-[var(--sge-ink-3)]">Pick the plant and save the draft, then add job lines here.</p>
+      ) : null}
+      {editable ? (
+        jobs.length === 0 ? (
+          <p className="text-xs text-[var(--sge-ink-3)]">No open jobs for this supervisor on {report.plant || "this plant"}. Start one in Work → Jobs &amp; DPR.</p>
+        ) : (
+          <div className="space-y-2">
+            <div className="flex flex-wrap items-end gap-2">
+              <div>
+                <Label>Add a line for job</Label>
+                <select
+                  className="mt-1 h-9 rounded-md border border-[var(--sge-line)] bg-[var(--sge-paper)] px-2 text-sm"
+                  value={adding}
+                  onChange={(e) => setAdding(e.target.value)}
+                >
+                  <option value="">Pick a job…</option>
+                  {jobs.map((j) => (
+                    <option key={j.id} value={j.id}>{j.jobNo} · {j.location}</option>
+                  ))}
+                </select>
               </div>
+            </div>
+            {job ? (
+              <JobEntryForm
+                job={job}
+                reportId={report.id}
+                fixedDate={report.date}
+                onDone={(m) => {
+                  setMsg(m);
+                  if (m.ok) setAdding("");
+                }}
+              />
             ) : null}
           </div>
-        ))}
-      </div>
+        )
+      ) : null}
+      {msg ? <p className={msg.ok ? "mt-2 text-xs text-[var(--sge-ok)]" : "mt-2 text-xs text-[var(--sge-crit)]"}>{msg.msg}</p> : null}
     </Panel>
   );
 }

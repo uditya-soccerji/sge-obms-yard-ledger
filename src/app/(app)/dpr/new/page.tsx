@@ -19,9 +19,10 @@ import {
   defaultDprSubmitterType,
 } from "@/lib/paint-lifecycle";
 import { useStore } from "@/lib/store";
-import { dprCrew, validateDprForSubmit } from "@/lib/dpr-validate";
+import { useWork } from "@/lib/work/store";
 import { entrySiteId } from "@/lib/site-scope";
-import type { DprDocument, DprSubmitterType } from "@/lib/types";
+import type { DprSubmitterType } from "@/lib/types";
+import type { DprReport } from "@/lib/work/types";
 
 const TYPE_LABEL: Record<DprSubmitterType, string> = {
   painting_blasting: "Painting & Blasting",
@@ -31,7 +32,8 @@ const TYPE_LABEL: Record<DprSubmitterType, string> = {
 };
 
 function NewDprPage() {
-  const { state, saveDpr, submitDpr } = useStore();
+  const { state } = useStore();
+  const { saveReport, submitReport } = useWork();
   const router = useRouter();
 
   const staff = useMemo(
@@ -69,7 +71,7 @@ function NewDprPage() {
   const [submitterType, setSubmitterType] =
     useState<DprSubmitterType>(defaultType);
   const [submitterId, setSubmitterId] = useState(defaultSubmitter);
-  const [doc, setDoc] = useState<DprDocument>(() =>
+  const [doc, setDoc] = useState<DprReport>(() =>
     blankDpr({
       submitterId: defaultSubmitter,
       submitterType: defaultType,
@@ -96,34 +98,21 @@ function NewDprPage() {
   function handleSave(andSubmit: boolean) {
     const next = { ...doc, submitterId, submitterType };
     if (!submitterId) return setProblems(["Pick whose DPR this is (no one on this site files this type yet)"]);
-    // Strip wrong-type bodies for safety (no paint fields)
-    if (submitterType === "safety") {
-      next.paintWork = undefined;
-      next.scaffoldWork = undefined;
-      next.storeBody = undefined;
-    } else if (submitterType === "scaffolding") {
-      next.paintWork = undefined;
-      next.safetyBody = undefined;
-      next.storeBody = undefined;
-    } else if (submitterType === "painting_blasting") {
-      next.scaffoldWork = undefined;
-      next.safetyBody = undefined;
-      next.storeBody = undefined;
-    } else if (submitterType === "store") {
-      next.paintWork = undefined;
-      next.scaffoldWork = undefined;
-      next.safetyBody = undefined;
-    }
+    // Keep only the body for this type
+    if (submitterType !== "scaffolding") next.scaffoldWork = undefined;
+    if (submitterType !== "safety") next.safetyBody = undefined;
+    if (submitterType !== "store") next.storeBody = undefined;
+    const r = saveReport(next);
+    if (!r.ok) return setProblems([r.error]);
     if (andSubmit) {
-      // docs §5: permit + TBT, every crew member marked, quantity or a reason
-      const plants = state.sites.find((x) => x.id === next.siteId)?.plants ?? [];
-      const found = validateDprForSubmit(next, dprCrew(next, state.labourers), plants);
-      setProblems(found);
-      if (found.length) return;
+      // docs §5: permit + TBT, every crew member marked, quantity or a reason — checked by the store
+      const sent = submitReport(next.id);
+      if (!sent.ok) {
+        // Saved as a draft; open it so the problems can be fixed there
+        router.push(`/dpr/${next.id}?problems=${encodeURIComponent(sent.error)}`);
+        return;
+      }
     }
-    const r = saveDpr(next);
-    if (!r.ok) return setProblems([r.error ?? "Save blocked"]);
-    if (andSubmit) submitDpr(next.id);
     router.push(`/dpr/${next.id}`);
   }
 
@@ -215,8 +204,8 @@ function NewDprPage() {
         <Button type="button" variant="outline" onClick={() => handleSave(false)}>
           Save draft
         </Button>
-        <Button type="button" onClick={() => handleSave(true)}>
-          Save & submit to SIC
+        <Button type="button" onClick={() => handleSave(submitterType !== "painting_blasting")}>
+          {submitterType === "painting_blasting" ? "Save & add job lines" : "Save & submit to SIC"}
         </Button>
       </div>
     </div>

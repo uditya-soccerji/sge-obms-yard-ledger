@@ -18,8 +18,6 @@ import type {
   AttendanceStatus,
   BillingSnapshot,
   ComplianceDoc,
-  DprDocument,
-  DprEntry,
   EquipmentItem,
   EquipmentRequest,
   FinanceEntry,
@@ -53,7 +51,7 @@ interface SiteProfile {
   safety: string;
   /** Today's work lines (thin DPR) */
   work: {
-    type: DprEntry["type"];
+    type: "painting" | "blasting" | "scaffolding";
     location: string;
     areaM2?: number;
     volumeM3?: number;
@@ -350,8 +348,6 @@ export interface SiteSeedRows {
   attendance: AttendanceRecord[];
   paintStock: PaintStockLine[];
   equipment: EquipmentItem[];
-  dprs: DprEntry[];
-  dprDocuments: DprDocument[];
   workPlans: WorkPlanItem[];
   safetyDays: SafetyChecklistDay[];
   finance: FinanceEntry[];
@@ -367,8 +363,8 @@ export interface SiteSeedRows {
 
 export function seedOtherSites(): SiteSeedRows {
   const out: SiteSeedRows = {
-    staff: [], labourers: [], attendance: [], paintStock: [], equipment: [], dprs: [],
-    dprDocuments: [], workPlans: [], safetyDays: [], finance: [], predictions: [],
+    staff: [], labourers: [], attendance: [], paintStock: [], equipment: [],
+    workPlans: [], safetyDays: [], finance: [], predictions: [],
     billing: [], compliance: [], transfers: [], acplMatches: [], jmsPackages: [],
     wageLedger: [], equipmentRequests: [],
   };
@@ -429,63 +425,6 @@ export function seedOtherSites(): SiteSeedRows {
         siteId: sid,
       });
     }
-
-    // Work: thin DPR lines (owner gist) + one DPR document per line
-    p.work.forEach((w, i) => {
-      const supervisorId = w.type === "scaffolding" ? sup2 : sup1;
-      const crewCount = Math.max(3, Math.round((p.crew * p.presentRate) / p.work.length));
-      out.dprs.push({
-        id: `dpr-${k}-${i + 1}`,
-        date: TODAY,
-        type: w.type,
-        supervisorId,
-        siteId: sid,
-        plant: p.plant,
-        location: w.location,
-        mpsScheme: w.mps,
-        areaM2: w.areaM2,
-        volumeM3: w.volumeM3,
-        paintLitres: w.litres,
-        crewCount,
-        note: w.note,
-        permitOk: true,
-        tbtDone: true,
-      });
-      const crewIds = out.labourers
-        .filter((l) => l.siteId === sid && l.supervisorId === supervisorId && l.active)
-        .slice(0, crewCount);
-      out.dprDocuments.push({
-        id: `dprd-${k}-${i + 1}`,
-        date: TODAY,
-        siteId: sid,
-        plant: p.plant,
-        submitterId: supervisorId,
-        submitterType: w.type === "scaffolding" ? "scaffolding" : "painting_blasting",
-        // First line of each site waits for the SIC; the rest are approved
-        status: i === 0 ? "submitted" : "sic_approved",
-        labourMarks: crewIds.map((l) => {
-          const a = out.attendance.find((x) => x.labourerId === l.id && x.date === TODAY);
-          return { labourerId: l.id, status: a?.status ?? "present", inTime: a?.inTime };
-        }),
-        equipmentMarks: [],
-        requests: [],
-        nextDayPlan: p.plans[0]?.task ?? "",
-        note: w.note,
-        telegramDraftLines: [],
-        paintWork:
-          w.type === "scaffolding"
-            ? undefined
-            : [{ id: `pw-${k}-${i + 1}`, plant: p.plant, bay: w.location, activity: w.type, areaM2: w.areaM2 ?? 0, mpsScheme: w.mps, paintLitres: w.litres }],
-        scaffoldWork:
-          w.type === "scaffolding"
-            ? [{ id: `sw-${k}-${i + 1}`, plant: p.plant, location: w.location, erectM3: Math.round((w.volumeM3 ?? 0) * 0.3), dismantleM3: 0, standingM3: w.volumeM3 ?? 0 }]
-            : undefined,
-        sicReviewedBy: i === 0 ? undefined : `st-${k}-sic`,
-        sicReviewedAt: i === 0 ? undefined : `${TODAY}T17:30:00Z`,
-        createdAt: `${TODAY}T08:${String(20 + i * 10).padStart(2, "0")}:00Z`,
-        updatedAt: `${TODAY}T16:${String(10 + i * 10).padStart(2, "0")}:00Z`,
-      });
-    });
 
     p.paint.forEach((l, i) =>
       out.paintStock.push({

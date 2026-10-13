@@ -8,6 +8,10 @@ import type { RoleId } from "../types";
 export type EventKind =
   | "dpr_added"
   | "dpr_mismatch"
+  | "dpr_submitted"
+  | "dpr_approved"
+  | "dpr_sent_back"
+  | "dpr_unlocked"
   | "job_started"
   | "job_closed"
   | "jms_confirmed"
@@ -54,11 +58,15 @@ export interface Viewer {
 }
 
 /** Events that need someone to act, or tell the submitter the outcome: instant. */
-export const INSTANT: EventKind[] = ["job_closed", "jms_confirmed", "job_sent_back"];
+export const INSTANT: EventKind[] = ["job_closed", "jms_confirmed", "job_sent_back", "dpr_submitted", "dpr_approved", "dpr_sent_back"];
 
 export const KIND_LABEL: Record<EventKind, string> = {
   dpr_added: "DPR entry",
   dpr_mismatch: "Admin vs supervisor DPR differs",
+  dpr_submitted: "DPR submitted — needs SIC",
+  dpr_approved: "DPR approved",
+  dpr_sent_back: "DPR sent back",
+  dpr_unlocked: "DPR unlocked",
   job_started: "Job started",
   job_closed: "Job closed — needs SIC",
   jms_confirmed: "JMS confirmed",
@@ -86,7 +94,14 @@ export function isFor(e: WorkEvent, v: Viewer): boolean {
     case "job_started":
       return v.role === "sic";
     case "job_closed":
+    case "dpr_submitted":
       return v.role === "sic";
+    case "dpr_approved":
+      return mine || v.role === "hr";
+    case "dpr_sent_back":
+      return mine;
+    case "dpr_unlocked":
+      return mine || v.role === "sic" || v.role === "hr";
     case "dpr_mismatch":
       // The supervisor is told of each difference; SIC and Admin see them for the monthly review (docs §5b)
       return mine || v.role === "sic" || v.role === "admin";

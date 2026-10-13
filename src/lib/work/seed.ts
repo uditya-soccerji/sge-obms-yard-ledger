@@ -10,8 +10,11 @@ import type { RoleId } from "../types";
 import { reasonText, type WorkEvent } from "./events";
 import { entryArea, lineStatus, round3 } from "./logic";
 import { STAGES } from "./types";
+import { blankReport } from "./reports";
+import { sampleDprReports } from "../seed";
 import type {
   DprEntry,
+  DprReport,
   Jms,
   JmsStatus,
   Job,
@@ -23,7 +26,7 @@ import type {
 } from "./types";
 
 /** v8: fresh start — a new browser starts on an empty current month; the demo loads from Test tools */
-export const WORK_STORAGE_KEY = "sge-work-v8";
+export const WORK_STORAGE_KEY = "sge-work-v9";
 /** "Today" for the work demo (DPR dates, expiry warnings). */
 export const WORK_TODAY = "2026-09-28";
 
@@ -153,6 +156,7 @@ export function createEmptyWork(month: string): WorkState {
     workOrders: demo.workOrders,
     planLines: [],
     jobs: [],
+    reports: [],
     dprs: [],
     jms: [],
     paint: [],
@@ -229,6 +233,7 @@ export function createWorkSeed(): WorkState {
     ],
     planLines,
     jobs,
+    reports: [],
     dprs,
     jms,
     paint: [],
@@ -355,7 +360,59 @@ export function createWorkSeed(): WorkState {
     { id: "ex-d-2", date: "2026-09-06", month: "2026-09", siteId: SITE, kind: "direct", category: "Copper slag abrasive", amount: 18400, jobId: j3.id },
     { id: "ex-d-3", date: "2026-09-21", month: "2026-09", siteId: SITE, kind: "direct", category: "Copper slag abrasive", amount: 42000, jobId: j5.id },
   ];
+  state.reports = demoReports(state);
   return state;
+}
+
+/**
+ * Daily reports for the demo (merge plan Step 2): September job lines grouped
+ * per supervisor · plant · day (Admin double entries get their own report),
+ * approved, with the crew marked present. The last two days stay with the SIC
+ * (submitted) so the review queue has something in it. Plus the sample safety,
+ * store and scaffolding reports, moved onto the demo dates.
+ */
+function demoReports(w: WorkState): DprReport[] {
+  const reports = new Map<string, DprReport>();
+  for (const e of w.dprs) {
+    const job = w.jobs.find((j) => j.id === e.jobId);
+    const line = job && w.planLines.find((l) => l.id === job.planLineId);
+    if (!job || !line) continue;
+    const admin = e.enteredBy === "admin";
+    const key = [job.supervisorId, line.plant, e.date, admin].join("|");
+    let r = reports.get(key);
+    if (!r) {
+      const pending = e.date >= "2026-09-27";
+      r = {
+        ...blankReport({ submitterId: job.supervisorId, submitterType: "painting_blasting", siteId: line.siteId, plant: line.plant, date: e.date }),
+        id: `dprd-demo-${reports.size + 1}`,
+        enteredBy: admin ? "admin" : undefined,
+        enteredByName: admin ? "N. Sharma" : undefined,
+        status: pending ? "submitted" : "sic_approved",
+        permitOk: true,
+        tbtDone: true,
+        permitNos: [`WP-${e.date.slice(5).replace("-", "")}-${reports.size + 11}`],
+        submittedAt: `${e.date}T18:30:00+05:30`,
+        sicReviewedBy: pending ? undefined : "R. Mehta",
+        sicReviewedAt: pending ? undefined : `${e.date}T20:00:00+05:30`,
+        createdAt: `${e.date}T17:00:00+05:30`,
+        updatedAt: `${e.date}T18:30:00+05:30`,
+      };
+      reports.set(key, r);
+    }
+    e.reportId = r.id;
+    for (const id of e.crew ?? []) {
+      if (!r.labourMarks.some((m) => m.labourerId === id)) r.labourMarks.push({ labourerId: id, status: "present", inTime: "08:00", outTime: "18:00" });
+    }
+  }
+  // Sample non-painting reports (safety, store, scaffolding) from the old DPR desk demo
+  const shift = (d: string) => (d === "2026-10-05" ? WORK_TODAY : d === "2026-10-04" ? "2026-09-27" : "2026-09-26");
+  const samples: DprReport[] = sampleDprReports()
+    .filter((d) => d.submitterType !== "painting_blasting")
+    .map(({ paintWork: _drop, ...d }) => {
+      void _drop;
+      return { ...d, date: shift(d.date), status: d.status, createdAt: `${shift(d.date)}T08:00:00+05:30`, updatedAt: `${shift(d.date)}T17:00:00+05:30` };
+    });
+  return [...reports.values(), ...samples];
 }
 
 /** Demo staff names for seeded history (the live app uses the signed-in account). */

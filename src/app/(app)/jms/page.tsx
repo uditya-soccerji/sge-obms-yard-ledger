@@ -17,6 +17,8 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { effectivePermission } from "@/lib/permissions";
 import { useStore } from "@/lib/store";
+import { useWork } from "@/lib/work/store";
+import { reportsAsDprDocuments } from "@/lib/work/legacy-view";
 import type { JmsLine } from "@/lib/types";
 
 function uid(prefix: string) {
@@ -33,6 +35,7 @@ function JmsPage() {
     computeRatings,
     markJmsPayment,
   } = useStore();
+  const { work } = useWork();
   const [label, setLabel] = useState("JMS Oct W2 — COKER");
   const [period, setPeriod] = useState("2026-10-W2");
   const [paste, setPaste] = useState(
@@ -194,7 +197,7 @@ FS-01 scaffold,COKER,scaffolding,840,m3,85`
                     size="sm"
                     variant="outline"
                     onClick={() => {
-                      matchJmsLines(pkg.id);
+                      matchJmsLines(pkg.id, reportsAsDprDocuments(work));
                       setMsg("Lines matched to approved DPR work on the same site, plant and period.");
                     }}
                   >
@@ -230,7 +233,7 @@ FS-01 scaffold,COKER,scaffolding,840,m3,85`
                     size="sm"
                     variant="outline"
                     onClick={() => {
-                      const r = computeRatings(pkg.id);
+                      const r = computeRatings(pkg.id, reportsAsDprDocuments(work));
                       setMsg(r.ok ? "Work ratings computed — this package's incentive drafts were replaced, not added again." : r.error ?? "Couldn't compute ratings");
                     }}
                   >

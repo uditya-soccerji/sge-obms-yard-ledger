@@ -3,14 +3,18 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { canCloseJob, canVoidExpense, JMS_FLOW, currentMonthOf, EXPENSE_CATEGORIES, entryDiffs, finalStage, isMonthClosed, jobJmsQty, lineStatus, nextJmsStatuses, nextJobNo, nextMonth, pickWorkOrder, round3, validMembers, woUsage } from "./logic";
 import { createEmptyWork, createWorkSeed, WORK_STORAGE_KEY, WORK_TODAY } from "./seed";
-import { daysAgo, setDemoToday, today } from "../today";
+import { daysAgo, nowTime, setDemoToday, today } from "../today";
 import { applyScenario, type ScenarioId } from "./scenarios";
 import { useStore } from "../store";
 import type { RoleId } from "../types";
 import { reasonText, type WorkEvent } from "./events";
 import { entryArea } from "./logic";
 import { workRights } from "./permissions";
-import type { DprEntry, Expense, Jms, JmsPayment, JmsStatus, Job, PlanLine, Stage, WorkState } from "./types";
+import type { DprEntry, DprReport, Expense, Jms, JmsPayment, JmsStatus, Job, PlanLine, Stage, WorkState } from "./types";
+import { blankReport, entriesOf, isLate, pendingReports, reportOpen, sameDay } from "./reports";
+import { effectivePermission } from "../permissions";
+import { dprCrew, validateDprForSubmit } from "../dpr-validate";
+import type { DprSubmitterType, ModuleId, PermissionAction } from "../types";
 import { STAGES } from "./types";
 
 type Result = { ok: true; id?: string } | { ok: false; error: string };
@@ -20,7 +24,20 @@ interface WorkApi {
   hydrated: boolean;
   addPlanLine: (input: Omit<PlanLine, "id" | "carriedM2" | "month"> & { month?: string }) => Result;
   startJob: (input: { planLineId: string; location: string; stages: Stage[]; startDate: string }) => Result;
+  /** Add a job line; it goes on the day's open report (made if none), or on `reportId` */
   addDpr: (input: Omit<DprEntry, "id" | "supervisorId">) => Result;
+  /** Remove a job line while its report is still a draft or sent back */
+  removeEntry: (id: string) => Result;
+  /** Save a report (draft); a submitted or approved one is frozen */
+  saveReport: (doc: DprReport) => Result;
+  /** Submit to SIC: refused with the list of problems until §5's checks pass */
+  submitReport: (id: string) => Result;
+  /** SIC approves (attendance is taken from it) or sends back with a reason */
+  reviewReport: (id: string, decision: "sic_approved" | "sic_rejected", note: string) => Result;
+  /** Owner / Super Admin reopen an approved report, with the reason (logged) */
+  unlockReport: (id: string, reason: string) => Result;
+  /** Telegram: add a message to today's open report of that submitter (made if none) */
+  telegramToReport: (input: { content: string; submitterId: string; submitterType: DprSubmitterType; siteId: string; observation?: boolean }) => Result;
   requestClose: (jobId: string) => Result;
   confirmJms: (jobId: string) => Result;
   /** SIC sends a closed job back to the supervisor, with the reason (docs §5, §19) */
@@ -59,7 +76,7 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
   ref.current = work;
 
   // Who is acting (the viewed-as account when Super Admin uses "View as")
-  const { currentAccount, state: appState, fullState } = useStore();
+  const { currentAccount, state: appState, fullState, applyDprAttendance, clearDprAttendance, raiseRequestsFromDpr } = useStore();
   const actor = React.useRef({ name: "System", role: null as RoleId | null, staffId: null as string | null, accountId: "", impersonatedBy: undefined as string | undefined });
   actor.current = {
     name: currentAccount?.name ?? "System",
@@ -75,6 +92,14 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
   const sitesRef = React.useRef(fullState.sites);
   sitesRef.current = fullState.sites;
   const rights = () => workRights(actor.current.role);
+  const accountRef = React.useRef(currentAccount);
+  accountRef.current = currentAccount;
+  /** Main permission matrix (DPR desk, approvals) for the acting account */
+  const may = (module: ModuleId, action: PermissionAction) => effectivePermission(accountRef.current, actor.current.role, module, action);
+  const labourersRef = React.useRef(fullState.labourers);
+  labourersRef.current = fullState.labourers;
+  const mainActs = React.useRef({ applyDprAttendance, clearDprAttendance, raiseRequestsFromDpr });
+  mainActs.current = { applyDprAttendance, clearDprAttendance, raiseRequestsFromDpr };
   /** A supervisor may only act on their own lines and jobs. */
   const notMine = (supervisorId: string) => actor.current.role === "supervisor" && supervisorId !== actor.current.staffId;
 
@@ -91,7 +116,10 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     try {
       const raw = localStorage.getItem(WORK_STORAGE_KEY);
-      if (raw) setWork(JSON.parse(raw) as WorkState);
+      if (raw) {
+        const saved = JSON.parse(raw) as WorkState;
+        setWork({ ...saved, reports: saved.reports ?? [] });
+      }
     } catch {
       /* keep seed */
     }
@@ -197,8 +225,31 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
     // Who keyed it in comes from the signed-in role, not the screen (docs §5b)
     const enteredBy: DprEntry["enteredBy"] =
       role === "admin" || role === "sic" || role === "owner" || role === "super_admin" ? role : "supervisor";
-    const entry: DprEntry = { ...input, members, enteredBy, enteredByName: actor.current.name, id: uid("wd"), supervisorId: job.supervisorId };
-    setWork((s) => ({ ...s, dprs: [...s.dprs, entry] }));
+    // The line goes on a daily report (merge plan §1): the one given, or the day's open one
+    const plan = w.planLines.find((l) => l.id === job.planLineId)!;
+    const key = { submitterId: job.supervisorId, siteId: plan.siteId, plant: plan.plant, date: input.date, submitterType: "painting_blasting" as const, admin: enteredBy === "admin" };
+    let report = input.reportId
+      ? w.reports.find((r) => r.id === input.reportId)
+      : w.reports.find((r) => reportOpen(r) && sameDay(r, key));
+    if (input.reportId) {
+      if (!report) return { ok: false, error: "Report not found" };
+      if (!reportOpen(report)) return { ok: false, error: "That report is submitted — lines can't be added" };
+      if (report.date !== input.date) return { ok: false, error: `This report is for ${report.date}` };
+      if (report.siteId !== plan.siteId || (report.plant && report.plant !== plan.plant)) return { ok: false, error: `${job.jobNo} is on ${plan.plant}; this report is for ${report.plant || "another site"}` };
+      if (report.submitterId !== job.supervisorId) return { ok: false, error: `${job.jobNo} belongs to another supervisor` };
+    }
+    const fresh = !report;
+    if (!report) report = { ...blankReport({ submitterId: job.supervisorId, submitterType: "painting_blasting", siteId: plan.siteId, plant: plan.plant, date: input.date }), enteredBy: enteredBy === "admin" ? "admin" : undefined, enteredByName: enteredBy === "admin" ? actor.current.name : undefined };
+    // Crew on the line must be on the report as working; add anyone missing as present 08:00–18:00
+    const marked = new Set(report.labourMarks.map((m) => m.labourerId));
+    const addMarks = (input.crew ?? []).filter((id) => !marked.has(id)).map((labourerId) => ({ labourerId, status: "present" as const, inTime: "08:00", outTime: "18:00" }));
+    const nextReport: DprReport = { ...report, plant: report.plant || plan.plant, labourMarks: [...report.labourMarks, ...addMarks], updatedAt: new Date().toISOString() };
+    const entry: DprEntry = { ...input, reportId: nextReport.id, members, enteredBy, enteredByName: actor.current.name, id: uid("wd"), supervisorId: job.supervisorId };
+    setWork((s) => ({
+      ...s,
+      reports: fresh ? [...s.reports, nextReport] : s.reports.map((r) => (r.id === nextReport.id ? nextReport : r)),
+      dprs: [...s.dprs, entry],
+    }));
     const siteId = siteOfJob(w, job);
     log({ kind: "dpr_added", siteId, subjectStaffId: job.supervisorId, title: `${job.jobNo} · ${STAGES.find((x) => x.id === entry.stage)?.label} ${round3(entryArea(entry))} m²`, detail: `${job.location}${entry.enteredBy !== "supervisor" ? ` · entered by ${entry.enteredByName} (${entry.enteredBy.replace("_", " ")})` : ""}${entry.crew?.length ? ` · crew ${entry.crew.length}` : ""}`, tab: "jobs", refId: job.id });
     // Double entry (docs §5b): Admin's figure counts; tell the supervisor when the two differ
@@ -226,6 +277,9 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
     if (notMine(job.supervisorId)) return { ok: false, error: "That job belongs to another supervisor" };
     const check = canCloseJob(job, w.dprs);
     if (!check.ok) return { ok: false, error: `Still missing: ${check.missing.map((m) => STAGES.find((x) => x.id === m)?.label).join(", ")}` };
+    // The day's reports go to SIC first (merge plan Step 3)
+    const unsent = pendingReports(job, w).filter(reportOpen);
+    if (unsent.length) return { ok: false, error: `Submit the DPR for ${unsent.map((r) => r.date).sort().join(", ")} first` };
     // A real timestamp, so the 24-hour escalation (docs §19) can age it
     const at = new Date().toISOString();
     setWork((s) => ({
@@ -258,6 +312,10 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
     if (job.closeRequestedBy && job.closeRequestedBy === actor.current.accountId && !rights().isBoss) {
       return { ok: false, error: "You closed this job — another SIC (or the Owner) has to confirm it" };
     }
+    // Closing a cycle never approves DPRs by itself (merge plan P2): the SIC reviews each first
+    const pending = pendingReports(job, w);
+    if (pending.some(reportOpen)) return { ok: false, error: "A DPR for this job is still with the supervisor — it has to be submitted first" };
+    if (pending.length) return { ok: false, error: `${pending.length} DPR(s) for this job still need your review — approve them (or send back) first` };
     const line = w.planLines.find((l) => l.id === job.planLineId)!;
     const item = w.serviceItems.find((s) => s.code === line.serviceCode)!;
     const qty = jobJmsQty(job, w.dprs);
@@ -303,6 +361,128 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
     }
     return { ok: true, id };
   }, [log]);
+
+  const removeEntry = useCallback<WorkApi["removeEntry"]>((id) => {
+    const w = ref.current;
+    const e = w.dprs.find((d) => d.id === id);
+    if (!e) return { ok: false, error: "Line not found" };
+    const r = e.reportId ? w.reports.find((x) => x.id === e.reportId) : undefined;
+    if (!r || !reportOpen(r)) return { ok: false, error: "Only lines on a draft or sent-back DPR can be removed" };
+    if (!rights().canEnter || notMine(e.supervisorId)) return NOT_ALLOWED;
+    const job = w.jobs.find((j) => j.id === e.jobId);
+    if (job && job.status !== "open") return { ok: false, error: "The job is closed" };
+    setWork((s) => ({ ...s, dprs: s.dprs.filter((d) => d.id !== id) }));
+    log({ kind: "dpr_added", siteId: r.siteId, subjectStaffId: e.supervisorId, title: `Line removed · ${job?.jobNo ?? ""} ${round3(entryArea(e))} m²`, detail: `${e.date} · ${STAGES.find((x) => x.id === e.stage)?.label}`, tab: "jobs", refId: e.jobId });
+    return { ok: true };
+  }, [log]);
+
+  const saveReport = useCallback<WorkApi["saveReport"]>((doc) => {
+    if (!may("dpr", "create") && !may("dpr", "update")) return NOT_ALLOWED;
+    if (actor.current.role === "supervisor" && doc.submitterId !== actor.current.staffId) return { ok: false, error: "That DPR belongs to another supervisor" };
+    const w = ref.current;
+    const existing = w.reports.find((r) => r.id === doc.id);
+    if (existing && !reportOpen(existing)) return { ok: false, error: `This DPR is ${existing.status === "submitted" ? "with SIC" : "approved"} — it can't be edited` };
+    if (existing && existing.plant && doc.plant !== existing.plant && entriesOf(w, doc.id).length) return { ok: false, error: "This DPR has job lines on " + existing.plant + " — the plant can't change" };
+    // Crew booked on this report's job lines stays marked, whatever the form held
+    const booked = [...new Set(entriesOf(w, doc.id).flatMap((e) => e.crew ?? []))].filter((id) => !doc.labourMarks.some((m) => m.labourerId === id));
+    const saved: DprReport = {
+      ...doc,
+      labourMarks: [...doc.labourMarks, ...booked.map((labourerId) => ({ labourerId, status: "present" as const, inTime: "08:00", outTime: "18:00" }))],
+      status: existing?.status ?? "draft",
+      updatedAt: new Date().toISOString(),
+    };
+    setWork((s) => ({ ...s, reports: existing ? s.reports.map((r) => (r.id === doc.id ? saved : r)) : [...s.reports, saved] }));
+    return { ok: true, id: doc.id };
+  }, []);
+
+  const submitReport = useCallback<WorkApi["submitReport"]>((id) => {
+    if (!may("dpr", "submit")) return NOT_ALLOWED;
+    const w = ref.current;
+    const r = w.reports.find((x) => x.id === id);
+    if (!r) return { ok: false, error: "DPR not found" };
+    if (!reportOpen(r)) return { ok: false, error: "Already submitted" };
+    if (actor.current.role === "supervisor" && r.submitterId !== actor.current.staffId) return { ok: false, error: "That DPR belongs to another supervisor" };
+    const plants = sitesRef.current.find((x) => x.id === r.siteId)?.plants ?? [];
+    const problems = validateDprForSubmit(r, dprCrew(r, labourersRef.current), plants, entriesOf(w, id));
+    if (problems.length) return { ok: false, error: problems.join(" · ") };
+    const at = new Date().toISOString();
+    // Stamped on the app date (the demo date when one is set), India time, for the 10:00 deadline
+    const sent: DprReport = { ...r, status: "submitted", submittedAt: `${today()}T${nowTime()}:00+05:30`, updatedAt: at };
+    setWork((s) => ({ ...s, reports: s.reports.map((x) => (x.id === id ? sent : x)) }));
+    // Requests on the DPR go to the request desk (docs §9)
+    mainActs.current.raiseRequestsFromDpr(sent);
+    const late = isLate(sent);
+    log({ kind: "dpr_submitted", problem: late, siteId: r.siteId, subjectStaffId: r.submitterId, title: `DPR ${r.date} · ${r.plant} submitted${late ? " late" : ""}`, detail: `${r.submitterType.replace("_", " & ")} · ${entriesOf(w, id).length} job line(s) · crew ${r.labourMarks.length}`, tab: "jobs", refId: id });
+    return { ok: true };
+  }, [log]);
+
+  const reviewReport = useCallback<WorkApi["reviewReport"]>((id, decision, note) => {
+    if (!may("approvals", "approve")) return NOT_ALLOWED;
+    const w = ref.current;
+    const r = w.reports.find((x) => x.id === id);
+    if (!r || r.status !== "submitted") return { ok: false, error: "This DPR isn't waiting for review" };
+    if (decision === "sic_rejected" && !note.trim()) return { ok: false, error: "Give a reason so the supervisor can fix it" };
+    const at = new Date().toISOString();
+    const done: DprReport = { ...r, status: decision, sicNote: note.trim() || undefined, sicReviewedBy: actor.current.name, sicReviewedAt: at, updatedAt: at };
+    setWork((s) => ({ ...s, reports: s.reports.map((x) => (x.id === id ? done : x)) }));
+    // Approval writes the day's attendance (docs §4); HR / ACPL own it in the main store
+    if (decision === "sic_approved") mainActs.current.applyDprAttendance(done);
+    log({
+      kind: decision === "sic_approved" ? "dpr_approved" : "dpr_sent_back",
+      problem: decision === "sic_rejected",
+      siteId: r.siteId,
+      subjectStaffId: r.submitterId,
+      title: `DPR ${r.date} · ${r.plant} ${decision === "sic_approved" ? "approved" : "sent back"}`,
+      detail: note.trim() || "Approved",
+      tab: "jobs",
+      refId: id,
+    });
+    return { ok: true };
+  }, [log]);
+
+  const unlockReport = useCallback<WorkApi["unlockReport"]>((id, reason) => {
+    const role = actor.current.role;
+    if (role !== "owner" && role !== "super_admin") return { ok: false, error: "Only the Owner or Super Admin can unlock an approved DPR" };
+    const w = ref.current;
+    const r = w.reports.find((x) => x.id === id);
+    if (!r || r.status !== "sic_approved") return { ok: false, error: "Only an approved DPR can be unlocked" };
+    if (!reason.trim()) return { ok: false, error: "Give the reason for unlocking (it's logged)" };
+    const jobsDone = w.jobs.filter((j) => j.status === "closed" && entriesOf(w, id).some((e) => e.jobId === j.id));
+    if (jobsDone.length) return { ok: false, error: `${jobsDone.map((j) => j.jobNo).join(", ")} already became a JMS — unlocking would change a confirmed quantity` };
+    const at = new Date().toISOString();
+    setWork((s) => ({ ...s, reports: s.reports.map((x) => (x.id === id ? { ...x, status: "draft", updatedAt: at, unlocks: [...(x.unlocks ?? []), { by: actor.current.name, at, reason: reason.trim() }] } : x)) }));
+    // Attendance taken from it goes until it is approved again
+    mainActs.current.clearDprAttendance(id);
+    log({ kind: "dpr_unlocked", problem: true, siteId: r.siteId, subjectStaffId: r.submitterId, title: `DPR ${r.date} · ${r.plant} unlocked`, detail: reason.trim(), tab: "jobs", refId: id });
+    return { ok: true };
+  }, [log]);
+
+  const telegramToReport = useCallback<WorkApi["telegramToReport"]>((input) => {
+    const w = ref.current;
+    const day = today();
+    const open = w.reports.find((r) => r.submitterId === input.submitterId && r.submitterType === input.submitterType && r.date === day && reportOpen(r));
+    const base = open ?? blankReport({ submitterId: input.submitterId, submitterType: input.submitterType, siteId: input.siteId, date: day });
+    let next: DprReport = {
+      ...base,
+      telegramDraftLines: [...base.telegramDraftLines, input.content],
+      note: base.note ? `${base.note}\n[TG] ${input.content}` : `[TG] ${input.content}`,
+      updatedAt: new Date().toISOString(),
+    };
+    if (input.observation && next.safetyBody) {
+      next = {
+        ...next,
+        safetyBody: {
+          ...next.safetyBody,
+          observations: [
+            ...next.safetyBody.observations,
+            { id: `obs-tg-${Date.now()}`, obsNo: "", type: "UA", from: "S", risk: "MEDIUM", status: "OPEN", checkedBy: "S", whereWhat: input.content, actionTaken: "", whoWillFix: "", firstFoundOn: day, fixByDate: "" },
+          ],
+        },
+      };
+    }
+    setWork((s) => ({ ...s, reports: open ? s.reports.map((r) => (r.id === next.id ? next : r)) : [...s.reports, next] }));
+    return { ok: true, id: next.id };
+  }, []);
 
   const setJmsStatus = useCallback<WorkApi["setJmsStatus"]>((jmsId, status, note) => {
     if (!rights().canConfirm) return NOT_ALLOWED;
@@ -480,8 +660,8 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const api = useMemo<WorkApi>(
-    () => ({ work, hydrated, addPlanLine, startJob, addDpr, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork }),
-    [work, hydrated, addPlanLine, startJob, addDpr, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork]
+    () => ({ work, hydrated, addPlanLine, startJob, addDpr, removeEntry, saveReport, submitReport, reviewReport, unlockReport, telegramToReport, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork }),
+    [work, hydrated, addPlanLine, startJob, addDpr, removeEntry, saveReport, submitReport, reviewReport, unlockReport, telegramToReport, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork]
   );
   return <WorkContext.Provider value={api}>{children}</WorkContext.Provider>;
 }

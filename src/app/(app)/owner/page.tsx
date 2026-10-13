@@ -17,11 +17,16 @@ import { SiteComparison } from "@/components/owner/site-comparison";
 import { MoneyCard } from "@/components/work/money-card";
 import { ALL_SITES } from "@/lib/site-scope";
 import { useStore } from "@/lib/store";
+import { useSiteReports } from "@/lib/work/use-reports";
+import { useWork } from "@/lib/work/store";
+import { reportArea } from "@/lib/work/reports";
 import { paintVariance } from "@/lib/paint-variance";
 import { workedCount } from "@/lib/attendance";
 
 function OwnerHomePage() {
   const { state } = useStore();
+  const reports = useSiteReports();
+  const { work } = useWork();
   const today = todayDate();
   const allSites = state.currentSiteId === ALL_SITES;
   const siteName = state.sites.find((s) => s.id === state.currentSiteId)?.name;
@@ -32,11 +37,10 @@ function OwnerHomePage() {
   const todayFin = state.finance.filter((f) => f.date === today);
   const expenseToday = todayFin.filter((f) => f.kind === "expense").reduce((s, f) => s + f.amount, 0);
   const incomeToday = todayFin.filter((f) => f.kind === "income").reduce((s, f) => s + f.amount, 0);
-  const paintToday = state.dprs
-    .filter((d) => d.date === today && d.type === "painting")
-    .reduce((s, d) => s + (d.areaM2 ?? 0), 0);
+  // Painting m² today from the job lines on today's reports (one DPR model)
+  const paintToday = Math.round(reports.filter((r) => r.date === today).reduce((s, r) => s + reportArea(work, r.id, true), 0) * 1000) / 1000;
 
-  const pendingSic = state.dprDocuments.filter((d) => d.status === "submitted").length;
+  const pendingSic = reports.filter((d) => d.status === "submitted").length;
   const acplFlags = state.acplMatches.filter(
     (m) => m.resolveStatus === "open" && m.flag !== "match"
   ).length;
@@ -229,7 +233,7 @@ function OwnerHomePage() {
               {formatINR(incomeToday - expenseToday)}.
             </p>
             <ul className="list-inside list-disc text-sm text-[var(--sge-ink-2)]">
-              {state.dprDocuments
+              {reports
                 .filter((d) => d.date === today)
                 .map((d) => (
                   <li key={d.id}>
@@ -239,7 +243,7 @@ function OwnerHomePage() {
             </ul>
           </TabsContent>
           <TabsContent value="weekly" className="mt-3 text-sm text-[var(--sge-ink-2)]">
-            Week roll-up: DPR docs {state.dprDocuments.length} · JMS expected{" "}
+            Week roll-up: DPR docs {reports.length} · JMS expected{" "}
             {formatINR(state.jmsPackages.reduce((s, p) => s + p.expectedIncome, 0))} ·
             ACPL flags {acplFlags}.
           </TabsContent>

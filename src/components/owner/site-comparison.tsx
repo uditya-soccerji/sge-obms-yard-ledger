@@ -5,6 +5,9 @@ import { today as todayDate } from "@/lib/today";
 import { useStore } from "@/lib/store";
 import { workedCount } from "@/lib/attendance";
 import type { AppState } from "@/lib/types";
+import type { WorkState } from "@/lib/work/types";
+import { entryArea } from "@/lib/work/logic";
+import { useWork } from "@/lib/work/store";
 
 
 export interface SiteRow {
@@ -24,30 +27,26 @@ export interface SiteRow {
 }
 
 /** One row of figures per enabled site, from the unfiltered state. */
-export function siteRows(s: AppState): SiteRow[] {
+export function siteRows(s: AppState, w: WorkState): SiteRow[] {
+  const day = todayDate();
   return s.sites
     .filter((x) => x.enabled)
     .map((site) => {
       const id = site.id;
-      const today = s.dprs.filter((d) => d.siteId === id && d.date === todayDate());
+      // Today's quantities come from the one DPR model in Work (job lines + scaffold lines)
+      const siteOfJob = (jobId: string) => w.planLines.find((l) => l.id === w.jobs.find((j) => j.id === jobId)?.planLineId)?.siteId;
+      const lines = w.dprs.filter((d) => d.date === day && siteOfJob(d.jobId) === id);
+      const reportsToday = w.reports.filter((r) => r.siteId === id && r.date === day);
       return {
         siteId: id,
         code: site.code,
         name: site.name,
         crew: s.labourers.filter((l) => l.siteId === id && l.active).length,
         present: workedCount(s.attendance.filter((a) => a.siteId === id), todayDate()),
-        paintedM2: today
-          .filter((d) => d.type === "painting")
-          .reduce((n, d) => n + (d.areaM2 ?? 0), 0),
-        blastedM2: today
-          .filter((d) => d.type === "blasting")
-          .reduce((n, d) => n + (d.areaM2 ?? 0), 0),
-        scaffoldM3: today
-          .filter((d) => d.type === "scaffolding")
-          .reduce((n, d) => n + (d.volumeM3 ?? 0), 0),
-        pendingDprs: s.dprDocuments.filter(
-          (d) => d.siteId === id && d.status === "submitted"
-        ).length,
+        paintedM2: Math.round(lines.filter((d) => d.stage !== "prep").reduce((n, d) => n + entryArea(d), 0) * 1000) / 1000,
+        blastedM2: Math.round(lines.filter((d) => d.stage === "prep").reduce((n, d) => n + entryArea(d), 0) * 1000) / 1000,
+        scaffoldM3: reportsToday.flatMap((r) => r.scaffoldWork ?? []).reduce((n, l) => n + (l.erectM3 || 0), 0),
+        pendingDprs: w.reports.filter((d) => d.siteId === id && d.status === "submitted").length,
         openRequests: s.equipmentRequests.filter(
           (r) => r.siteId === id && ["open", "sic_approved", "fulfilling"].includes(r.status)
         ).length,
@@ -73,7 +72,8 @@ function pct(present: number, crew: number) {
  */
 export function SiteComparison() {
   const { fullState, switchSite } = useStore();
-  const rows = siteRows(fullState);
+  const { work } = useWork();
+  const rows = siteRows(fullState, work);
   const total = rows.reduce(
     (t, r) => ({
       crew: t.crew + r.crew,

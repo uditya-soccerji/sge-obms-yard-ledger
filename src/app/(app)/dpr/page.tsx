@@ -24,18 +24,21 @@ import {
 } from "@/lib/paint-lifecycle";
 import { effectivePermission, plantScopeFor } from "@/lib/permissions";
 import { useStore } from "@/lib/store";
+import { useSiteReports } from "@/lib/work/use-reports";
+import type { ReportStatus } from "@/lib/work/types";
 import { WORKING } from "@/lib/attendance";
-import type { DprStatus, DprSubmitterType } from "@/lib/types";
+import type { DprSubmitterType } from "@/lib/types";
+import { useWork } from "@/lib/work/store";
+import { entriesOf, isLate, reportArea } from "@/lib/work/reports";
 
 const STATUS_TONE: Record<
-  DprStatus,
+  ReportStatus,
   "default" | "ok" | "warn" | "crit" | "accent"
 > = {
   draft: "default",
   submitted: "accent",
   sic_approved: "ok",
   sic_rejected: "crit",
-  locked: "warn",
 };
 
 const TYPE_LABEL: Record<DprSubmitterType, string> = {
@@ -47,6 +50,8 @@ const TYPE_LABEL: Record<DprSubmitterType, string> = {
 
 function DprDeskPage() {
   const { state, currentAccount } = useStore();
+  const reports = useSiteReports();
+  const { work } = useWork();
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [statusFilter, setStatusFilter] = useState<string>("all");
 
@@ -59,7 +64,7 @@ function DprDeskPage() {
     allowedTypes === "all" ? null : defaultDprSubmitterType(role, staff);
 
   const visible = useMemo(() => {
-    let docs = state.dprDocuments;
+    let docs = reports;
     if (role === "supervisor" || role === "store" || role === "safety") {
       docs = docs.filter((d) => d.submitterId === userId);
       if (lockedType) {
@@ -75,14 +80,14 @@ function DprDeskPage() {
       );
     }
     if (statusFilter !== "all") {
-      docs = docs.filter((d) => d.status === (statusFilter as DprStatus));
+      docs = docs.filter((d) => d.status === (statusFilter as ReportStatus));
     }
     return [...docs].sort(
       (a, b) =>
         b.date.localeCompare(a.date) || b.updatedAt.localeCompare(a.updatedAt)
     );
   }, [
-    state.dprDocuments,
+    reports,
     role,
     userId,
     typeFilter,
@@ -92,7 +97,7 @@ function DprDeskPage() {
   ]);
 
   // Counts follow what this seat may see (role, type and plant), not every DPR on the site
-  const mine = state.dprDocuments.filter((d) => {
+  const mine = reports.filter((d) => {
     if ((role === "supervisor" || role === "store" || role === "safety") && d.submitterId !== userId) return false;
     if (lockedType && (role === "supervisor" || role === "store" || role === "safety") && d.submitterType !== lockedType) return false;
     if (scope !== "all" && !scope.includes(d.plant)) return false;
@@ -203,9 +208,10 @@ function DprDeskPage() {
                   </p>
                   <div className="mt-1 font-mono text-[11px] text-[var(--sge-ink-3)]">
                     labour {labourPresent}/{d.labourMarks.length}
-                    {d.paintWork?.length
-                      ? ` · paint lines ${d.paintWork.length}`
+                    {entriesOf(work, d.id).length
+                      ? ` · job lines ${entriesOf(work, d.id).length} · ${reportArea(work, d.id)} m²`
                       : ""}
+                    {isLate(d) ? " · late" : ""}
                     {d.scaffoldWork?.length
                       ? ` · scaffold ${d.scaffoldWork.reduce((n, w) => n + w.standingM3, 0)} m³`
                       : ""}

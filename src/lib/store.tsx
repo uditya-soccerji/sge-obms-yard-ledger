@@ -15,13 +15,12 @@ import {
   matchAcplAgainstApproved,
   parseAcplCsv,
 } from "./acpl";
-import { dprCrew, validateDprForSubmit } from "./dpr-validate";
 import { scoreFromMatchRatio } from "./estimate";
 import { effectivePermission } from "./permissions";
 import { PAINT_STAGE_ORDER } from "./paint-lifecycle";
 import { resolveActivityRate, withSupersession } from "./rate-book";
 import { roleMeta } from "./roles";
-import { migrateLegacySafetyBody, SAFETY_CHECKLIST_SEED } from "./safety-dpr";
+import { SAFETY_CHECKLIST_SEED } from "./safety-dpr";
 import { seedMasterCatalog } from "./master/seed-catalog";
 import { supabase } from "./supabase/client";
 import {
@@ -38,6 +37,8 @@ import {
 } from "./supabase/remote";
 import type { CatalogItem, Contractor, MasterCatalog, MaterialItem } from "./master/types";
 import { createSeedState, STORAGE_KEY } from "./seed";
+import type { DprReport } from "./work/types";
+import type { LegacyDprView } from "./work/legacy-view";
 import { ALL_SITES, canSeeAllSites, canSwitchSites, entrySiteId, landingSite, scopeState } from "./site-scope";
 import { checkSite } from "./sites";
 import { normalizeEp } from "./ep";
@@ -54,8 +55,6 @@ import type {
   AttendanceStatus,
   AuditEntry,
   DraftEntityKind,
-  DprDocument,
-  DprStatus,
   EquipmentRequest,
   EquipmentRequestStatus,
   FinanceAlert,
@@ -133,15 +132,17 @@ interface StoreApi {
       >
     >
   ) => void;
-  saveDpr: (doc: DprDocument) => { ok: boolean; error?: string };
-  submitDpr: (id: string) => void;
-  reviewDpr: (id: string, decision: "sic_approved" | "sic_rejected", note: string) => { ok: boolean; error?: string };
-  /** Owner / Super Admin reopen an approved DPR for editing, with a logged reason */
-  unlockDpr: (id: string, reason: string) => { ok: boolean; error?: string };
+  /** An SIC-approved daily report's crew marks become that day's attendance (docs §4) */
+  applyDprAttendance: (report: DprReport) => void;
+  /** An unlocked report's attendance goes until it is approved again */
+  clearDprAttendance: (reportId: string) => void;
+  /** Requests on a submitted report go to the request desk (docs §9) */
+  raiseRequestsFromDpr: (report: DprReport) => void;
   /** Today's safety checklist for a site, created from the F/HSE/008 list when missing */
   openSafetyDay: (siteId: string) => void;
   uploadAcplText: (text: string, date: string, source: "upload" | "paste") => number;
-  runAcplMatch: (date: string) => number;
+  /** Match the gate punches against the day's SIC-approved reports (passed in from Work) */
+  runAcplMatch: (date: string, reports: DprReport[]) => number;
   resolveAcplFlag: (
     id: string,
     status: AcplResolveStatus,
@@ -150,8 +151,8 @@ interface StoreApi {
   ) => { ok: boolean; error?: string };
   uploadJmsPackage: (pkg: Omit<JmsPackage, "id" | "financeNotified" | "expectedIncome" | "paymentReceived"> & { lines: JmsLine[] }) => string;
   reviewJmsPackage: (id: string, decision: "sic_approved" | "sic_rejected", note: string) => void;
-  matchJmsLines: (packageId: string) => void;
-  computeRatings: (packageId: string) => { ok: boolean; error?: string };
+  matchJmsLines: (packageId: string, dprs: LegacyDprView[]) => void;
+  computeRatings: (packageId: string, dprs: LegacyDprView[]) => { ok: boolean; error?: string };
   /** received=true records the payment (amount defaults to expected income); false flags it as due to SIC */
   markJmsPayment: (
     packageId: string,
@@ -323,14 +324,6 @@ function migrateState(parsed: Partial<AppState>): AppState {
     equipmentRequests: parsed.equipmentRequests ?? seed.equipmentRequests,
     attendance: (parsed.attendance ?? seed.attendance).map((a) =>
       (a.status as string) === "off" ? { ...a, status: "weekly_off" as const } : a
-    ),
-    dprDocuments: (parsed.dprDocuments ?? seed.dprDocuments).map((d) =>
-      d.submitterType === "safety" && d.safetyBody
-        ? {
-            ...d,
-            safetyBody: migrateLegacySafetyBody(d.safetyBody),
-          }
-        : d
     ),
     acplPunches: parsed.acplPunches ?? seed.acplPunches,
     acplMatches: parsed.acplMatches ?? seed.acplMatches,
@@ -904,213 +897,38 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     []
   );
 
-  const saveDpr = useCallback((doc: DprDocument) => {
-    let result: { ok: boolean; error?: string } = { ok: true };
-    // Run the update on the current state first, so the result returned is the real outcome
-    // (React may apply the queued update later); then queue the same update
-    const step = (s: AppState): AppState => {
-      if (!can(s, "dpr", "create") && !can(s, "dpr", "update")) {
-        result = DENIED;
-        return s;
-      }
-      const existing = s.dprDocuments.find((d) => d.id === doc.id);
-      // Freeze on submit until SIC reject (6A)
-      if (
-        existing &&
-        (existing.status === "submitted" ||
-          existing.status === "sic_approved" ||
-          existing.status === "locked")
-      ) {
-        result = {
-          ok: false,
-          error: `DPR is frozen (${existing.status}). Edit only after SIC reject.`,
-        };
-        return s;
-      }
-      const updated = {
-        ...doc,
-        // Force draft/rejected only when saving edits
-        status:
-          existing?.status === "sic_rejected"
-            ? ("draft" as DprStatus)
-            : doc.status === "submitted"
-              ? ("draft" as DprStatus)
-              : doc.status === "draft" || doc.status === "sic_rejected"
-                ? doc.status
-                : ("draft" as DprStatus),
-        updatedAt: new Date().toISOString(),
-      };
-      const exists = !!existing;
-      const nextDocs = exists
-        ? s.dprDocuments.map((d) => (d.id === doc.id ? updated : d))
-        : [updated, ...s.dprDocuments];
-      const next = { ...s, dprDocuments: nextDocs };
-      return {
-        ...next,
-        auditLog: [
-          makeAudit(
-            next,
-            "dpr",
-            exists ? "update" : "create",
-            `${updated.id} · ${updated.submitterType} · ${updated.plant}`,
-            updated.plant
-          ),
-          ...s.auditLog,
-        ],
-      };
-    };
-    step(stateRef.current);
-    setState(step);
-    return result;
+  const applyDprAttendance = useCallback((report: DprReport) => {
+    setState((s) => {
+      const derived = attendanceFromApprovedDpr(report.id, report.date, report.siteId, report.labourMarks, s.currentUserId ?? "st-sic");
+      // The approved report replaces manual marks for those people, but another
+      // approved report's marks stay: a split day across two supervisors (docs §4)
+      const keys = new Set(derived.map((a) => `${a.date}:${a.labourerId}`));
+      const attendance = [
+        ...derived,
+        ...s.attendance.filter((a) => a.sourceDprId !== report.id && (a.sourceDprId || !keys.has(`${a.date}:${a.labourerId}`))),
+      ];
+      const next = { ...s, attendance };
+      return { ...next, auditLog: [makeAudit(next, "approvals", "approve", `DPR ${report.date} · ${report.plant}: attendance for ${derived.length}`, report.plant), ...s.auditLog] };
+    });
   }, []);
 
-  const submitDpr = useCallback((id: string) => {
+  const clearDprAttendance = useCallback((reportId: string) => {
+    setState((s) => ({ ...s, attendance: s.attendance.filter((a) => a.sourceDprId !== reportId) }));
+  }, []);
+
+  const raiseRequestsFromDpr = useCallback((report: DprReport) => {
     setState((s) => {
-      if (!can(s, "dpr", "submit")) return s;
-      const doc = s.dprDocuments.find((d) => d.id === id);
-      if (!doc) return s;
-      if (doc.status !== "draft" && doc.status !== "sic_rejected") return s;
-      // Same checks the form shows (docs §5); the store refuses an incomplete DPR too
-      const plants = s.sites.find((x) => x.id === doc.siteId)?.plants ?? [];
-      if (validateDprForSubmit(doc, dprCrew(doc, s.labourers), plants).length) return s;
-      const dprDocuments = s.dprDocuments.map((d) =>
-        d.id === id
-          ? {
-              ...d,
-              status: "submitted" as DprStatus,
-              updatedAt: new Date().toISOString(),
-            }
-          : d
-      );
-      // Sync open DPR requests into equipment desk
       let equipmentRequests = s.equipmentRequests;
-      for (const req of doc.requests) {
-        const already = equipmentRequests.some(
-          (e) => e.sourceDprId === id && e.description === req.description
-        );
-        if (already) continue;
+      for (const req of report.requests) {
+        if (equipmentRequests.some((e) => e.sourceDprId === report.id && e.description === req.description)) continue;
+        const now = new Date().toISOString();
         equipmentRequests = [
-          {
-            id: uid("er"),
-            createdAt: new Date().toISOString(),
-            updatedAt: new Date().toISOString(),
-            createdBy: doc.submitterId,
-            siteId: doc.siteId,
-            plant: doc.plant,
-            kind: req.kind,
-            description: req.description,
-            qty: req.qty,
-            urgent: req.urgent,
-            status: "open",
-            sourceDprId: id,
-          },
+          { id: uid("er"), createdAt: now, updatedAt: now, createdBy: report.submitterId, siteId: report.siteId, plant: report.plant, kind: req.kind, description: req.description, qty: req.qty, urgent: req.urgent, status: "open", sourceDprId: report.id },
           ...equipmentRequests,
         ];
       }
-      const next = { ...s, dprDocuments, equipmentRequests };
-      return {
-        ...next,
-        auditLog: [
-          makeAudit(
-            next,
-            "dpr",
-            "submit",
-            `Submitted ${id} (frozen until SIC review)`,
-            doc.plant
-          ),
-          ...s.auditLog,
-        ],
-      };
+      return equipmentRequests === s.equipmentRequests ? s : { ...s, equipmentRequests };
     });
-  }, []);
-
-  const reviewDpr = useCallback(
-    (id: string, decision: "sic_approved" | "sic_rejected", note: string) => {
-      const cur = stateRef.current;
-      if (!can(cur, "approvals", "approve")) return DENIED;
-      const target = cur.dprDocuments.find((d) => d.id === id);
-      if (!target || target.status !== "submitted") return { ok: false, error: "This DPR isn't waiting for review" };
-      if (decision === "sic_rejected" && !note.trim()) return { ok: false, error: "Give a reason so the supervisor can fix it" };
-      setState((s) => {
-        const doc = s.dprDocuments.find((d) => d.id === id);
-        if (!doc || doc.status !== "submitted") return s;
-        const now = new Date().toISOString();
-        const dprDocuments = s.dprDocuments.map((d) =>
-          d.id === id
-            ? {
-                ...d,
-                status: decision,
-                sicNote: note,
-                sicReviewedBy: s.currentUserId ?? "st-sic",
-                sicReviewedAt: now,
-                updatedAt: now,
-              }
-            : d
-        );
-
-        let attendance = s.attendance;
-        if (decision === "sic_approved") {
-          attendance = attendance.filter((a) => a.sourceDprId !== id);
-          const derived = attendanceFromApprovedDpr(
-            id,
-            doc.date,
-            doc.siteId,
-            doc.labourMarks,
-            s.currentUserId ?? "st-sic"
-          );
-          // The approved DPR replaces manual marks for those people, but another
-          // approved DPR's marks stay: a split day across two supervisors (docs §4)
-          const keys = new Set(derived.map((a) => `${a.date}:${a.labourerId}`));
-          attendance = [
-            ...derived,
-            ...attendance.filter((a) => a.sourceDprId || !keys.has(`${a.date}:${a.labourerId}`)),
-          ];
-        }
-
-        const next = { ...s, dprDocuments, attendance };
-        return {
-          ...next,
-          auditLog: [
-            makeAudit(
-              next,
-              "approvals",
-              decision === "sic_approved" ? "approve" : "reject",
-              `${id} · ${note || decision}`,
-              doc.plant
-            ),
-            ...s.auditLog,
-          ],
-        };
-      });
-      return { ok: true };
-    },
-    []
-  );
-
-  const unlockDpr = useCallback((id: string, reason: string) => {
-    const cur = stateRef.current;
-    if (cur.currentRole !== "owner" && cur.currentRole !== "super_admin") return { ok: false, error: "Only the Owner or Super Admin can unlock an approved DPR" };
-    const doc = cur.dprDocuments.find((d) => d.id === id);
-    if (!doc || doc.status !== "sic_approved") return { ok: false, error: "Only an approved DPR can be unlocked" };
-    if (!reason.trim()) return { ok: false, error: "Give the reason for unlocking (it's logged)" };
-    const account = cur.users.find((u) => u.id === cur.currentAccountId);
-    setState((s) => {
-      const d = s.dprDocuments.find((x) => x.id === id);
-      if (!d || d.status !== "sic_approved") return s;
-      const at = new Date().toISOString();
-      const next = {
-        ...s,
-        dprDocuments: s.dprDocuments.map((x) =>
-          x.id === id
-            ? { ...x, status: "draft" as DprStatus, updatedAt: at, unlocks: [...(x.unlocks ?? []), { by: account?.name ?? "Owner", at, reason: reason.trim() }] }
-            : x
-        ),
-        // Attendance taken from it goes until it is approved again
-        attendance: s.attendance.filter((a) => a.sourceDprId !== id),
-      };
-      return { ...next, auditLog: [makeAudit(next, "dpr", "unlock", `${id} · ${reason.trim()}`, d.plant), ...s.auditLog] };
-    });
-    return { ok: true };
   }, []);
 
   const openSafetyDay = useCallback((siteId: string) => {
@@ -1158,7 +976,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     []
   );
 
-  const runAcplMatch = useCallback((date: string) => {
+  const runAcplMatch = useCallback((date: string, reports: DprReport[]) => {
     let count = 0;
     if (!can(stateRef.current, "acpl", "upload") && !can(stateRef.current, "acpl", "approve")) return 0;
     // Run the update on the current state first, so the result returned is the real outcome
@@ -1168,7 +986,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const resolved = s.acplMatches.filter((m) => m.date === date && m.resolveStatus !== "open");
       const same = (a: AcplMatchRow, b: AcplMatchRow) =>
         a.epNumber === b.epNumber && a.flag === b.flag && a.dprStatus === b.dprStatus && a.acplInTime === b.acplInTime && a.acplOutTime === b.acplOutTime;
-      const matches = matchAcplAgainstApproved(s, s.acplPunches, date).filter((m) => !resolved.some((r) => same(r, m)));
+      const matches = matchAcplAgainstApproved(s, s.acplPunches, date, reports).filter((m) => !resolved.some((r) => same(r, m)));
       count = matches.length;
       // Replace open matches for that date
       const kept = s.acplMatches.filter(
@@ -1350,7 +1168,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
    * many DPRs, so their quantities are summed; each DPR work line counts toward
    * one JMS line only.
    */
-  const matchJmsLines = useCallback((packageId: string) => {
+  const matchJmsLines = useCallback((packageId: string, dprs: LegacyDprView[]) => {
     if (!can(stateRef.current, "jms", "upload") && !can(stateRef.current, "jms", "approve")) return;
     setState((s) => {
       const pkg = s.jmsPackages.find((p) => p.id === packageId);
@@ -1361,7 +1179,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const fromDate = new Date(Date.parse(upTo) - 30 * 86_400_000).toISOString().slice(0, 10);
       const inPeriod = (date: string) =>
         monthMatch ? date.startsWith(monthMatch[1]) : date >= fromDate && date <= upTo;
-      const approved = s.dprDocuments.filter(
+      const approved = dprs.filter(
         (d) =>
           d.status === "sic_approved" &&
           (!pkg.siteId || d.siteId === pkg.siteId) &&
@@ -1443,7 +1261,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     []
   );
 
-  const computeRatings = useCallback((packageId: string) => {
+  const computeRatings = useCallback((packageId: string, dprs: LegacyDprView[]) => {
     const cur = stateRef.current;
     if (!can(cur, "jms", "approve")) return DENIED;
     const target = cur.jmsPackages.find((p) => p.id === packageId);
@@ -1458,7 +1276,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       >();
       for (const line of pkg.lines) {
         if (!line.matchedDprId) continue;
-        const dpr = s.dprDocuments.find((d) => d.id === line.matchedDprId);
+        const dpr = dprs.find((d) => d.id === line.matchedDprId);
         if (!dpr) continue;
         const cur = bySup.get(dpr.submitterId) ?? {
           jms: 0,
@@ -1478,7 +1296,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             ? agg.ratios.reduce((a, b) => a + b, 0) / agg.ratios.length
             : 0;
         const score = scoreFromMatchRatio(avgRatio);
-        const dprDocs = s.dprDocuments.filter(
+        const dprDocs = dprs.filter(
           (d) => d.submitterId === supervisorId
         );
         const faultEq = dprDocs.flatMap((d) =>
@@ -2437,83 +2255,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           }
         }
 
-        if (input.mappedEntity === "dpr_note") {
-          // Prefer appending to an open draft/submitted DPR for the role
-          const submitterId =
-            input.role === "safety"
-              ? "st-safety"
-              : input.role === "store"
-                ? "st-store"
-                : "st-sup1";
-          const open = next.dprDocuments.find(
-            (d) =>
-              d.submitterId === submitterId &&
-              (d.status === "draft" || d.status === "submitted") &&
-              d.date === today
-          );
-          if (open) {
-            draft.entityId = open.id;
-            next = {
-              ...next,
-              dprDocuments: next.dprDocuments.map((d) =>
-                d.id === open.id
-                  ? {
-                      ...d,
-                      telegramDraftLines: [
-                        ...d.telegramDraftLines,
-                        input.content,
-                      ],
-                      note: d.note
-                        ? `${d.note}\n[TG] ${input.content}`
-                        : `[TG] ${input.content}`,
-                      updatedAt: new Date().toISOString(),
-                    }
-                  : d
-              ),
-            };
-          } else {
-            const dpr: DprDocument = {
-              id: uid("dprd"),
-              date: today,
-              siteId: entrySiteId(next),
-              plant: "CPP",
-              submitterId,
-              submitterType:
-                input.role === "safety"
-                  ? "safety"
-                  : input.role === "store"
-                    ? "store"
-                    : "painting_blasting",
-              status: "draft",
-              labourMarks: [],
-              equipmentMarks: [],
-              requests: [],
-              nextDayPlan: "",
-              note: input.content,
-              telegramDraftLines: [input.content],
-              createdAt: new Date().toISOString(),
-              updatedAt: new Date().toISOString(),
-            };
-            draft.entityId = dpr.id;
-            next = { ...next, dprDocuments: [dpr, ...next.dprDocuments] };
-          }
-
-          // Keep legacy thin line for owner gist
-          const thin = {
-            id: uid("dpr"),
-            date: today,
-            type: "painting" as const,
-            supervisorId: submitterId,
-            siteId: entrySiteId(next),
-            plant: "CPP",
-            location: "Telegram ingest",
-            crewCount: 0,
-            note: input.content,
-            permitOk: false,
-            tbtDone: false,
-          };
-          next = { ...next, dprs: [thin, ...next.dprs] };
-        }
+        // dpr_note: the Telegram page adds it to today's Work report (telegramToReport)
 
         if (input.mappedEntity === "expense") {
           // Prefer a number marked as money (₹ / Rs / INR); else the largest number in the message
@@ -2574,47 +2316,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             };
             draft.entityId = day.id;
           }
-          // Also append to safety DPR draft
-          const safetyDpr = next.dprDocuments.find(
-            (d) =>
-              d.submitterType === "safety" &&
-              (d.status === "draft" || d.status === "submitted")
-          );
-          if (safetyDpr?.safetyBody) {
-            const obs = {
-              id: `obs-tg-${Date.now()}`,
-              obsNo: "",
-              type: "UA" as const,
-              from: "S" as const,
-              risk: "MEDIUM" as const,
-              status: "OPEN" as const,
-              checkedBy: "S" as const,
-              whereWhat: input.content,
-              actionTaken: "",
-              whoWillFix: "",
-              firstFoundOn: new Date().toISOString().slice(0, 10),
-              fixByDate: "",
-            };
-            next = {
-              ...next,
-              dprDocuments: next.dprDocuments.map((d) =>
-                d.id === safetyDpr.id
-                  ? {
-                      ...d,
-                      telegramDraftLines: [
-                        ...d.telegramDraftLines,
-                        input.content,
-                      ],
-                      note: `${d.note}\n[TG] ${input.content}`,
-                      safetyBody: {
-                        ...d.safetyBody!,
-                        observations: [...d.safetyBody!.observations, obs],
-                      },
-                    }
-                  : d
-              ),
-            };
-          }
+          // The Telegram page also adds it to today's safety report in Work
         }
 
         return {
@@ -2656,10 +2358,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       setEquipmentStatus,
       actOnRequest,
       updatePaintLine,
-      saveDpr,
-      submitDpr,
-      reviewDpr,
-      unlockDpr,
+      applyDprAttendance,
+      clearDprAttendance,
+      raiseRequestsFromDpr,
       openSafetyDay,
       uploadAcplText,
       runAcplMatch,
@@ -2714,10 +2415,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       setEquipmentStatus,
       actOnRequest,
       updatePaintLine,
-      saveDpr,
-      submitDpr,
-      reviewDpr,
-      unlockDpr,
+      applyDprAttendance,
+      clearDprAttendance,
+      raiseRequestsFromDpr,
       openSafetyDay,
       uploadAcplText,
       runAcplMatch,

@@ -7,7 +7,8 @@ import {
 import { seedMasterCatalog } from "./master/seed-catalog";
 import { seedOtherSites } from "./seed-sites";
 import { SEED_RATE_LINES } from "./rate-book-seed";
-import type { AppState, AttendanceStatus, DprDocument, DprSafetyBody, TradeDefinition } from "./types";
+import type { AppState, AttendanceStatus, DprSafetyBody, TradeDefinition } from "./types";
+import type { DprReport } from "./work/types";
 
 const SITE = "site-dta";
 const TODAY = "2026-10-05";
@@ -259,7 +260,12 @@ const SAFETY_ITEMS = [
   "Confined space control",
 ];
 
-function seedDprDocuments(): DprDocument[] {
+/**
+ * Sample daily reports (safety, store, scaffolding, painting) used by the Work
+ * demo (Test tools → Load demo). Painting quantities live on Work job lines, so
+ * the painting samples' old paintWork is dropped there.
+ */
+export function sampleDprReports(): (DprReport & { paintWork?: unknown })[] {
   return [
     {
       id: "dprd-1",
@@ -1026,69 +1032,6 @@ export function createSeedState(): AppState {
         ],
       },
     ],
-    dprs: [
-      {
-        id: "dpr-1",
-        date: TODAY,
-        type: "painting",
-        supervisorId: "st-sup1",
-        siteId: SITE,
-        plant: "COKER",
-        location: "Pipe rack B-12",
-        mpsScheme: 2,
-        areaM2: 420,
-        paintLitres: 168,
-        crewCount: 6,
-        note: "Intermediate MIO ongoing; final coat tomorrow.",
-        permitOk: true,
-        tbtDone: true,
-      },
-      {
-        id: "dpr-2",
-        date: TODAY,
-        type: "blasting",
-        supervisorId: "st-sup2",
-        siteId: SITE,
-        plant: "CRUDE",
-        location: "Vessel V-204 shell",
-        areaM2: 180,
-        crewCount: 4,
-        note: "SA2.5 completed south face; slag recovery pending.",
-        permitOk: true,
-        tbtDone: true,
-      },
-      {
-        id: "dpr-3",
-        date: YDAY,
-        type: "scaffolding",
-        supervisorId: "st-sup3",
-        siteId: SITE,
-        plant: "COKER",
-        location: "Flare structure FS-01",
-        volumeM3: 840,
-        crewCount: 5,
-        note: "Standing scaffold erected to EL +18 m.",
-        permitOk: true,
-        tbtDone: true,
-      },
-      {
-        id: "dpr-4",
-        date: D2,
-        type: "painting",
-        supervisorId: "st-sup1",
-        siteId: SITE,
-        plant: "COKER",
-        location: "Pipe rack B-12",
-        mpsScheme: 2,
-        areaM2: 310,
-        paintLitres: 124,
-        crewCount: 5,
-        note: "Primer completed.",
-        permitOk: true,
-        tbtDone: true,
-      },
-    ],
-    dprDocuments: seedDprDocuments(),
     workPlans: [
       { id: "wp-1", date: TODAY, supervisorId: "st-sup1", plant: "COKER", task: "Finish MIO intermediate B-12", targetM2: 450, status: "in_progress" },
       { id: "wp-2", date: TODAY, supervisorId: "st-sup2", plant: "COKER", task: "Blast V-204 remaining faces", targetM2: 200, status: "in_progress" },
@@ -1412,7 +1355,7 @@ export function createSeedState(): AppState {
 /** v9: per-site demo data — a new key so old browsers load the new seed. */
 /** v10: EP numbers in the PP + 10 digit format (docs §1) */
 /** v11: attendance statuses per docs §4, HR on all sites */
-export const STORAGE_KEY = "sge-obms-ops-v12";
+export const STORAGE_KEY = "sge-obms-ops-v13";
 export { SAFETY_ITEMS };
 
 /**
@@ -1445,8 +1388,6 @@ function withOtherSites(base: AppState): AppState {
     attendance: [...base.attendance, ...dtaRoster, ...more.attendance],
     paintStock: [...base.paintStock, ...more.paintStock],
     equipment: [...base.equipment, ...more.equipment],
-    dprs: [...base.dprs, ...more.dprs],
-    dprDocuments: [...base.dprDocuments, ...more.dprDocuments],
     workPlans: [...dta(base.workPlans), ...more.workPlans],
     safetyDays: [...base.safetyDays, ...more.safetyDays],
     finance: [...base.finance, ...more.finance],
