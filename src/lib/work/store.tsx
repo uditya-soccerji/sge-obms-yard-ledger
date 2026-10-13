@@ -12,6 +12,8 @@ import { entryArea } from "./logic";
 import { workRights } from "./permissions";
 import type { DprEntry, DprReport, Expense, Jms, JmsPayment, JmsStatus, JmsSubmission, Job, PlanLine, Stage, WorkState } from "./types";
 import { compareJms, linkCandidates } from "./jms-compare";
+import { inStock, LIFECYCLE, LIFECYCLE_LABEL, paintUsedInMonth, stepVariance } from "./paint-steps";
+import type { PaintBatch, PaintStep } from "./types";
 import { blankReport, entriesOf, isLate, pendingReports, reportOpen, sameDay } from "./reports";
 import { effectivePermission } from "../permissions";
 import { dprCrew, validateDprForSubmit } from "../dpr-validate";
@@ -55,7 +57,18 @@ interface WorkApi {
   unlinkSubmission: (submissionId: string) => Result;
   /** Close one site's current month and carry its unfinished work forward */
   closeMonth: (siteId: string) => Result;
+  /** Issue from SGE store stock to a supervisor: creates our 941 step */
   issuePaint: (batchId: string, supervisorId: string, qtyL: number) => Result;
+  /** Add a batch at any stage before issue (PR / PO / RIL store / SGE store) */
+  receivePaint: (input: Omit<PaintBatch, "id" | "supervisorId" | "issuedOn" | "updatedAt">) => Result;
+  /** Move a batch one stage on (PR → PO → RIL store → SGE store) */
+  advancePaintLifecycle: (batchId: string) => Result;
+  /** Month reco: our 942 for a supervisor · paint · month, litres = DPR use */
+  recoMonth: (supervisorId: string, sap: string, month: string) => Result;
+  /** Post a reco: our 261 */
+  postMonth: (recoId: string) => Result;
+  /** RIL's number (and litres, on a 942) typed against our step — reference only */
+  setRilRef: (stepId: string, ref: string, rilLitres?: number) => Result;
   /** Record the money received, or clear it (null) with a reason */
   recordPayment: (jmsId: string, payment: JmsPayment | null, clearReason?: string) => Result;
   addExpense: (input: Omit<Expense, "id">) => Result;
@@ -100,6 +113,8 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
   staffRef.current = fullState.staff;
   const sitesRef = React.useRef(fullState.sites);
   sitesRef.current = fullState.sites;
+  const materialsRef = React.useRef(fullState.masterCatalog.materials);
+  materialsRef.current = fullState.masterCatalog.materials;
   const rights = () => workRights(actor.current.role);
   const accountRef = React.useRef(currentAccount);
   accountRef.current = currentAccount;
@@ -127,7 +142,7 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
       const raw = localStorage.getItem(WORK_STORAGE_KEY);
       if (raw) {
         const saved = JSON.parse(raw) as WorkState;
-        setWork({ ...saved, reports: saved.reports ?? [], submissions: saved.submissions ?? [] });
+        setWork({ ...saved, reports: saved.reports ?? [], submissions: saved.submissions ?? [], paintSteps: saved.paintSteps ?? [] });
       }
     } catch {
       /* keep seed */
@@ -632,18 +647,90 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
     const w = ref.current;
     const b = w.paint.find((x) => x.id === batchId);
     if (!b || b.supervisorId) return { ok: false, error: "Pick a store batch" };
+    if (!inStock(b)) return { ok: false, error: "That batch isn't in the SGE store yet" };
     if (!(qtyL > 0)) return { ok: false, error: "Quantity must be above zero" };
     if (qtyL > b.qtyL) return { ok: false, error: `Only ${b.qtyL} L in this batch` };
     const sup = staffRef.current.find((x) => x.id === supervisorId);
     if (!sup || sup.role !== "supervisor") return { ok: false, error: "Pick a supervisor" };
     if (sup.siteId !== b.siteId) return { ok: false, error: `${sup.name} doesn't work on this batch's site` };
     const issued = { ...b, id: uid("pb"), qtyL, supervisorId, issuedOn: today() };
+    // Our 941: the issue in the supervisor's name (RIL's 941 no. is added later for reference)
+    const step941: PaintStep = { id: uid("ps"), step: "941", batchId: issued.id, supervisorId, sap: b.sap, month: today().slice(0, 7), litres: qtyL, date: today(), by: actor.current.name };
     setWork((s) => ({
       ...s,
       paint: [...s.paint.map((x) => (x.id === batchId ? { ...x, qtyL: round3(x.qtyL - qtyL) } : x)), issued],
+      paintSteps: [...s.paintSteps, step941],
     }));
     log({ kind: "paint_issued", siteId: b.siteId, subjectStaffId: supervisorId, problem: b.expiry < today(), title: `${qtyL} L ${b.name} issued`, detail: `Batch ${b.batch} · exp ${b.expiry}${b.expiry < today() ? " (EXPIRED)" : ""}`, tab: "paint", refId: issued.id });
     return { ok: true, id: issued.id };
+  }, [log]);
+
+  const receivePaint = useCallback<WorkApi["receivePaint"]>((input) => {
+    if (!rights().canIssuePaint) return NOT_ALLOWED;
+    if (!input.sap.trim() || !input.name.trim()) return { ok: false, error: "Enter the paint (SAP code and name)" };
+    if (!(input.qtyL > 0)) return { ok: false, error: "Litres must be above zero" };
+    if (!input.siteId) return { ok: false, error: "Pick the site" };
+    if (input.expiry && input.mfg && input.expiry < input.mfg) return { ok: false, error: "Expiry can't be before manufacture" };
+    const b: PaintBatch = { ...input, sap: input.sap.trim(), name: input.name.trim(), id: uid("pb"), supervisorId: null, updatedAt: new Date().toISOString() };
+    setWork((s) => ({ ...s, paint: [...s.paint, b] }));
+    log({ kind: "paint_received", siteId: b.siteId, title: `${b.qtyL} L ${b.name} · ${LIFECYCLE_LABEL[b.lifecycle ?? "sge_receive"]}`, detail: `Batch ${b.batch || "—"}${b.prNo ? ` · PR ${b.prNo}` : ""}${b.poNo ? ` · PO ${b.poNo}` : ""}`, tab: "paint", refId: b.id });
+    return { ok: true, id: b.id };
+  }, [log]);
+
+  const advancePaintLifecycle = useCallback<WorkApi["advancePaintLifecycle"]>((batchId) => {
+    if (!rights().canIssuePaint) return NOT_ALLOWED;
+    const b = ref.current.paint.find((x) => x.id === batchId);
+    if (!b || b.supervisorId) return { ok: false, error: "Batch not found" };
+    const at = LIFECYCLE.indexOf(b.lifecycle ?? "sge_receive");
+    if (at >= LIFECYCLE.length - 1) return { ok: false, error: "Already in the SGE store — issue it to a supervisor" };
+    const to = LIFECYCLE[at + 1];
+    if (to === "po" && !b.prNo) return { ok: false, error: "Enter the PR no. first" };
+    if (to === "ril_receive" && !b.poNo) return { ok: false, error: "Enter the PO no. first" };
+    setWork((s) => ({ ...s, paint: s.paint.map((x) => (x.id === batchId ? { ...x, lifecycle: to, updatedAt: new Date().toISOString() } : x)) }));
+    log({ kind: "paint_stage", siteId: b.siteId, title: `${b.name} → ${LIFECYCLE_LABEL[to]}`, detail: `${b.qtyL} L · batch ${b.batch || "—"}`, tab: "paint", refId: b.id });
+    return { ok: true };
+  }, [log]);
+
+  const recoMonth = useCallback<WorkApi["recoMonth"]>((supervisorId, sap, month) => {
+    if (!rights().canIssuePaint && actor.current.role !== "admin") return NOT_ALLOWED;
+    const w = ref.current;
+    if (month >= today().slice(0, 7)) return { ok: false, error: "Reco is done after the month ends" };
+    if (w.paintSteps.some((s) => s.step === "942" && s.supervisorId === supervisorId && s.sap === sap && s.month === month)) return { ok: false, error: "That month is already reconciled" };
+    const litres = paintUsedInMonth(supervisorId, sap, month, w.dprs);
+    const step: PaintStep = { id: uid("ps"), step: "942", supervisorId, sap, month, litres, date: today(), by: actor.current.name };
+    setWork((s) => ({ ...s, paintSteps: [...s.paintSteps, step] }));
+    const site = staffRef.current.find((x) => x.id === supervisorId)?.siteId ?? "";
+    log({ kind: "paint_step", siteId: site, subjectStaffId: supervisorId, title: `942 reco · ${month} · ${litres} L`, detail: `${sap} · from DPR use`, tab: "paint", refId: step.id });
+    return { ok: true, id: step.id };
+  }, [log]);
+
+  const postMonth = useCallback<WorkApi["postMonth"]>((recoId) => {
+    if (!rights().canIssuePaint && actor.current.role !== "admin") return NOT_ALLOWED;
+    const w = ref.current;
+    const reco = w.paintSteps.find((s) => s.id === recoId && s.step === "942");
+    if (!reco) return { ok: false, error: "Reco not found" };
+    if (w.paintSteps.some((s) => s.step === "261" && s.recoId === recoId)) return { ok: false, error: "Already posted" };
+    const step: PaintStep = { id: uid("ps"), step: "261", recoId, supervisorId: reco.supervisorId, sap: reco.sap, month: reco.month, litres: reco.litres, date: today(), by: actor.current.name };
+    setWork((s) => ({ ...s, paintSteps: [...s.paintSteps, step] }));
+    const site = staffRef.current.find((x) => x.id === reco.supervisorId)?.siteId ?? "";
+    log({ kind: "paint_step", siteId: site, subjectStaffId: reco.supervisorId, title: `261 posted · ${reco.month} · ${reco.litres} L`, detail: reco.sap, tab: "paint", refId: step.id });
+    return { ok: true, id: step.id };
+  }, [log]);
+
+  const setRilRef = useCallback<WorkApi["setRilRef"]>((stepId, refNo, rilLitres) => {
+    if (!rights().canIssuePaint && actor.current.role !== "admin") return NOT_ALLOWED;
+    const w = ref.current;
+    const st = w.paintSteps.find((s) => s.id === stepId);
+    if (!st) return { ok: false, error: "Step not found" };
+    if (!refNo.trim()) return { ok: false, error: "Enter RIL's number" };
+    if (rilLitres != null && !(rilLitres >= 0)) return { ok: false, error: "Litres can't be negative" };
+    const next: PaintStep = { ...st, rilRef: refNo.trim(), rilRefBy: actor.current.name, rilRefAt: new Date().toISOString(), rilLitres: st.step === "942" ? rilLitres : undefined };
+    setWork((s) => ({ ...s, paintSteps: s.paintSteps.map((x) => (x.id === stepId ? next : x)) }));
+    const site = staffRef.current.find((x) => x.id === st.supervisorId)?.siteId ?? "";
+    log({ kind: "paint_step", siteId: site, subjectStaffId: st.supervisorId, title: `RIL ${st.step} no. ${next.rilRef}`, detail: `${st.sap} · ${st.month}${next.rilLitres != null ? ` · RIL ${next.rilLitres} L vs ours ${st.litres} L` : ""}`, tab: "paint", refId: st.id });
+    const v = stepVariance(next, materialsRef.current);
+    if (v?.over) log({ kind: "paint_variance", problem: true, siteId: site, subjectStaffId: st.supervisorId, title: `Paint variance ${v.pct.toFixed(1)}% · ${st.sap} ${st.month}`, detail: `Ours ${st.litres} L vs RIL ${next.rilLitres} L (tolerance ±${v.tolerance}%)`, tab: "paint", refId: st.id });
+    return { ok: true };
   }, [log]);
 
   /** Record (or clear, with null) the money received against a JMS. */
@@ -753,8 +840,8 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const api = useMemo<WorkApi>(
-    () => ({ work, hydrated, uploadSubmission, linkSubmission, unlinkSubmission, addPlanLine, startJob, addDpr, removeEntry, saveReport, submitReport, reviewReport, unlockReport, telegramToReport, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork }),
-    [work, hydrated, uploadSubmission, linkSubmission, unlinkSubmission, addPlanLine, startJob, addDpr, removeEntry, saveReport, submitReport, reviewReport, unlockReport, telegramToReport, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork]
+    () => ({ work, hydrated, receivePaint, advancePaintLifecycle, recoMonth, postMonth, setRilRef, uploadSubmission, linkSubmission, unlinkSubmission, addPlanLine, startJob, addDpr, removeEntry, saveReport, submitReport, reviewReport, unlockReport, telegramToReport, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork }),
+    [work, hydrated, receivePaint, advancePaintLifecycle, recoMonth, postMonth, setRilRef, uploadSubmission, linkSubmission, unlinkSubmission, addPlanLine, startJob, addDpr, removeEntry, saveReport, submitReport, reviewReport, unlockReport, telegramToReport, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork]
   );
   return <WorkContext.Provider value={api}>{children}</WorkContext.Provider>;
 }

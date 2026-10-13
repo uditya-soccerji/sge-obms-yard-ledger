@@ -16,7 +16,6 @@ import {
   parseAcplCsv,
 } from "./acpl";
 import { effectivePermission } from "./permissions";
-import { PAINT_STAGE_ORDER } from "./paint-lifecycle";
 import { withSupersession } from "./rate-book";
 import { roleMeta } from "./roles";
 import { SAFETY_CHECKLIST_SEED } from "./safety-dpr";
@@ -59,7 +58,6 @@ import type {
   Labourer,
   MessageType,
   ModuleId,
-  PaintStockLine,
   PermissionAction,
   StaffMember,
   RateCard,
@@ -105,27 +103,10 @@ interface StoreApi {
     content: string;
     mappedEntity: DraftEntityKind;
   }) => TelegramDraft;
-  /** Move a paint line one stage on; refused until that stage's details are in (docs §6) */
-  advancePaintStage: (lineId: string) => { ok: boolean; error?: string };
   /** Supervisor reports a fault; the store marks it repaired (docs §7) */
   setEquipmentStatus: (id: string, status: "ok" | "due" | "fault", note?: string) => { ok: boolean; error?: string };
   /** Request flow (docs §9): approve, start, fulfil, part_fill, cancel, receive */
   actOnRequest: (id: string, action: RequestAction, note?: string) => { ok: boolean; error?: string };
-  updatePaintLine: (
-    lineId: string,
-    patch: Partial<
-      Pick<
-        PaintStockLine,
-        | "movement941"
-        | "movement942"
-        | "movement261"
-        | "rilPosted"
-        | "sgeUsed"
-        | "qtyLitres"
-        | "issuedTo"
-      >
-    >
-  ) => void;
   /** An SIC-approved daily report's crew marks become that day's attendance (docs §4) */
   applyDprAttendance: (report: DprReport) => void;
   /** An unlocked report's attendance goes until it is approved again */
@@ -274,25 +255,6 @@ function can(s: AppState, module: ModuleId, action: PermissionAction): boolean {
 
 const DENIED = { ok: false as const, error: "Your role can't do this" };
 
-function migratePaintStock(
-  lines: PaintStockLine[] | undefined,
-  seedLines: PaintStockLine[]
-): PaintStockLine[] {
-  if (!lines || lines.length === 0) return seedLines;
-  return lines.map((line) => {
-    const stage = PAINT_STAGE_ORDER.includes(line.stage)
-      ? line.stage
-      : "reco";
-    return {
-      ...line,
-      stage,
-      movement941: line.movement941,
-      movement942: line.movement942,
-      movement261: line.movement261,
-    };
-  });
-}
-
 function migrateState(parsed: Partial<AppState>): AppState {
   const seed = createSeedState();
   const users =
@@ -341,7 +303,6 @@ function migrateState(parsed: Partial<AppState>): AppState {
     wageLedger: parsed.wageLedger ?? seed.wageLedger,
     financeAlerts: parsed.financeAlerts ?? seed.financeAlerts,
     staff: parsed.staff && parsed.staff.length > 0 ? parsed.staff : seed.staff,
-    paintStock: migratePaintStock(parsed.paintStock, seed.paintStock),
   };
 }
 
@@ -774,110 +735,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       ),
     }));
   }, []);
-
-  const advancePaintStage = useCallback((lineId: string) => {
-    const cur = stateRef.current;
-    if (!can(cur, "store", "update")) return DENIED;
-    const line = cur.paintStock.find((l) => l.id === lineId);
-    if (!line) return { ok: false, error: "Line not found" };
-    const at = PAINT_STAGE_ORDER.indexOf(line.stage);
-    if (at < 0 || at >= PAINT_STAGE_ORDER.length - 1) return { ok: false, error: "Already at the last stage" };
-    const to = PAINT_STAGE_ORDER[at + 1];
-    // docs §6: issue needs a supervisor and the 941 no.; posting needs 942 and RIL's litres
-    if (to === "issued" && (!line.issuedTo || !line.movement941?.trim())) return { ok: false, error: "Pick the supervisor and enter the 941 issue no. before issuing" };
-    if (to === "issued" && !(line.qtyLitres > 0)) return { ok: false, error: "No litres on this line to issue" };
-    if (to === "posted" && (!line.movement942?.trim() || line.rilPosted == null)) return { ok: false, error: "Enter the 942 no. and RIL's posted litres before posting" };
-    setState((s) => {
-      if (!can(s, "store", "update")) return s;
-      const current = s.paintStock.find((l) => l.id === lineId);
-      if (!current) return s;
-      const idx = PAINT_STAGE_ORDER.indexOf(current.stage);
-      if (idx < 0 || idx >= PAINT_STAGE_ORDER.length - 1) return s;
-      const nextStage = PAINT_STAGE_ORDER[idx + 1];
-      const paintStock = s.paintStock.map((line) =>
-        line.id === lineId
-          ? {
-              ...line,
-              stage: nextStage,
-              updatedAt: new Date().toISOString().slice(0, 10),
-            }
-          : line
-      );
-      const next = { ...s, paintStock };
-      return {
-        ...next,
-        auditLog: [
-          makeAudit(
-            next,
-            "store",
-            "paint_advance",
-            `${lineId} → ${nextStage} · ${current.description}`,
-            null
-          ),
-          ...s.auditLog,
-        ],
-      };
-    });
-    return { ok: true };
-  }, []);
-
-  const updatePaintLine = useCallback(
-    (
-      lineId: string,
-      patch: Partial<
-        Pick<
-          PaintStockLine,
-          | "movement941"
-          | "movement942"
-          | "movement261"
-          | "rilPosted"
-          | "sgeUsed"
-          | "qtyLitres"
-          | "issuedTo"
-        >
-      >
-    ) => {
-      setState((s) => {
-        if (!can(s, "store", "update")) return s;
-        const before = s.paintStock.find((l) => l.id === lineId);
-        // Nothing changed → nothing to save or log
-        if (!before || (Object.keys(patch) as (keyof typeof patch)[]).every((k) => before[k] === patch[k])) return s;
-        const paintStock = s.paintStock.map((line) =>
-          line.id === lineId
-            ? {
-                ...line,
-                ...patch,
-                updatedAt: new Date().toISOString().slice(0, 10),
-              }
-            : line
-        );
-        const updated = paintStock.find((l) => l.id === lineId);
-        if (!updated) return s;
-        const next = { ...s, paintStock };
-        const bits = [
-          patch.movement941 != null ? `941=${patch.movement941 || "—"}` : null,
-          patch.movement942 != null ? `942=${patch.movement942 || "—"}` : null,
-          patch.movement261 != null ? `261=${patch.movement261 || "—"}` : null,
-          patch.rilPosted != null ? `rilPosted=${patch.rilPosted}` : null,
-          patch.sgeUsed != null ? `sgeUsed=${patch.sgeUsed}` : null,
-        ].filter(Boolean);
-        return {
-          ...next,
-          auditLog: [
-            makeAudit(
-              next,
-              "store",
-              "paint_update",
-              `${lineId} · ${bits.join(" · ") || "fields"} · ${updated.description}`,
-              null
-            ),
-            ...s.auditLog,
-          ],
-        };
-      });
-    },
-    []
-  );
 
   const applyDprAttendance = useCallback((report: DprReport) => {
     setState((s) => {
@@ -1923,21 +1780,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           }
         }
 
-        if (input.mappedEntity === "stock_receipt") {
-          const line = {
-            id: uid("ps"),
-            sapCode: "TG-MOCK",
-            description: `Telegram receipt: ${input.content.slice(0, 60)}`,
-            mpsScheme: 2,
-            batch: `TG-${Date.now().toString().slice(-6)}`,
-            stage: "sge_receive" as const,
-            qtyLitres: 0,
-            siteId: entrySiteId(next),
-            updatedAt: today,
-          };
-          draft.entityId = line.id;
-          next = { ...next, paintStock: [line, ...next.paintStock] };
-        }
+        // stock_receipt: the Telegram page adds the receipt to Work paint (receivePaint)
 
         if (input.mappedEntity === "safety_obs") {
           const day = next.safetyDays[0];
@@ -1997,10 +1840,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       toggleSafetyItem,
       signSafetyDay,
       applyTelegram,
-      advancePaintStage,
       setEquipmentStatus,
       actOnRequest,
-      updatePaintLine,
       applyDprAttendance,
       clearDprAttendance,
       raiseRequestsFromDpr,
@@ -2049,10 +1890,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       toggleSafetyItem,
       signSafetyDay,
       applyTelegram,
-      advancePaintStage,
       setEquipmentStatus,
       actOnRequest,
-      updatePaintLine,
       applyDprAttendance,
       clearDprAttendance,
       raiseRequestsFromDpr,

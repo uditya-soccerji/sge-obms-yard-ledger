@@ -21,7 +21,8 @@ import { useSiteReports } from "@/lib/work/use-reports";
 import { useWork } from "@/lib/work/store";
 import { reportArea } from "@/lib/work/reports";
 import { supervisorRatings } from "@/lib/work/jms-compare";
-import { paintVariance } from "@/lib/paint-variance";
+import { stepVariance } from "@/lib/work/paint-steps";
+import { supervisorPaint } from "@/lib/work/logic";
 import { workedCount } from "@/lib/attendance";
 
 function OwnerHomePage() {
@@ -51,12 +52,13 @@ function OwnerHomePage() {
   const unpaidJms = work.jms.filter((j) => !j.payment).reduce((s, j) => s + j.amount, 0);
   const financeOpen = state.financeAlerts.filter((a) => !a.acknowledged).length;
 
-  const varianceLines = state.paintStock.filter(
-    (p) =>
-      (p.stage === "posted" || p.rilPosted != null) &&
-      p.sgeUsed != null &&
-      (p.rilPosted ?? 0) > 0
-  );
+  // Paint (Work): our 942 reco vs RIL's litres where given, and supervisors short of paint
+  const siteOfStaff = (id: string) => state.staff.find((x) => x.id === id)?.siteId;
+  const varianceSteps = work.paintSteps
+    .filter((st) => st.step === "942" && st.rilLitres != null && (allSites || siteOfStaff(st.supervisorId) === state.currentSiteId))
+    .map((st) => ({ st, v: stepVariance(st, state.masterCatalog.materials) }));
+  const paintFlags = supervisorPaint(work).filter((r) => r.flag === "negative" || r.flag === "low" || r.flag === "no_stock").filter((r) => allSites || siteOfStaff(r.supervisorId) === state.currentSiteId);
+  const waitingRil = work.paintSteps.filter((st) => !st.rilRef && (allSites || siteOfStaff(st.supervisorId) === state.currentSiteId)).length;
 
   return (
     <div className="sge-enter space-y-6">
@@ -122,40 +124,28 @@ function OwnerHomePage() {
             Paint variance (owner-only)
           </h3>
           <p className="mb-2 text-[11px] text-[var(--sge-ink-3)]">
-            SGE used (DPR×MPS) vs RIL posted after 942/261 — not batch/SAP codes.
+            Our month reco (942 = DPR use) vs RIL&apos;s litres, where RIL gave a figure. {waitingRil} step(s) still wait for RIL&apos;s number.
           </p>
-          {varianceLines.length === 0 ? (
-            <EmptyState title="No variance lines" detail="Lines with RIL 942/261 posted litres vs SGE used appear here." />
+          {varianceSteps.length === 0 ? (
+            <EmptyState title="No RIL litres yet" detail="Store types RIL's 942 litres against our reco on the Store page." />
           ) : (
             <div className="space-y-2">
-              {varianceLines.map((line) => {
-                const v = paintVariance(line, state.masterCatalog.materials);
-                const pct = v ? v.pct.toFixed(1) : "0";
-                const hot = !!v?.over;
-                return (
-                  <div
-                    key={line.id}
-                    className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-[var(--sge-line)] px-3 py-2"
-                  >
-                    <div>
-                      <div className="text-sm font-medium">
-                        {allSites ? (
-                          <span className="mr-1.5 font-heading text-xs tracking-wide text-[var(--sge-brass-ink)]">
-                            {siteCode(line.siteId)}
-                          </span>
-                        ) : null}
-                        {line.description}
-                      </div>
-                      <div className="font-mono text-[11px] text-[var(--sge-ink-3)]">
-                        SAP {line.sapCode} · RIL {line.rilPosted}L · SGE {line.sgeUsed}L
-                        {line.movement942 ? ` · 942 ${line.movement942}` : ""}
-                        {line.movement261 ? ` · 261 ${line.movement261}` : ""}
-                      </div>
+              {varianceSteps.map(({ st, v }) => (
+                <div key={st.id} className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-[var(--sge-line)] px-3 py-2">
+                  <div>
+                    <div className="text-sm font-medium">
+                      {allSites ? (
+                        <span className="mr-1.5 font-heading text-xs tracking-wide text-[var(--sge-brass-ink)]">{siteCode(siteOfStaff(st.supervisorId) ?? "")}</span>
+                      ) : null}
+                      {state.staff.find((x) => x.id === st.supervisorId)?.name} · {st.month}
                     </div>
-                    <StatusPill tone={hot ? "crit" : "ok"}>{pct}% (±{v?.tolerance ?? 8}%)</StatusPill>
+                    <div className="font-mono text-[11px] text-[var(--sge-ink-3)]">
+                      SAP {st.sap} · ours {st.litres} L · RIL {st.rilLitres} L{st.rilRef ? ` · 942 ${st.rilRef}` : ""}
+                    </div>
                   </div>
-                );
-              })}
+                  <StatusPill tone={v?.over ? "crit" : "ok"}>{v ? v.pct.toFixed(1) : "0"}% (±{v?.tolerance ?? 8}%)</StatusPill>
+                </div>
+              ))}
             </div>
           )}
         </Panel>
@@ -164,28 +154,17 @@ function OwnerHomePage() {
       <div className="grid gap-4 lg:grid-cols-2">
         <Panel>
           <h3 className="mb-3 font-heading text-sm font-bold uppercase tracking-wide text-[var(--sge-ink-3)]">
-            Prediction thresholds
+            Paint short or overdrawn
           </h3>
           <div className="space-y-2">
-            {state.predictions.map((p) => (
-              <div
-                key={p.id}
-                className="rounded-md border border-[var(--sge-line)] px-3 py-2"
-              >
+            {paintFlags.length === 0 ? <p className="text-sm text-[var(--sge-ink-3)]">Every supervisor has enough paint for the remaining scope.</p> : null}
+            {paintFlags.map((r) => (
+              <div key={r.supervisorId + r.sap} className="rounded-md border border-[var(--sge-line)] px-3 py-2">
                 <div className="flex items-center justify-between gap-2">
-                  <div className="text-sm font-semibold">
-                    {allSites && p.siteId ? (
-                      <span className="mr-1.5 font-heading text-xs tracking-wide text-[var(--sge-brass-ink)]">
-                        {siteCode(p.siteId)}
-                      </span>
-                    ) : null}
-                    {p.title}
-                  </div>
-                  <StatusPill tone={p.severity === "crit" ? "crit" : "warn"}>
-                    {p.kind.replace("_", " ")}
-                  </StatusPill>
+                  <div className="text-sm font-semibold">{state.staff.find((x) => x.id === r.supervisorId)?.name} · {r.name}</div>
+                  <StatusPill tone={r.flag === "low" ? "warn" : "crit"}>{r.flag === "no_stock" ? "no stock" : r.flag}</StatusPill>
                 </div>
-                <p className="mt-1 text-xs text-[var(--sge-ink-2)]">{p.detail}</p>
+                <p className="mt-1 text-xs text-[var(--sge-ink-2)]">Balance {r.balance} L · still needed {Math.round(r.needed)} L for the remaining plan</p>
               </div>
             ))}
           </div>

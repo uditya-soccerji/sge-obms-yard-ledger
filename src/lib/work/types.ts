@@ -250,7 +250,10 @@ export interface JmsSubmission {
   jmsId?: string;
 }
 
-/** Paint batch: in the SGE store (supervisorId null) or issued to a supervisor. */
+/** Stages before the paint is ours to issue (docs §6). */
+export type PaintLifecycle = "pr" | "po" | "ril_receive" | "sge_receive";
+
+/** Paint batch: on order, in the SGE store (supervisorId null) or issued to a supervisor. */
 export interface PaintBatch {
   id: string;
   sap: string;
@@ -259,9 +262,43 @@ export interface PaintBatch {
   qtyL: number;
   supervisorId: string | null;
   issuedOn?: string;
+  /** "" when not known (FIM "NEW - LOC" rows have no dates) */
   mfg: string;
   expiry: string;
   siteId: string;
+  /** Unset = in the SGE store (older rows) */
+  lifecycle?: PaintLifecycle;
+  prNo?: string;
+  poNo?: string;
+  /** e.g. "MPS-1": variance tolerance per paint system (§6) */
+  mps?: string;
+  updatedAt?: string;
+}
+
+/**
+ * Our own consumption steps (Owner decision 3): 941 = issued to a supervisor,
+ * 942 = month reco (litres = our DPR use), 261 = posted / closed. RIL's
+ * numbers are typed against them for reference only.
+ */
+export interface PaintStep {
+  id: string;
+  step: "941" | "942" | "261";
+  /** 941: the issued batch */
+  batchId?: string;
+  /** 261: the 942 it posts */
+  recoId?: string;
+  supervisorId: string;
+  sap: string;
+  /** YYYY-MM */
+  month: string;
+  litres: number;
+  date: string;
+  by: string;
+  rilRef?: string;
+  rilRefBy?: string;
+  rilRefAt?: string;
+  /** RIL's litres, only when they give a figure (feeds the variance alert) */
+  rilLitres?: number;
 }
 
 export interface WorkState {
@@ -276,6 +313,8 @@ export interface WorkState {
   /** JMS submitted to RIL (uploaded), compared with the internal JMS */
   submissions: JmsSubmission[];
   paint: PaintBatch[];
+  /** 941 / 942 / 261 steps (merge plan Step 8) */
+  paintSteps: PaintStep[];
   expenses: Expense[];
   /** Activity log + notifications (docs §19), newest last */
   events: WorkEvent[];

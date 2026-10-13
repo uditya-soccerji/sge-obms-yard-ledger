@@ -15,6 +15,7 @@ import { useStore } from "@/lib/store";
 import { useSiteReports } from "@/lib/work/use-reports";
 import { useWork } from "@/lib/work/store";
 import { reportArea } from "@/lib/work/reports";
+import { supervisorPaint } from "@/lib/work/logic";
 
 function SupervisorHomePage() {
   const { state } = useStore();
@@ -42,12 +43,8 @@ function SupervisorHomePage() {
         ? ("safety" as const)
         : ("painting_blasting" as const);
 
-  const myPaint = state.paintStock.filter(
-    (p) =>
-      isPaintSup &&
-      p.issuedTo === supervisorId &&
-      (p.stage === "issued" || p.stage === "consumed" || p.stage === "reco")
-  );
+  // Paint in my name (Work): issued (941), used on my DPRs, balance and flags (docs §6)
+  const myPaint = isPaintSup ? supervisorPaint(work).filter((r) => r.supervisorId === supervisorId && (r.issued > 0 || r.used > 0 || r.flag === "no_stock")) : [];
 
   const myDocs = reports.filter(
     (d) => d.submitterId === supervisorId && d.submitterType === myDprType
@@ -83,7 +80,7 @@ function SupervisorHomePage() {
         <KpiTile label="My DPRs" value={String(myDocs.length)} tone="accent" />
         <KpiTile label="Open / submitted" value={String(pending.length)} tone="warn" />
         {isPaintSup ? (
-          <KpiTile label="Paint issued" value={String(myPaint.length)} />
+          <KpiTile label="Paints in hand" value={String(myPaint.length)} hint={myPaint.some((r) => r.flag !== "ok") ? "check the flags" : undefined} />
         ) : (
           <KpiTile
             label={isScaffoldSup ? "Scaffold plans" : "Work plans"}
@@ -193,18 +190,17 @@ function SupervisorHomePage() {
               />
             ) : (
               myPaint.map((p) => (
-                <div
-                  key={p.id}
-                  className="mb-1.5 flex justify-between gap-2 text-sm"
-                >
+                <div key={p.sap} className="mb-1.5 flex flex-wrap justify-between gap-2 text-sm">
                   <span>
-                    {p.description}
+                    {p.name}
                     <span className="ml-2 font-mono text-[11px] text-[var(--sge-ink-3)]">
-                      {p.batch}
-                      {p.movement941 ? ` · 941 ${p.movement941}` : ""}
+                      issued {p.issued} L · used {p.used} L · need {Math.round(p.needed)} L
                     </span>
                   </span>
-                  <span className="font-mono">{p.qtyLitres} L</span>
+                  <span className="flex items-center gap-2">
+                    <span className="font-mono">{p.balance} L</span>
+                    {p.flag === "negative" ? <StatusPill tone="crit">negative</StatusPill> : p.flag === "low" ? <StatusPill tone="warn">low</StatusPill> : p.flag === "no_stock" ? <StatusPill tone="crit">no stock</StatusPill> : null}
+                  </span>
                 </div>
               ))
             )}

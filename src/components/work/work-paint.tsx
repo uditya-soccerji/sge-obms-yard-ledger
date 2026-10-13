@@ -8,13 +8,16 @@ import { Label } from "@/components/ui/label";
 import { batchBalances, daysBetween, EXPIRY_WARN_DAYS, expiryState, supervisorPaint } from "@/lib/work/logic";
 import { today } from "@/lib/today";
 import { useWork } from "@/lib/work/store";
+import { inStock } from "@/lib/work/paint-steps";
 import { fmtM2, Msg, selectCls, tdCls, thCls, useWorkScope } from "./common";
 
 const SLICES = [
   { key: "expired", label: "Expired", color: "var(--sge-crit)" },
   { key: "soon", label: `Expiring ≤ ${EXPIRY_WARN_DAYS} days`, color: "var(--sge-brass)" },
   { key: "ok", label: "OK", color: "var(--sge-ok)" },
+  { key: "unknown", label: "No expiry date", color: "var(--sge-ink-3)" },
 ] as const;
+type ExpState = (typeof SLICES)[number]["key"];
 
 export function WorkPaint() {
   const { issuePaint } = useWork();
@@ -22,13 +25,14 @@ export function WorkPaint() {
   const { work } = s;
   const left = batchBalances(work);
   const batches = work.paint
-    .filter((b) => s.inSite(b.siteId))
+    // On hand = in the SGE store or with a supervisor (paint still on order is on the Store page)
+    .filter((b) => s.inSite(b.siteId) && (b.supervisorId || inStock(b)))
     .map((b) => ({ ...b, left: left.get(b.id) ?? b.qtyL, state: expiryState(b.expiry, today()) }))
     .filter((b) => b.left > 0)
     .sort((a, b) => a.expiry.localeCompare(b.expiry));
-  const totals = { expired: 0, soon: 0, ok: 0 } as Record<"expired" | "soon" | "ok", number>;
+  const totals = { expired: 0, soon: 0, ok: 0, unknown: 0 } as Record<ExpState, number>;
   for (const b of batches) totals[b.state] += b.left;
-  const all = totals.expired + totals.soon + totals.ok;
+  const all = totals.expired + totals.soon + totals.ok + totals.unknown;
 
   const holdings = supervisorPaint(work).filter((r) =>
     s.staff.some((x) => x.id === r.supervisorId && s.inSite(x.siteId))
@@ -130,7 +134,7 @@ export function WorkPaint() {
                     <td className={tdCls + " text-xs"}>{b.expiry}</td>
                     <td className={tdCls}>
                       <StatusPill tone={b.state === "expired" ? "crit" : b.state === "soon" ? "warn" : "ok"}>
-                        {b.state === "expired" ? `Expired ${-d} d ago` : b.state === "soon" ? `${d} days left` : "OK"}
+                        {b.state === "expired" ? `Expired ${-d} d ago` : b.state === "soon" ? `${d} days left` : b.state === "unknown" ? "No date" : "OK"}
                       </StatusPill>
                     </td>
                   </tr>
@@ -189,8 +193,8 @@ export function WorkPaint() {
 }
 
 /** Donut chart of litres by expiry state. */
-function Pie({ totals }: { totals: Record<"expired" | "soon" | "ok", number> }) {
-  const all = totals.expired + totals.soon + totals.ok;
+function Pie({ totals }: { totals: Record<ExpState, number> }) {
+  const all = totals.expired + totals.soon + totals.ok + totals.unknown;
   const r = 52;
   const c = 2 * Math.PI * r;
   let offset = 0;

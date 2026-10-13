@@ -319,7 +319,9 @@ export function daysBetween(from: string, to: string): number {
   return Math.round((Date.parse(to) - Date.parse(from)) / 86_400_000);
 }
 
-export function expiryState(expiry: string, today: string): "expired" | "soon" | "ok" {
+export function expiryState(expiry: string, today: string): "expired" | "soon" | "ok" | "unknown" {
+  // FIM "NEW - LOC" rows come without dates
+  if (!expiry) return "unknown";
   const d = daysBetween(today, expiry);
   if (d < 0) return "expired";
   if (d <= EXPIRY_WARN_DAYS) return "soon";
