@@ -92,3 +92,11 @@ export function scopeState(s: AppState): AppState {
     equipmentRequests: s.equipmentRequests.filter((r) => keep(r.siteId)),
   };
 }
+
+/**
+ * Where a user lands after signing in or being viewed as (B4): Owner / Super
+ * Admin open on All sites, everyone else on their first site.
+ */
+export function landingSite(role: RoleId, siteIds: string[], fallback: string): string {
+  return canSeeAllSites(role) ? ALL_SITES : siteIds[0] ?? fallback;
+}

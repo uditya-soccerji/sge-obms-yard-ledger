@@ -1,6 +1,8 @@
 "use client";
 
-import React, { useMemo, useState } from "react";
+import React, { createContext, useContext, useMemo, useState } from "react";
+import { BlurInput } from "@/components/shared/blur-input";
+import { normalizeEp } from "@/lib/ep";
 import { useRouter, useSearchParams } from "next/navigation";
 import { VirtualRows } from "@/components/shared/virtual-rows";
 import { Panel, SectionHeader, StatusPill } from "@/components/shared/ui-bits";
@@ -15,7 +17,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { MASTER_SHEETS, type MasterSheetId } from "@/lib/master/types";
-import { canAccessMasterData } from "@/lib/desk";
+import { canAccessMasterData, masterSheetsFor } from "@/lib/desk";
 import { ROLES } from "@/lib/roles";
 import { useStore } from "@/lib/store";
 import type { CatalogItem, MaterialItem } from "@/lib/master/types";
@@ -27,6 +29,13 @@ import { cn } from "@/lib/utils";
 
 type ScopeFilter = "site" | "company" | "all";
 
+/** Sheets report save results here; the desk shows the latest problem */
+const DeskMsg = createContext<(msg: string | null) => void>(() => {});
+function useReport() {
+  const set = useContext(DeskMsg);
+  return (r: { ok: boolean; error?: string }) => set(r.ok ? null : r.error ?? "Couldn't save");
+}
+
 function uid(prefix: string) {
   return `${prefix}-${Math.random().toString(36).slice(2, 9)}`;
 }
@@ -35,28 +44,40 @@ export function MasterDesk() {
   const params = useSearchParams();
   const router = useRouter();
   const { fullState: state, currentAccount } = useStore();
-  const sheet = (params.get("sheet") as MasterSheetId) || "sites";
+  const allowed = masterSheetsFor(state.currentRole);
+  const sheets = MASTER_SHEETS.filter((s) => allowed === "all" || allowed.includes(s.id));
+  const asked = params.get("sheet") as MasterSheetId | null;
+  // Admin sees only Trades and Rate book (M3); an unknown or off-limits sheet opens the first allowed one
+  const sheet: MasterSheetId = asked && sheets.some((s) => s.id === asked) ? asked : sheets[0]?.id ?? "sites";
   const [scope, setScope] = useState<ScopeFilter>("all");
   const [showInactive, setShowInactive] = useState(true);
+  const [deskMsg, setDeskMsg] = useState<string | null>(null);
 
   if (!canAccessMasterData(state.currentRole)) {
     return null;
   }
 
-  const meta = MASTER_SHEETS.find((s) => s.id === sheet) ?? MASTER_SHEETS[0];
+  const meta = sheets.find((s) => s.id === sheet) ?? sheets[0];
 
   return (
     <div className="sge-enter space-y-4">
       <SectionHeader
         title="Master Data"
-        subtitle="Owner & Super Admin only. Deactivate instead of delete. Site rows first; company-wide fills the rest. Dropdowns elsewhere read this store."
+        subtitle={
+          allowed === "all"
+            ? "Owner & Super Admin. Deactivate instead of delete. Site rows first; company-wide fills the rest. Dropdowns elsewhere read this store."
+            : "Admin: trades and the rate book. Other sheets are Owner / Super Admin."
+        }
       />
       <div className="flex flex-wrap gap-1 border-b border-[var(--sge-line)] pb-2">
-        {MASTER_SHEETS.map((s) => (
+        {sheets.map((s) => (
           <button
             key={s.id}
             type="button"
-            onClick={() => router.replace(`/master-data?sheet=${s.id}`)}
+            onClick={() => {
+              setDeskMsg(null);
+              router.replace(`/master-data?sheet=${s.id}`);
+            }}
             className={cn(
               "rounded-sm px-2.5 py-1.5 text-[11px] font-semibold uppercase tracking-[0.08em]",
               s.id === sheet
@@ -96,7 +117,14 @@ export function MasterDesk() {
         </div>
       </div>
       <p className="text-sm text-[var(--sge-ink-2)]">{meta.hint}</p>
-      <SheetBody sheet={sheet} scope={scope} showInactive={showInactive} />
+      {deskMsg ? (
+        <div className="rounded-sm border border-[var(--sge-crit)]/30 bg-[var(--sge-crit-wash)] px-3 py-2 text-sm text-[var(--sge-crit)]">
+          {deskMsg}
+        </div>
+      ) : null}
+      <DeskMsg.Provider value={setDeskMsg}>
+        <SheetBody sheet={sheet} scope={scope} showInactive={showInactive} />
+      </DeskMsg.Provider>
     </div>
   );
 }
@@ -141,8 +169,10 @@ function SheetBody({
 
 function SitesSheet({ showInactive }: { showInactive: boolean }) {
   const { fullState: state, upsertSite } = useStore();
+  const report = useReport();
   const rows = state.sites.filter((s) => showInactive || s.enabled);
   const [draft, setDraft] = useState<Site | null>(null);
+  const [formErr, setFormErr] = useState<string | null>(null);
 
   return (
     <Panel>
@@ -168,12 +198,17 @@ function SitesSheet({ showInactive }: { showInactive: boolean }) {
         <SiteForm
           value={draft}
           onChange={setDraft}
-          onSave={() => {
-            if (!draft.code.trim()) return;
-            upsertSite({ ...draft, code: draft.code.toUpperCase() });
+          error={formErr}
+          onSave={async () => {
+            const r = await upsertSite({ ...draft, code: draft.code.toUpperCase() });
+            if (!r.ok) return setFormErr(r.error ?? "Couldn't save");
+            setFormErr(null);
             setDraft(null);
           }}
-          onCancel={() => setDraft(null)}
+          onCancel={() => {
+            setFormErr(null);
+            setDraft(null);
+          }}
         />
       ) : null}
       <table className="w-full text-sm">
@@ -196,7 +231,7 @@ function SitesSheet({ showInactive }: { showInactive: boolean }) {
               <td className="text-xs">{s.plants.join(", ")}</td>
               <td>
                 <StatusPill tone={s.enabled ? "ok" : "default"}>
-                  {s.enabled ? "active" : "inactive"}
+                  {s.enabled ? "active" : "switched off · read only"}
                 </StatusPill>
               </td>
               <td className="text-right">
@@ -206,7 +241,7 @@ function SitesSheet({ showInactive }: { showInactive: boolean }) {
                 <Button
                   size="sm"
                   variant="ghost"
-                  onClick={() => upsertSite({ ...s, enabled: !s.enabled })}
+                  onClick={async () => report(await upsertSite({ ...s, enabled: !s.enabled }))}
                 >
                   {s.enabled ? "Deactivate" : "Activate"}
                 </Button>
@@ -224,12 +259,16 @@ function SiteForm({
   onChange,
   onSave,
   onCancel,
+  error,
 }: {
   value: Site;
   onChange: (s: Site) => void;
   onSave: () => void;
   onCancel: () => void;
+  error?: string | null;
 }) {
+  // Typed as text so a trailing comma survives while typing; split on save
+  const [plantsText, setPlantsText] = useState(value.plants.join(", "));
   return (
     <div className="mb-4 grid gap-2 rounded-sm border border-[var(--sge-line)] bg-[var(--sge-linen)] p-3 sm:grid-cols-2">
       <div>
@@ -237,7 +276,8 @@ function SiteForm({
         <Input
           className="mt-1"
           value={value.code}
-          onChange={(e) => onChange({ ...value, code: e.target.value })}
+          placeholder="2–6 capitals, e.g. DTA"
+          onChange={(e) => onChange({ ...value, code: e.target.value.toUpperCase().replace(/[^A-Z]/g, "") })}
         />
       </div>
       <div>
@@ -249,19 +289,20 @@ function SiteForm({
         />
       </div>
       <div className="sm:col-span-2">
-        <Label>Plants (comma)</Label>
+        <Label>Plants (comma between each)</Label>
         <Input
           className="mt-1"
-          value={value.plants.join(", ")}
-          onChange={(e) =>
+          value={plantsText}
+          onChange={(e) => {
+            setPlantsText(e.target.value);
             onChange({
               ...value,
               plants: e.target.value
                 .split(",")
                 .map((x) => x.trim())
                 .filter(Boolean),
-            })
-          }
+            });
+          }}
         />
       </div>
       <div className="flex gap-2 sm:col-span-2">
@@ -271,6 +312,7 @@ function SiteForm({
         <Button size="sm" variant="outline" onClick={onCancel}>
           Cancel
         </Button>
+        {error ? <span className="self-center text-xs text-[var(--sge-crit)]">{error}</span> : null}
       </div>
     </div>
   );
@@ -289,6 +331,9 @@ function UsersSheet({ showInactive }: { showInactive: boolean }) {
   const isSa =
     state.currentRole === "super_admin" && !state.impersonatorAccountId;
   const canEdit = state.currentRole === "super_admin" || state.currentRole === "owner";
+  // Only a Super Admin grants or touches Super Admin (M2)
+  const roleChoices = ROLES.filter((r) => isSa || r.id !== "super_admin");
+  const [showPw, setShowPw] = useState(false);
   const rows = state.users.filter((u) => showInactive || u.active);
   const [name, setName] = useState("");
   const [username, setUsername] = useState("");
@@ -337,12 +382,18 @@ function UsersSheet({ showInactive }: { showInactive: boolean }) {
         </div>
         <div>
           <Label>Password</Label>
-          <Input
-            className="mt-1"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            placeholder={`At least ${MIN_PASSWORD} characters`}
-          />
+          <div className="mt-1 flex gap-1">
+            <Input
+              type={showPw ? "text" : "password"}
+              autoComplete="new-password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder={`At least ${MIN_PASSWORD} characters`}
+            />
+            <Button type="button" size="sm" variant="ghost" onClick={() => setShowPw((v) => !v)}>
+              {showPw ? "Hide" : "Show"}
+            </Button>
+          </div>
         </div>
         <div>
           <Label>Role</Label>
@@ -351,7 +402,7 @@ function UsersSheet({ showInactive }: { showInactive: boolean }) {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {ROLES.map((r) => (
+              {roleChoices.map((r) => (
                 <SelectItem key={r.id} value={r.id}>
                   {r.label}
                 </SelectItem>
@@ -476,19 +527,19 @@ function UsersSheet({ showInactive }: { showInactive: boolean }) {
               key={u.id}
               user={u}
               isSa={isSa}
-              canEdit={canEdit}
+              canEdit={canEdit && (isSa || !u.roles.includes("super_admin"))}
+              isMe={u.id === state.currentAccountId}
               onToggle={async () => {
                 const r = await updateUser(u.id, { active: !u.active });
                 if (!r.ok) setMsg({ ok: false, text: r.error ?? "Failed" });
               }}
-              onResetPassword={async () => {
-                const pw = window.prompt(`New password for @${u.username} (min ${MIN_PASSWORD} characters)`);
-                if (!pw) return;
+              onResetPassword={async (pw) => {
                 const r = await setUserPassword(u.id, pw);
                 setMsg({
                   ok: r.ok,
                   text: r.ok ? `Password reset for @${u.username}` : r.error ?? "Failed",
                 });
+                return r.ok;
               }}
               onSites={(ids) => {
                 const bad = checkSites(u.roles, ids);
@@ -571,6 +622,7 @@ function UserRow({
   user,
   isSa,
   canEdit,
+  isMe,
   onToggle,
   onResetPassword,
   onSites,
@@ -580,8 +632,10 @@ function UserRow({
   user: UserAccount;
   isSa: boolean;
   canEdit: boolean;
+  isMe: boolean;
   onToggle: () => void;
-  onResetPassword: () => void;
+  /** Resolves true when the password was changed */
+  onResetPassword: (password: string) => Promise<boolean>;
   /** Returns an error message, or null when saved */
   onSites: (ids: string[]) => string | null;
   onViewAs: () => void;
@@ -599,6 +653,10 @@ function UserRow({
   const [editing, setEditing] = useState(false);
   const [ids, setIds] = useState(user.siteIds);
   const [err, setErr] = useState<string | null>(null);
+  const [pwOpen, setPwOpen] = useState(false);
+  const [pw1, setPw1] = useState("");
+  const [pw2, setPw2] = useState("");
+  const [pwErr, setPwErr] = useState<string | null>(null);
   return (
     <tr className="border-t border-[var(--sge-line)] align-top">
       <td className="py-2">
@@ -690,12 +748,39 @@ function UserRow({
             View as
           </Button>
         ) : null}
-        <Button size="sm" variant="ghost" disabled={!canEdit} onClick={onResetPassword}>
+        <Button size="sm" variant="ghost" disabled={!canEdit} onClick={() => setPwOpen((v) => !v)}>
           Reset password
         </Button>
-        <Button size="sm" variant="ghost" disabled={!canEdit} onClick={onToggle}>
+        <Button
+          size="sm"
+          variant="ghost"
+          disabled={!canEdit || (isMe && user.active)}
+          title={isMe && user.active ? "You can't deactivate yourself" : undefined}
+          onClick={onToggle}
+        >
           {user.active ? "Deactivate" : "Activate"}
         </Button>
+        {pwOpen ? (
+          <form
+            className="mt-2 flex flex-wrap items-center justify-end gap-1.5"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              if (pw1.length < MIN_PASSWORD) return setPwErr(`At least ${MIN_PASSWORD} characters`);
+              if (pw1 !== pw2) return setPwErr("The two passwords don't match");
+              setPwErr(null);
+              if (await onResetPassword(pw1)) {
+                setPw1("");
+                setPw2("");
+                setPwOpen(false);
+              }
+            }}
+          >
+            <Input type="password" autoComplete="new-password" className="h-8 w-36" placeholder="New password" value={pw1} onChange={(e) => setPw1(e.target.value)} />
+            <Input type="password" autoComplete="new-password" className="h-8 w-36" placeholder="Type it again" value={pw2} onChange={(e) => setPw2(e.target.value)} />
+            <Button type="submit" size="sm">Save</Button>
+            {pwErr ? <span className="w-full text-right text-xs text-[var(--sge-crit)]">{pwErr}</span> : null}
+          </form>
+        ) : null}
       </td>
     </tr>
   );
@@ -708,35 +793,65 @@ function LabourSheet({
   scope: ScopeFilter;
   showInactive: boolean;
 }) {
-  const { fullState: state, updateLabourer, addLabourer } = useStore();
+  const { fullState: state, updateLabourer, addLabourer, removeLabourer } = useStore();
+  const report = useReport();
   const [q, setQ] = useState("");
   const contractors = state.masterCatalog.contractors.filter((c) => c.active);
   const trades = state.tradeCatalogue.filter((t) => t.active);
   const activeSite = entrySiteId(state);
+  // Aadhaar is private: Owner, Super Admin and HR only (docs §1)
+  const seesAadhaar = ["owner", "super_admin", "hr"].includes(state.currentRole ?? "");
+  const canDelete = state.currentRole === "owner" || state.currentRole === "super_admin";
+  const supervisorsOn = (siteId: string) => state.staff.filter((x) => x.role === "supervisor" && x.siteId === siteId);
+  const siteCode = (id: string) => state.sites.find((s) => s.id === id)?.code ?? id;
   const rows = useMemo(() => {
     return state.labourers.filter((l) => {
       if (!showInactive && !l.active) return false;
       if (!matchScope(l.siteId, activeSite, scope)) return false;
       if (!q.trim()) return true;
-      const hay = `${l.name} ${l.epNumber} ${l.trade} ${l.gatePass}`.toLowerCase();
+      const hay = `${l.name} ${l.epNumber} ${l.trade}`.toLowerCase();
       return hay.includes(q.trim().toLowerCase());
     });
   }, [state.labourers, activeSite, scope, showInactive, q]);
 
-  function addBlank() {
-    addLabourer({
-      name: "New labourer",
-      trade: trades[0]?.id ?? "helper",
-      epNumber: "EP-",
-      gatePass: "GP-",
-      siteId: entrySiteId(state),
-      supervisorId: state.staff[0]?.id ?? "",
-      contractorId: contractors[0]?.id ?? "con-sge",
-      wageDaily: 0,
+  const blank = () => ({
+    name: "",
+    epNumber: "",
+    aadhaar: "",
+    mobile: "",
+    trade: trades[0]?.id ?? "",
+    contractorId: "",
+    siteId: activeSite,
+    supervisorId: "",
+    wageDaily: "",
+  });
+  const [form, setForm] = useState<ReturnType<typeof blank> | null>(null);
+  const [formErr, setFormErr] = useState<string | null>(null);
+  const set = (patch: Partial<ReturnType<typeof blank>>) => setForm((f) => (f ? { ...f, ...patch } : f));
+
+  function save() {
+    if (!form) return;
+    const r = addLabourer({
+      name: form.name,
+      epNumber: form.epNumber,
+      aadhaar: form.aadhaar.trim() || undefined,
+      mobile: form.mobile.trim() || undefined,
+      trade: form.trade,
+      gatePass: "",
+      siteId: form.siteId,
+      supervisorId: form.supervisorId,
+      contractorId: form.contractorId,
+      wageDaily: Number(form.wageDaily),
       equipmentIds: [],
       active: true,
     });
+    if (!r.ok) return setFormErr(r.error ?? "Couldn't add");
+    setFormErr(null);
+    setForm(null);
   }
+
+  const sel = "h-8 w-full rounded-sm border border-[var(--sge-line)] bg-[var(--sge-paper)] text-xs";
+  const cols = "grid-cols-[1.3fr_0.8fr_0.8fr_1fr_0.9fr_0.5fr_4rem_6.5rem]";
 
   return (
     <Panel>
@@ -750,16 +865,82 @@ function LabourSheet({
             onChange={(e) => setQ(e.target.value)}
           />
         </div>
-        <Button size="sm" onClick={addBlank}>
-          Add labourer
+        <Button size="sm" onClick={() => setForm(form ? null : blank())}>
+          {form ? "Close form" : "Add labourer"}
         </Button>
         <span className="text-xs text-[var(--sge-ink-3)]">{rows.length} rows</span>
       </div>
-      <div className="grid grid-cols-[1.4fr_0.8fr_0.8fr_0.9fr_4.5rem_5.5rem] gap-2 border-b border-[var(--sge-line)] px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--sge-ink-3)]">
+      {form ? (
+        <div className="mb-4 grid gap-2 rounded-sm border border-[var(--sge-line)] bg-[var(--sge-linen)] p-3 sm:grid-cols-4">
+          <div>
+            <Label>Name</Label>
+            <Input className="mt-1" value={form.name} onChange={(e) => set({ name: e.target.value })} />
+          </div>
+          <div>
+            <Label>EP</Label>
+            <Input className="mt-1 font-mono" placeholder="PP + 10 digits" value={form.epNumber} onChange={(e) => set({ epNumber: e.target.value.toUpperCase() })} />
+          </div>
+          {seesAadhaar ? (
+            <div>
+              <Label>Aadhaar (optional)</Label>
+              <Input className="mt-1 font-mono" inputMode="numeric" maxLength={12} value={form.aadhaar} onChange={(e) => set({ aadhaar: e.target.value.replace(/\D/g, "") })} />
+            </div>
+          ) : null}
+          <div>
+            <Label>Mobile (optional)</Label>
+            <Input className="mt-1 font-mono" inputMode="numeric" maxLength={10} value={form.mobile} onChange={(e) => set({ mobile: e.target.value.replace(/\D/g, "") })} />
+          </div>
+          <div>
+            <Label>Trade</Label>
+            <select className={cn(sel, "mt-1 h-9")} value={form.trade} onChange={(e) => set({ trade: e.target.value })}>
+              {trades.map((t) => (
+                <option key={t.id} value={t.id}>{t.label}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <Label>Contractor</Label>
+            <select className={cn(sel, "mt-1 h-9")} value={form.contractorId} onChange={(e) => set({ contractorId: e.target.value })}>
+              <option value="">Pick…</option>
+              {contractors.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <Label>Site</Label>
+            <select className={cn(sel, "mt-1 h-9")} value={form.siteId} onChange={(e) => set({ siteId: e.target.value, supervisorId: "" })}>
+              {state.sites.filter((s) => s.enabled).map((s) => (
+                <option key={s.id} value={s.id}>{s.code}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <Label>Supervisor</Label>
+            <select className={cn(sel, "mt-1 h-9")} value={form.supervisorId} onChange={(e) => set({ supervisorId: e.target.value })}>
+              <option value="">Pick…</option>
+              {supervisorsOn(form.siteId).map((x) => (
+                <option key={x.id} value={x.id}>{x.name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <Label>Daily wage ₹</Label>
+            <Input className="mt-1" type="number" min={1} value={form.wageDaily} onChange={(e) => set({ wageDaily: e.target.value })} />
+          </div>
+          <div className="flex items-center gap-2 sm:col-span-4">
+            <Button size="sm" onClick={save}>Add to register</Button>
+            {formErr ? <span className="text-xs text-[var(--sge-crit)]">{formErr}</span> : null}
+          </div>
+        </div>
+      ) : null}
+      <div className={cn("grid gap-2 border-b border-[var(--sge-line)] px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--sge-ink-3)]", cols)}>
         <span>Name</span>
         <span>Trade</span>
         <span>Contractor</span>
+        <span>Supervisor</span>
         <span>EP</span>
+        <span>Site</span>
         <span>Wage</span>
         <span />
       </div>
@@ -768,54 +949,53 @@ function LabourSheet({
         rowHeight={44}
         height={Math.min(520, Math.max(180, rows.length * 44 + 8))}
         render={(l: Labourer) => (
-          <div className="grid h-full grid-cols-[1.4fr_0.8fr_0.8fr_0.9fr_4.5rem_5.5rem] items-center gap-2 border-b border-[var(--sge-line)] px-2 text-sm">
-            <Input
-              value={l.name}
-              onChange={(e) => updateLabourer(l.id, { name: e.target.value })}
-            />
-            <select
-              className="h-8 rounded-sm border border-[var(--sge-line)] bg-[var(--sge-paper)] text-xs"
-              value={l.trade}
-              onChange={(e) => updateLabourer(l.id, { trade: e.target.value })}
-            >
+          <div className={cn("grid h-full items-center gap-2 border-b border-[var(--sge-line)] px-2 text-sm", cols)}>
+            <BlurInput value={l.name} onSave={(v) => report(updateLabourer(l.id, { name: v }))} />
+            <select className={sel} value={l.trade} onChange={(e) => report(updateLabourer(l.id, { trade: e.target.value }))}>
               {trades.map((t) => (
-                <option key={t.id} value={t.id}>
-                  {t.label}
-                </option>
+                <option key={t.id} value={t.id}>{t.label}</option>
               ))}
             </select>
-            <select
-              className="h-8 rounded-sm border border-[var(--sge-line)] bg-[var(--sge-paper)] text-xs"
-              value={l.contractorId ?? ""}
-              onChange={(e) =>
-                updateLabourer(l.id, { contractorId: e.target.value })
-              }
-            >
+            <select className={sel} value={l.contractorId ?? ""} onChange={(e) => report(updateLabourer(l.id, { contractorId: e.target.value }))}>
               {contractors.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
+                <option key={c.id} value={c.id}>{c.name}</option>
               ))}
             </select>
-            <Input
+            <select className={sel} value={l.supervisorId} onChange={(e) => report(updateLabourer(l.id, { supervisorId: e.target.value }))}>
+              <option value="">—</option>
+              {supervisorsOn(l.siteId).map((x) => (
+                <option key={x.id} value={x.id}>{x.name}</option>
+              ))}
+            </select>
+            <BlurInput
+              className="font-mono text-xs"
               value={l.epNumber}
-              onChange={(e) => updateLabourer(l.id, { epNumber: e.target.value })}
+              onSave={(v) => report(updateLabourer(l.id, { epNumber: normalizeEp(v) ?? v }))}
             />
-            <Input
+            <span className="text-xs">{siteCode(l.siteId)}</span>
+            <BlurInput
+              type="number"
+              min={1}
               value={String(l.wageDaily)}
-              onChange={(e) =>
-                updateLabourer(l.id, {
-                  wageDaily: Number(e.target.value) || 0,
-                })
-              }
+              onSave={(v) => report(updateLabourer(l.id, { wageDaily: Number(v) || 0 }))}
             />
-            <Button
-              size="sm"
-              variant="ghost"
-              onClick={() => updateLabourer(l.id, { active: !l.active })}
-            >
-              {l.active ? "Off" : "On"}
-            </Button>
+            <div className="flex">
+              <Button size="sm" variant="ghost" onClick={() => report(updateLabourer(l.id, { active: !l.active }))}>
+                {l.active ? "Off" : "On"}
+              </Button>
+              {canDelete ? (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="text-[var(--sge-crit)]"
+                  onClick={() => {
+                    if (window.confirm(`Delete ${l.name} from the register? This can't be undone.`)) report(removeLabourer(l.id));
+                  }}
+                >
+                  Del
+                </Button>
+              ) : null}
+            </div>
           </div>
         )}
       />
@@ -831,6 +1011,7 @@ function ContractorsSheet({
   showInactive: boolean;
 }) {
   const { fullState: state, upsertContractor, setContractorActive } = useStore();
+  const report = useReport();
   const rows = state.masterCatalog.contractors.filter((c) => {
     if (!showInactive && !c.active) return false;
     return matchScope(c.siteId, entrySiteId(state), scope);
@@ -840,14 +1021,16 @@ function ContractorsSheet({
       <div className="mb-3">
         <Button
           size="sm"
-          onClick={() =>
-            upsertContractor({
-              id: uid("con"),
-              siteId: entrySiteId(state),
-              code: "NEW",
-              name: "New contractor",
-              active: true,
-            })
+          onClick={async () =>
+            report(
+              await upsertContractor({
+                id: uid("con"),
+                siteId: entrySiteId(state),
+                code: "NEW",
+                name: "New contractor",
+                active: true,
+              })
+            )
           }
         >
           Add contractor
@@ -868,12 +1051,7 @@ function ContractorsSheet({
             <tr key={c.id} className="border-t border-[var(--sge-line)]">
               <td className="py-2 font-mono text-xs">{c.code}</td>
               <td>
-                <Input
-                  value={c.name}
-                  onChange={(e) =>
-                    upsertContractor({ ...c, name: e.target.value })
-                  }
-                />
+                <BlurInput value={c.name} onSave={async (v) => report(await upsertContractor({ ...c, name: v }))} />
               </td>
               <td className="text-xs">
                 {c.siteId
@@ -889,7 +1067,7 @@ function ContractorsSheet({
                 <Button
                   size="sm"
                   variant="ghost"
-                  onClick={() => setContractorActive(c.id, !c.active)}
+                  onClick={async () => report(await setContractorActive(c.id, !c.active))}
                 >
                   {c.active ? "Deactivate" : "Activate"}
                 </Button>
@@ -910,27 +1088,28 @@ function TradesSheet({
   showInactive: boolean;
 }) {
   const { fullState: state, updateTrade, addTrade } = useStore();
+  const report = useReport();
+  const [newTrade, setNewTrade] = useState("");
   const rows = state.tradeCatalogue.filter((t) => {
     if (!showInactive && !t.active) return false;
     return matchScope(t.siteId ?? null, entrySiteId(state), scope);
   });
   return (
     <Panel>
-      <div className="mb-3">
-        <Button
-          size="sm"
-          onClick={() =>
-            addTrade({
-              label: "New trade",
-              subcategories: [],
-              active: true,
-              siteId: null,
-            })
-          }
-        >
+      <form
+        className="mb-3 flex items-center gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          const r = addTrade({ label: newTrade, subcategories: [], active: true, siteId: null });
+          report(r);
+          if (r.ok) setNewTrade("");
+        }}
+      >
+        <Input className="h-8 w-56" placeholder="New trade name" value={newTrade} onChange={(e) => setNewTrade(e.target.value)} />
+        <Button size="sm" type="submit">
           Add trade
         </Button>
-      </div>
+      </form>
       <table className="w-full text-sm">
         <thead>
           <tr className="text-left text-[10px] uppercase tracking-wider text-[var(--sge-ink-3)]">
@@ -944,10 +1123,7 @@ function TradesSheet({
           {rows.map((t) => (
             <tr key={t.id} className="border-t border-[var(--sge-line)]">
               <td className="py-2">
-                <Input
-                  value={t.label}
-                  onChange={(e) => updateTrade(t.id, { label: e.target.value })}
-                />
+                <BlurInput value={t.label} onSave={(v) => report(updateTrade(t.id, { label: v }))} />
               </td>
               <td className="text-xs">
                 {t.subcategories.map((s) => s.label).join(", ") || "—"}
@@ -957,7 +1133,7 @@ function TradesSheet({
                 <Button
                   size="sm"
                   variant="ghost"
-                  onClick={() => updateTrade(t.id, { active: !t.active })}
+                  onClick={() => report(updateTrade(t.id, { active: !t.active }))}
                 >
                   {t.active ? "Deactivate" : "Activate"}
                 </Button>
@@ -1050,6 +1226,7 @@ function MaterialsSheet({
   showInactive: boolean;
 }) {
   const { fullState: state, upsertMaterial, setCatalogActive } = useStore();
+  const report = useReport();
   const rows = state.masterCatalog.materials.filter((m) => {
     if (!showInactive && !m.active) return false;
     return matchScope(m.siteId, entrySiteId(state), scope);
@@ -1059,8 +1236,8 @@ function MaterialsSheet({
       <div className="mb-3">
         <Button
           size="sm"
-          onClick={() =>
-            upsertMaterial({
+          onClick={async () =>
+            report(await upsertMaterial({
               id: uid("mat"),
               siteId: null,
               code: "Type ",
@@ -1069,7 +1246,7 @@ function MaterialsSheet({
               paintSystem: "",
               uom: "L",
               active: true,
-            })
+            }))
           }
         >
           Add material
@@ -1091,28 +1268,25 @@ function MaterialsSheet({
             <tr key={m.id} className="border-t border-[var(--sge-line)]">
               <td className="py-1.5 font-mono text-xs">{m.code}</td>
               <td>
-                <Input
-                  value={m.label}
-                  onChange={(e) =>
-                    upsertMaterial({ ...m, label: e.target.value })
-                  }
-                />
+                <BlurInput value={m.label} onSave={async (v) => report(await upsertMaterial({ ...m, label: v }))} />
               </td>
               <td className="font-mono text-xs">{m.sapCode || "—"}</td>
               <td className="text-xs">{m.paintSystem}</td>
               <td>
-                <Input
+                <BlurInput
                   type="number"
                   min={0}
                   max={50}
                   className="w-20"
                   placeholder="8"
-                  value={m.varianceTolerancePct ?? ""}
-                  onChange={(e) =>
-                    upsertMaterial({
-                      ...m,
-                      varianceTolerancePct: e.target.value === "" ? undefined : Math.min(50, Math.max(0, Number(e.target.value))),
-                    })
+                  value={m.varianceTolerancePct != null ? String(m.varianceTolerancePct) : ""}
+                  onSave={async (v) =>
+                    report(
+                      await upsertMaterial({
+                        ...m,
+                        varianceTolerancePct: v === "" ? undefined : Math.min(50, Math.max(0, Number(v))),
+                      })
+                    )
                   }
                 />
               </td>
@@ -1120,8 +1294,8 @@ function MaterialsSheet({
                 <Button
                   size="sm"
                   variant="ghost"
-                  onClick={() =>
-                    setCatalogActive("materials", m.id, !m.active)
+                  onClick={async () =>
+                    report(await setCatalogActive("materials", m.id, !m.active))
                   }
                 >
                   {m.active ? "Deactivate" : "Activate"}
@@ -1165,6 +1339,7 @@ function CatalogSheet({
   showInactive: boolean;
 }) {
   const { fullState: state, upsertCatalogItem, setCatalogActive } = useStore();
+  const report = useReport();
   if (!CATALOG_SHEETS.includes(sheet as (typeof CATALOG_SHEETS)[number])) {
     return null;
   }
@@ -1178,14 +1353,16 @@ function CatalogSheet({
       <div className="mb-3">
         <Button
           size="sm"
-          onClick={() =>
-            upsertCatalogItem(key, {
-              id: uid("cat"),
-              siteId: null,
-              code: "NEW",
-              label: "New row",
-              active: true,
-            })
+          onClick={async () =>
+            report(
+              await upsertCatalogItem(key, {
+                id: uid("cat"),
+                siteId: null,
+                code: "NEW",
+                label: "New row",
+                active: true,
+              })
+            )
           }
         >
           Add row
@@ -1207,20 +1384,10 @@ function CatalogSheet({
           {rows.map((r) => (
             <tr key={r.id} className="border-t border-[var(--sge-line)]">
               <td className="py-1.5">
-                <Input
-                  value={r.code}
-                  onChange={(e) =>
-                    upsertCatalogItem(key, { ...r, code: e.target.value })
-                  }
-                />
+                <BlurInput value={r.code} onSave={async (v) => report(await upsertCatalogItem(key, { ...r, code: v }))} />
               </td>
               <td>
-                <Input
-                  value={r.label}
-                  onChange={(e) =>
-                    upsertCatalogItem(key, { ...r, label: e.target.value })
-                  }
-                />
+                <BlurInput value={r.label} onSave={async (v) => report(await upsertCatalogItem(key, { ...r, label: v }))} />
               </td>
               <td className="text-xs">
                 {r.siteId
@@ -1231,7 +1398,7 @@ function CatalogSheet({
                 <Button
                   size="sm"
                   variant="ghost"
-                  onClick={() => setCatalogActive(key, r.id, !r.active)}
+                  onClick={async () => report(await setCatalogActive(key, r.id, !r.active))}
                 >
                   {r.active ? "Deactivate" : "Activate"}
                 </Button>

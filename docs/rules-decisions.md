@@ -257,3 +257,16 @@ Taken without a fresh Owner answer, following the rules above; change here if th
 - **JMS package rates:** a line without a rate takes the rate book rate of the package's own site; if none matches it is marked "rate missing" and left out of expected income, never priced with a guessed rate. The estimator may still use the nearest painting rate.
 - **Signed safety checklist** is final: its ticks can't be changed.
 - **Access:** every page and store action checks the role's rights (lib/permissions.ts). Owner gains `jms: approve` and `users: view/create/update`; an account with no plants assigned covers every plant on its sites.
+
+## 21. Decisions taken while fixing the remaining audit items (2026-10-13)
+Taken without a fresh Owner answer; change here if the Owner disagrees.
+- **Admin in Master Data:** Admin opens Master Data but sees only **Trades** and **Rate book / PO** (permissions already gave Admin those rights). Every other sheet stays Owner / Super Admin.
+- **Requests** (§9): raise → **SIC approves** → Store fulfils in full or **part-fills** (note required) → the person who raised it **confirms received**. Cancelling needs a note.
+- **Paint issue** (§6): the 941 no. and the supervisor are entered while the paint is in the SGE store; issuing is refused without them. Posting needs the 942 no. and RIL's litres. Variance tolerance is set per paint in Master Data → Materials (default 8%).
+- **Equipment:** supervisors report a fault with a note; only the Store marks it repaired.
+- **Ledger entries** (§8) need date, time, category (fixed list), paid to / received from, payment mode and a remark.
+- **Switched-off sites** stay in the site picker marked "(off)" and are read-only; Master Data and users still work there so the site can be switched back on.
+- **Site codes** are 2–6 capital letters and unique; a site needs a name and at least one plant. **DTA's plants** are the 12 from the Aug-26 job plan (the old CPP / CPP-flare / ARMA demo plants are gone from the local seed; the live Supabase row is changed by the Owner in Master Data).
+- **Super Admin protection** (§2): only a Super Admin creates or changes a Super Admin, nobody deactivates themselves, and one active Super Admin always remains — checked in the app and in the admin-users function. Deactivated users are banned in auth and signed out within ~3 minutes.
+- **Labourers:** EP (PP + 10 digits) unique; Aadhaar optional, 12 digits, unique, visible to Owner / Super Admin / HR only; mobile optional; contractor, supervisor, site and a wage above zero required. Gate pass is no longer shown. Owner / Super Admin may delete a labourer with no attendance, wages or login; otherwise deactivate.
+- **Reset** asks first and resets the Work data as well.

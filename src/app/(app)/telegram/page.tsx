@@ -48,7 +48,7 @@ const ENTITY_MAP: {
     messageType: "image",
     entity: "dpr_note",
     hint: "Permit / board photo → DPR attachment note",
-    sample: "[photo] permit board CPP V-204 valid till 18:00",
+    sample: "[photo] permit board COKER V-204 valid till 18:00",
   },
   {
     role: "store",

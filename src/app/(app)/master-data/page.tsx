@@ -26,7 +26,7 @@ export default function MasterDataPage() {
   if (!canAccessMasterData(state.currentRole)) {
     return (
       <EmptyState
-        title="Master Data is Owner / Super Admin"
+        title="Master Data is for Owner, Super Admin (and Admin for trades and rates)"
         detail="Other seats never open this screen. Home and Operations still use the values."
       />
     );

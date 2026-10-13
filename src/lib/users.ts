@@ -45,3 +45,27 @@ export function checkSites(roles: RoleId[], siteIds: string[]): string | null {
   if (roles.includes("supervisor") && siteIds.length > 1) return "A supervisor works on one site only";
   return null;
 }
+
+/**
+ * Super Admin protections (rules §2, same as the admin-users edge function):
+ * only a Super Admin creates or changes a Super Admin, nobody deactivates
+ * themselves, and at least one active Super Admin always remains.
+ * `before` is null when creating. Returns an error message, or null.
+ */
+export function checkUserChange(
+  actor: { role: RoleId | null; accountId: string | null },
+  users: UserAccount[],
+  before: UserAccount | null,
+  after: { roles: RoleId[]; active: boolean }
+): string | null {
+  const isSA = actor.role === "super_admin";
+  if (!isSA && (after.roles.includes("super_admin") || before?.roles.includes("super_admin"))) {
+    return "Only Super Admin can create or change a Super Admin";
+  }
+  if (before && before.id === actor.accountId && before.active && !after.active) return "You can't deactivate yourself";
+  const losesSA = !!before && before.active && before.roles.includes("super_admin") && (!after.active || !after.roles.includes("super_admin"));
+  if (losesSA && !users.some((u) => u.id !== before!.id && u.active && u.roles.includes("super_admin"))) {
+    return "Keep at least one active Super Admin";
+  }
+  return null;
+}

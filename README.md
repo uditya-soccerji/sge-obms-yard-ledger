@@ -48,7 +48,8 @@ Storage key: `sge-obms-ops-v9-sites` — **Reset seed data** after pull.
 | `admin` | `admin123` | Admin |
 | `hr` | `hr123` | HR |
 | `finance` | `finance123` | Finance |
-| `paint` | `paint123` | Painting supervisor |
+| `paint` | `paint123` | Painting supervisor (V. Chauhan: COKER, CES, AROMATIC, HYDROGEN, PP, SULPHUR) |
+| `solanki` | `solanki123` | Painting supervisor (K. Solanki: CRUDE, FCCU, HYDROTREATER, PRU & HPIB, RTF, UTILITY & ETP) |
 | `scaffold` | `scaffold123` | Scaffolding supervisor |
 | `safety` | `safety123` | Safety supervisor |
 | `store` | `store123` | Store Keeper |

@@ -259,7 +259,12 @@ export interface Labourer {
   /** Optional subcategory id when the trade has subcategories. */
   tradeSubcategory?: string;
   epNumber: string;
+  /** Legacy — no longer shown or asked for (docs §1); kept until the data migration */
   gatePass: string;
+  /** 12 digits; shown only to Owner, Super Admin and HR (docs §1) */
+  aadhaar?: string;
+  /** 10 digits starting 6–9 */
+  mobile?: string;
   siteId: string;
   supervisorId: string;
   contractorId?: string;

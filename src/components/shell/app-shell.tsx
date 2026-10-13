@@ -19,6 +19,7 @@ import { canAccessWork, topNavFor } from "@/lib/desk";
 import { canUseTestTools } from "@/lib/permissions";
 import { ALL_SITES, canSeeAllSites, canSwitchSites, entrySiteId } from "@/lib/site-scope";
 import { useStore } from "@/lib/store";
+import { useWork } from "@/lib/work/store";
 import type { RoleId } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -120,11 +121,23 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     : null;
   const viewingAs = !!impersonator && !!currentAccount;
   const showReset = canUseTestTools(role, viewingAs);
+  const { resetWork } = useWork();
+  // X6: ask first, and reset both the main and the Work data
+  const resetAll = () => {
+    if (!window.confirm("Reset all demo data? This signs everyone out and restores the seed for every module, including Work.")) return false;
+    resetWork();
+    resetSeed();
+    router.push("/");
+    return true;
+  };
+  const currentSite = state.sites.find((s) => s.id === state.currentSiteId);
+  const siteOff = !!currentSite && !currentSite.enabled;
 
   const canSwitchSite = canSwitchSites(role);
+  // Switched-off sites stay listed (read only there) so nobody is stuck on one (M5)
   const switchableSites = state.sites.filter(
     (s) =>
-      s.enabled &&
+      (s.enabled || s.id === state.currentSiteId || role === "super_admin" || role === "owner") &&
       (currentAccount?.roles.includes("super_admin") ||
         currentAccount?.siteIds.includes(s.id))
   );
@@ -211,6 +224,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     <SelectItem key={s.id} value={s.id}>
                       {s.code}
                       {s.rpTags.length ? ` · ${s.rpTags.join("/")}` : ""}
+                      {s.enabled ? "" : " (off)"}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -234,6 +248,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   {switchableSites.map((s) => (
                     <SelectItem key={s.id} value={s.id}>
                       {s.code}
+                      {s.enabled ? "" : " (off)"}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -270,10 +285,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 variant="ghost"
                 size="sm"
                 className="hidden rounded-sm text-[#b8c0c8] hover:bg-[var(--sge-night-2)] hover:text-[#ffffff] md:inline-flex"
-                onClick={() => {
-                  resetSeed();
-                  router.push("/");
-                }}
+                onClick={resetAll}
               >
                 <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
                 Reset
@@ -314,6 +326,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </div>
 
       <main className="mx-auto w-full max-w-[1200px] flex-1 px-3 py-5 md:px-6 md:py-7">
+        {siteOff ? (
+          <div className="mb-3 rounded-sm border border-[var(--sge-warn)]/40 bg-[var(--sge-warn-wash)] px-3 py-2 text-sm text-[var(--sge-warn)]">
+            {currentSite?.code} is switched off — read only. Switch it back on in Master Data → Sites, or pick another site.
+          </div>
+        ) : null}
         {children}
       </main>
 
@@ -412,9 +429,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 variant="outline"
                 className="w-full rounded-sm"
                 onClick={() => {
-                  resetSeed();
-                  setMobileOpen(false);
-                  router.push("/");
+                  if (resetAll()) setMobileOpen(false);
                 }}
               >
                 <RefreshCw className="mr-2 h-4 w-4" />

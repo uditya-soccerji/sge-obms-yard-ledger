@@ -265,7 +265,7 @@ function seedDprDocuments(): DprDocument[] {
       id: "dprd-1",
       date: TODAY,
       siteId: SITE,
-      plant: "CPP",
+      plant: "COKER",
       submitterId: "st-sup1",
       submitterType: "painting_blasting",
       status: "submitted",
@@ -292,7 +292,7 @@ function seedDprDocuments(): DprDocument[] {
       paintWork: [
         {
           id: "pw-1",
-          plant: "CPP",
+          plant: "COKER",
           bay: "Pipe rack B-12",
           activity: "painting",
           areaM2: 420,
@@ -308,7 +308,7 @@ function seedDprDocuments(): DprDocument[] {
       id: "dprd-2",
       date: TODAY,
       siteId: SITE,
-      plant: "CPP",
+      plant: "CRUDE",
       submitterId: "st-sup2",
       submitterType: "painting_blasting",
       status: "submitted",
@@ -330,7 +330,7 @@ function seedDprDocuments(): DprDocument[] {
       paintWork: [
         {
           id: "pw-2",
-          plant: "CPP",
+          plant: "CRUDE",
           bay: "Vessel V-204 shell",
           activity: "blasting",
           areaM2: 180,
@@ -344,7 +344,7 @@ function seedDprDocuments(): DprDocument[] {
       id: "dprd-3",
       date: YDAY,
       siteId: SITE,
-      plant: "CPP",
+      plant: "COKER",
       submitterId: "st-sup3",
       submitterType: "scaffolding",
       status: "sic_approved",
@@ -362,7 +362,7 @@ function seedDprDocuments(): DprDocument[] {
       scaffoldWork: [
         {
           id: "sw-1",
-          plant: "CPP",
+          plant: "COKER",
           location: "Flare structure FS-01",
           erectM3: 840,
           dismantleM3: 0,
@@ -380,7 +380,7 @@ function seedDprDocuments(): DprDocument[] {
       id: "dprd-4",
       date: TODAY,
       siteId: SITE,
-      plant: "CPP",
+      plant: "COKER",
       submitterId: "st-safety",
       submitterType: "safety",
       status: "draft",
@@ -403,7 +403,7 @@ function seedDprDocuments(): DprDocument[] {
       id: "dprd-4b",
       date: YDAY,
       siteId: SITE,
-      plant: "CPP",
+      plant: "COKER",
       submitterId: "st-safety",
       submitterType: "safety",
       status: "submitted",
@@ -421,7 +421,7 @@ function seedDprDocuments(): DprDocument[] {
       id: "dprd-5",
       date: TODAY,
       siteId: SITE,
-      plant: "CPP",
+      plant: "COKER",
       submitterId: "st-store",
       submitterType: "store",
       status: "submitted",
@@ -436,8 +436,8 @@ function seedDprDocuments(): DprDocument[] {
       telegramDraftLines: [],
       storeBody: {
         stockByPlant: [
-          { plant: "CPP", paintLitres: 520, note: "Site store DTA" },
-          { plant: "CPP-flare", paintLitres: 40 },
+          { plant: "COKER", paintLitres: 520, note: "Site store DTA" },
+          { plant: "FCCU", paintLitres: 40 },
         ],
         issues: [
           { toSupervisorId: "st-sup1", sapCode: "2002462179", qtyLitres: 40, note: "B-12 primer touch-up" },
@@ -457,7 +457,7 @@ function seedDprDocuments(): DprDocument[] {
       id: "dprd-6",
       date: D2,
       siteId: SITE,
-      plant: "CPP",
+      plant: "COKER",
       submitterId: "st-sup1",
       submitterType: "painting_blasting",
       status: "sic_approved",
@@ -475,7 +475,7 @@ function seedDprDocuments(): DprDocument[] {
       paintWork: [
         {
           id: "pw-3",
-          plant: "CPP",
+          plant: "COKER",
           bay: "Pipe rack B-12",
           activity: "painting",
           areaM2: 310,
@@ -508,7 +508,8 @@ export function createSeedState(): AppState {
         client: "Reliance Industries Limited",
         enabled: true,
         rpTags: ["RP2"],
-        plants: ["CPP", "CPP-flare", "ARMA"],
+        // Same spelling as the Work plan (docs/merge-plan.md "one plant list per site")
+        plants: ["AROMATIC", "CES", "COKER", "CRUDE", "FCCU", "HYDROGEN", "HYDROTREATER", "PP", "PRU & HPIB", "RTF", "SULPHUR", "UTILITY & ETP"],
       },
       {
         id: "site-mtf",
@@ -690,8 +691,20 @@ export function createSeedState(): AppState {
         name: "V. Chauhan",
         roles: ["supervisor"],
         siteIds: [SITE],
-        plantIds: ["CPP"],
+        plantIds: [],
         staffId: "st-sup1",
+        permissionOverrides: [],
+        active: true,
+      },
+      {
+        id: "usr-solanki",
+        username: "solanki",
+        password: "solanki123",
+        name: "K. Solanki",
+        roles: ["supervisor"],
+        siteIds: [SITE],
+        plantIds: [],
+        staffId: "st-sup2",
         permissionOverrides: [],
         active: true,
       },
@@ -702,7 +715,7 @@ export function createSeedState(): AppState {
         name: "M. Rathwa",
         roles: ["supervisor"],
         siteIds: [SITE],
-        plantIds: ["CPP"],
+        plantIds: [],
         staffId: "st-sup3",
         permissionOverrides: [],
         active: true,
@@ -714,7 +727,7 @@ export function createSeedState(): AppState {
         name: "P. Desai",
         roles: ["safety"],
         siteIds: [SITE],
-        plantIds: ["CPP"],
+        plantIds: [],
         staffId: "st-safety",
         permissionOverrides: [],
         active: true,
@@ -1020,7 +1033,7 @@ export function createSeedState(): AppState {
         type: "painting",
         supervisorId: "st-sup1",
         siteId: SITE,
-        plant: "CPP",
+        plant: "COKER",
         location: "Pipe rack B-12",
         mpsScheme: 2,
         areaM2: 420,
@@ -1036,7 +1049,7 @@ export function createSeedState(): AppState {
         type: "blasting",
         supervisorId: "st-sup2",
         siteId: SITE,
-        plant: "CPP",
+        plant: "CRUDE",
         location: "Vessel V-204 shell",
         areaM2: 180,
         crewCount: 4,
@@ -1050,7 +1063,7 @@ export function createSeedState(): AppState {
         type: "scaffolding",
         supervisorId: "st-sup3",
         siteId: SITE,
-        plant: "CPP",
+        plant: "COKER",
         location: "Flare structure FS-01",
         volumeM3: 840,
         crewCount: 5,
@@ -1064,7 +1077,7 @@ export function createSeedState(): AppState {
         type: "painting",
         supervisorId: "st-sup1",
         siteId: SITE,
-        plant: "CPP",
+        plant: "COKER",
         location: "Pipe rack B-12",
         mpsScheme: 2,
         areaM2: 310,
@@ -1077,9 +1090,9 @@ export function createSeedState(): AppState {
     ],
     dprDocuments: seedDprDocuments(),
     workPlans: [
-      { id: "wp-1", date: TODAY, supervisorId: "st-sup1", plant: "CPP", task: "Finish MIO intermediate B-12", targetM2: 450, status: "in_progress" },
-      { id: "wp-2", date: TODAY, supervisorId: "st-sup2", plant: "CPP", task: "Blast V-204 remaining faces", targetM2: 200, status: "in_progress" },
-      { id: "wp-3", date: "2026-10-06", supervisorId: "st-sup1", plant: "CPP", task: "Final urethane coat B-12", targetM2: 420, status: "planned" },
+      { id: "wp-1", date: TODAY, supervisorId: "st-sup1", plant: "COKER", task: "Finish MIO intermediate B-12", targetM2: 450, status: "in_progress" },
+      { id: "wp-2", date: TODAY, supervisorId: "st-sup2", plant: "COKER", task: "Blast V-204 remaining faces", targetM2: 200, status: "in_progress" },
+      { id: "wp-3", date: "2026-10-06", supervisorId: "st-sup1", plant: "COKER", task: "Final urethane coat B-12", targetM2: 420, status: "planned" },
     ],
     safetyDays: [
       {
@@ -1221,7 +1234,7 @@ export function createSeedState(): AppState {
           {
             id: "jl-1",
             description: "Pipe rack B-12 painting MPS-2",
-            plant: "CPP",
+            plant: "COKER",
             activity: "painting",
             qty: 400,
             unit: "m2",
@@ -1235,7 +1248,7 @@ export function createSeedState(): AppState {
           {
             id: "jl-2",
             description: "V-204 blasting SA2.5",
-            plant: "CPP",
+            plant: "COKER",
             activity: "blasting",
             qty: 160,
             unit: "m2",
@@ -1249,7 +1262,7 @@ export function createSeedState(): AppState {
           {
             id: "jl-3",
             description: "FS-01 standing scaffold",
-            plant: "CPP",
+            plant: "COKER",
             activity: "scaffolding",
             qty: 840,
             unit: "m3",
@@ -1340,7 +1353,7 @@ export function createSeedState(): AppState {
         updatedAt: `${TODAY}T09:00:00Z`,
         createdBy: "st-sup1",
         siteId: SITE,
-        plant: "CPP",
+        plant: "COKER",
         kind: "spare",
         description: "Airless tip #517",
         qty: 4,
@@ -1354,7 +1367,7 @@ export function createSeedState(): AppState {
         updatedAt: `${TODAY}T15:00:00Z`,
         createdBy: "st-sup2",
         siteId: SITE,
-        plant: "CPP",
+        plant: "COKER",
         kind: "equipment",
         description: "Spare compressor hose 1.5\"",
         qty: 2,
@@ -1368,7 +1381,7 @@ export function createSeedState(): AppState {
         updatedAt: `${YDAY}T16:00:00Z`,
         createdBy: "st-safety",
         siteId: SITE,
-        plant: "CPP",
+        plant: "COKER",
         kind: "other",
         description: "Replace first-aid kit gloves",
         qty: 1,
@@ -1399,7 +1412,7 @@ export function createSeedState(): AppState {
 /** v9: per-site demo data — a new key so old browsers load the new seed. */
 /** v10: EP numbers in the PP + 10 digit format (docs §1) */
 /** v11: attendance statuses per docs §4, HR on all sites */
-export const STORAGE_KEY = "sge-obms-ops-v11-att";
+export const STORAGE_KEY = "sge-obms-ops-v12";
 export { SAFETY_ITEMS };
 
 /**

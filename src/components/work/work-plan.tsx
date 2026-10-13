@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { furthestStageArea, isMonthClosed, lineStatus, monthLabel, nextMonth, OVER_TOLERANCE, UNDER_TOLERANCE } from "@/lib/work/logic";
 import { useWork } from "@/lib/work/store";
+import { isSitePlant } from "@/lib/sites";
 import { STAGES } from "@/lib/work/types";
 import { fmtM2, fmtPct, Msg, selectCls, tdCls, thCls, useWorkScope } from "./common";
 
@@ -52,7 +53,8 @@ export function WorkPlan() {
   const supervisors = s.staff.filter((x) => x.role === "supervisor" && x.siteId === formSite);
   // Keep the pick only while it belongs to this site, else the first supervisor shown
   const supervisorId = supervisors.some((x) => x.id === f.supervisorId) ? f.supervisorId : supervisors[0]?.id ?? "";
-  const knownPlants = [...new Set([...plantsFor(formSite), ...work.planLines.filter((l) => l.siteId === formSite).map((l) => l.plant)])].sort();
+  // Master Data is the one plant list (rules §3)
+  const sitePlants = plantsFor(formSite);
 
   return (
     <div className="space-y-4">
@@ -187,6 +189,7 @@ export function WorkPlan() {
             onSubmit={(e) => {
               e.preventDefault();
               if (!f.plant.trim()) return setMsg({ ok: false, msg: "Plant is required" });
+              if (!isSitePlant(s.sites, formSite, f.plant)) return setMsg({ ok: false, msg: "Pick a plant from this site's Master Data list" });
               if (!supervisorId) return setMsg({ ok: false, msg: `No supervisor on ${s.siteCode(formSite)} yet — add one in Master Data first.` });
               const it = s.item(f.serviceCode);
               const r = addPlanLine({
@@ -211,8 +214,12 @@ export function WorkPlan() {
             ) : null}
             <div>
               <Label>Plant</Label>
-              <Input className="mt-1" list="work-plants" value={f.plant} onChange={(e) => setF({ ...f, plant: e.target.value })} placeholder="e.g. COKER" />
-              <datalist id="work-plants">{knownPlants.map((p) => <option key={p} value={p} />)}</datalist>
+              <select className={selectCls + " mt-1"} value={f.plant} onChange={(e) => setF({ ...f, plant: e.target.value })}>
+                <option value="">{sitePlants.length ? "Pick a plant…" : "No plants — add them in Master Data → Sites"}</option>
+                {sitePlants.map((p) => (
+                  <option key={p} value={p}>{p}</option>
+                ))}
+              </select>
             </div>
             <div className="lg:col-span-2">
               <Label>Service item</Label>
