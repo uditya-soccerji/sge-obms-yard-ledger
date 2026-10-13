@@ -267,7 +267,8 @@ Screenshots, when saved as files, go in `docs/bugs/` as `B<nn>-<n>.png`. Never i
   - 1,825 rows → **1,781 added** (DTA 1,354 · PCG 215 · SOLAR 212) + **40 new trades**; 1 Terminated added as inactive; EIC on all 1,781.
   - Skill: semi-skilled 805, unskilled 437, skilled 319, highly skilled 4, blank 216.
   - Skipped: **5** with a bad or missing EP (2 garbled, 3 blank).
-  - Held back: **39** possible duplicates (same name, trade and skill as another row, each with its own Worker ID). Waiting for the owner.
+  - Held back: **39** possible duplicates (same name, trade and skill as another row, each with its own Worker ID).
+  - Owner, 2026-10-14: they are different workers (own RIL pass, mostly different EIC). **34 added** (26 groups with different EICs) → 1,815 in the local app. **5 held** where both rows share an EIC (Mukesh Mahato PP5920139371, Akash Das PP5920058891, Sumit Mahato PP5920150839, Niraj Kumar PP5920136768, Pradip Mahato PP5920130714) until the site confirms. Nakum Haresh (SOLAR, same EIC) was already added twice in the first run: his skill is blank, and the duplicate check does not match blank skills.
   - The register runs smoothly at 1,404 rows on DTA; no console errors. `tsc` + `eslint src` clean.
 - Note: the SOLAR site was added in the local app only. On the live site it's added in Master Data → Sites at deploy time (a live database write).
 
