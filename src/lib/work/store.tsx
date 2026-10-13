@@ -10,7 +10,8 @@ import type { RoleId } from "../types";
 import { reasonText, type WorkEvent } from "./events";
 import { entryArea } from "./logic";
 import { workRights } from "./permissions";
-import type { DprEntry, DprReport, Expense, Jms, JmsPayment, JmsStatus, Job, PlanLine, Stage, WorkState } from "./types";
+import type { DprEntry, DprReport, Expense, Jms, JmsPayment, JmsStatus, JmsSubmission, Job, PlanLine, Stage, WorkState } from "./types";
+import { compareJms, linkCandidates } from "./jms-compare";
 import { blankReport, entriesOf, isLate, pendingReports, reportOpen, sameDay } from "./reports";
 import { effectivePermission } from "../permissions";
 import { dprCrew, validateDprForSubmit } from "../dpr-validate";
@@ -44,6 +45,14 @@ interface WorkApi {
   rejectClose: (jobId: string, reason: string) => Result;
   /** Move a JMS one stage on (Owner / Super Admin may step back one); every change is logged */
   setJmsStatus: (jmsId: string, status: JmsStatus, note?: string) => Result;
+  /**
+   * Admin uploads a JMS submitted to RIL. The same RIL JMS no. updates the
+   * existing record (docs §14); a new one is linked to its internal JMS when
+   * exactly one matches (same site, plant, service item, period).
+   */
+  uploadSubmission: (input: Omit<JmsSubmission, "id" | "qty" | "amount" | "statusLog" | "uploadedBy" | "uploadedAt" | "jmsId">) => Result;
+  linkSubmission: (submissionId: string, jmsId: string) => Result;
+  unlinkSubmission: (submissionId: string) => Result;
   /** Close one site's current month and carry its unfinished work forward */
   closeMonth: (siteId: string) => Result;
   issuePaint: (batchId: string, supervisorId: string, qtyL: number) => Result;
@@ -118,7 +127,7 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
       const raw = localStorage.getItem(WORK_STORAGE_KEY);
       if (raw) {
         const saved = JSON.parse(raw) as WorkState;
-        setWork({ ...saved, reports: saved.reports ?? [] });
+        setWork({ ...saved, reports: saved.reports ?? [], submissions: saved.submissions ?? [] });
       }
     } catch {
       /* keep seed */
@@ -501,6 +510,90 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
     return { ok: true };
   }, [log]);
 
+  /** Internal JMS takes RIL's status from its linked submission (docs §10), never undoing a recorded payment */
+  const followStatus = (j: Jms, s: JmsSubmission): Jms => {
+    if (j.payment || s.status === "A1 REJECT" || s.status === j.status || s.status === "PAID") return j;
+    return { ...j, status: s.status, statusLog: [...(j.statusLog ?? []), { at: new Date().toISOString(), by: actor.current.name, from: j.status, to: s.status, note: `From RIL JMS ${s.rilJmsNo}` }] };
+  };
+
+  const uploadSubmission = useCallback<WorkApi["uploadSubmission"]>((input) => {
+    if (!may("jms", "upload")) return NOT_ALLOWED;
+    const no = input.rilJmsNo.trim();
+    if (!/^\d{7}$/.test(no)) return { ok: false, error: "RIL JMS no. is 7 digits" };
+    if (!input.siteId) return { ok: false, error: "Pick the site" };
+    if (!input.plant.trim()) return { ok: false, error: "Pick the plant" };
+    if (!input.woNo.trim()) return { ok: false, error: "Enter the WO no." };
+    if (!input.periodFrom || !input.periodTo || input.periodFrom > input.periodTo) return { ok: false, error: "Pick the period (from ≤ to)" };
+    if (!input.items.length) return { ok: false, error: "Add at least one item" };
+    const w = ref.current;
+    const at = new Date().toISOString();
+    const existing = w.submissions.find((s) => s.rilJmsNo === no);
+    const qty = round3(input.items.reduce((t, i) => t + i.qty, 0));
+    const amount = Math.round(input.items.reduce((t, i) => t + i.amount, 0) * 100) / 100;
+    const sub: JmsSubmission = existing
+      ? {
+          ...existing,
+          ...input,
+          rilJmsNo: no,
+          qty,
+          amount,
+          statusLog: existing.status === input.status ? existing.statusLog : [...existing.statusLog, { status: input.status, at, by: actor.current.name }],
+          uploadedBy: actor.current.name,
+          uploadedAt: at,
+        }
+      : { ...input, rilJmsNo: no, id: uid("jsub"), qty, amount, statusLog: [{ status: input.status, at, by: actor.current.name }], uploadedBy: actor.current.name, uploadedAt: at };
+    // Link a new (or unlinked) submission when exactly one internal JMS fits
+    if (!sub.jmsId) {
+      const c = linkCandidates(sub, w);
+      if (c.length === 1) sub.jmsId = c[0].id;
+    }
+    const linked = sub.jmsId ? w.jms.find((j) => j.id === sub.jmsId) : undefined;
+    setWork((s) => ({
+      ...s,
+      submissions: existing ? s.submissions.map((x) => (x.id === sub.id ? sub : x)) : [...s.submissions, sub],
+      jms: s.jms.map((j) => (j.id === sub.jmsId ? followStatus({ ...j, submissionId: sub.id }, sub) : j)),
+    }));
+    log({ kind: existing ? "jms_status" : "jms_submitted", siteId: sub.siteId, title: `RIL JMS ${no} ${existing ? "re-uploaded" : "uploaded"} · ${sub.status}`, detail: `${sub.plant} · ${qty} · ₹${amount.toLocaleString("en-IN")}${linked ? ` · linked to JMS ${linked.jmsNo}` : " · not linked yet"}`, tab: "jms", refId: linked?.id ?? sub.id });
+    if (linked) {
+      const diffs = compareJms(linked, sub, w);
+      if (diffs.length) log({ kind: "jms_difference", problem: true, siteId: sub.siteId, title: `JMS ${linked.jmsNo} vs RIL ${no}: ${diffs.map((d) => d.field).join(", ")} differ`, detail: diffs.map((d) => `${d.field}: ours ${d.internal}, RIL ${d.submitted}`).join(" · "), tab: "jms", refId: linked.id });
+    }
+    return { ok: true, id: sub.id };
+  }, [log]);
+
+  const linkSubmission = useCallback<WorkApi["linkSubmission"]>((submissionId, jmsId) => {
+    if (!may("jms", "upload") && !may("jms", "approve")) return NOT_ALLOWED;
+    const w = ref.current;
+    const sub = w.submissions.find((s) => s.id === submissionId);
+    const j = w.jms.find((x) => x.id === jmsId);
+    if (!sub || !j) return { ok: false, error: "Not found" };
+    if (j.submissionId && j.submissionId !== submissionId) return { ok: false, error: `JMS ${j.jmsNo} is already linked to another submission` };
+    const line = w.planLines.find((l) => l.id === j.planLineId);
+    if (line?.siteId !== sub.siteId) return { ok: false, error: "That JMS is on another site" };
+    setWork((s) => ({
+      ...s,
+      submissions: s.submissions.map((x) => (x.id === submissionId ? { ...x, jmsId } : x.jmsId === jmsId ? { ...x, jmsId: undefined } : x)),
+      jms: s.jms.map((x) => (x.id === jmsId ? followStatus({ ...x, submissionId }, sub) : x.submissionId === submissionId ? { ...x, submissionId: undefined } : x)),
+    }));
+    const diffs = compareJms(j, sub, w);
+    log({ kind: "jms_linked", problem: diffs.length > 0, siteId: sub.siteId, title: `JMS ${j.jmsNo} ↔ RIL ${sub.rilJmsNo}`, detail: diffs.length ? `Differences: ${diffs.map((d) => d.field).join(", ")}` : "Matches", tab: "jms", refId: j.id });
+    return { ok: true };
+  }, [log]);
+
+  const unlinkSubmission = useCallback<WorkApi["unlinkSubmission"]>((submissionId) => {
+    if (!may("jms", "upload") && !may("jms", "approve")) return NOT_ALLOWED;
+    const sub = ref.current.submissions.find((s) => s.id === submissionId);
+    if (!sub?.jmsId) return { ok: false, error: "Not linked" };
+    const j = ref.current.jms.find((x) => x.id === sub.jmsId);
+    setWork((s) => ({
+      ...s,
+      submissions: s.submissions.map((x) => (x.id === submissionId ? { ...x, jmsId: undefined } : x)),
+      jms: s.jms.map((x) => (x.submissionId === submissionId ? { ...x, submissionId: undefined } : x)),
+    }));
+    log({ kind: "jms_linked", siteId: sub.siteId, title: `RIL ${sub.rilJmsNo} unlinked${j ? ` from JMS ${j.jmsNo}` : ""}`, detail: "Unlinked", tab: "jms", refId: sub.id });
+    return { ok: true };
+  }, [log]);
+
   /** Close one site's current month: its unfinished balance + open jobs move to next month. */
   const closeMonth = useCallback<WorkApi["closeMonth"]>((siteId) => {
     if (!rights().canConfirm) return NOT_ALLOWED;
@@ -660,8 +753,8 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const api = useMemo<WorkApi>(
-    () => ({ work, hydrated, addPlanLine, startJob, addDpr, removeEntry, saveReport, submitReport, reviewReport, unlockReport, telegramToReport, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork }),
-    [work, hydrated, addPlanLine, startJob, addDpr, removeEntry, saveReport, submitReport, reviewReport, unlockReport, telegramToReport, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork]
+    () => ({ work, hydrated, uploadSubmission, linkSubmission, unlinkSubmission, addPlanLine, startJob, addDpr, removeEntry, saveReport, submitReport, reviewReport, unlockReport, telegramToReport, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork }),
+    [work, hydrated, uploadSubmission, linkSubmission, unlinkSubmission, addPlanLine, startJob, addDpr, removeEntry, saveReport, submitReport, reviewReport, unlockReport, telegramToReport, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork]
   );
   return <WorkContext.Provider value={api}>{children}</WorkContext.Provider>;
 }

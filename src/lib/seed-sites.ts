@@ -16,12 +16,10 @@ import type {
   AcplMatchRow,
   AttendanceRecord,
   AttendanceStatus,
-  BillingSnapshot,
   ComplianceDoc,
   EquipmentItem,
   EquipmentRequest,
   FinanceEntry,
-  JmsPackage,
   Labourer,
   MaterialTransfer,
   PaintStockLine,
@@ -70,7 +68,7 @@ interface SiteProfile {
   }[];
   equipment: { type: EquipmentItem["type"]; status: EquipmentItem["status"]; expiry: string }[];
   finance: { date: string; kind: FinanceEntry["kind"]; category: string; amount: number; description: string }[];
-  billing: { label: string; amount: number; status: BillingSnapshot["status"]; period: string }[];
+  billing: { label: string; amount: number; status: "draft" | "submitted" | "approved" | "paid"; period: string }[];
   requests: { kind: EquipmentRequest["kind"]; description: string; qty: number; urgent?: boolean; status: EquipmentRequest["status"] }[];
   prediction?: Omit<PredictionAlert, "id" | "siteId">;
   jms?: { label: string; lines: { description: string; activity: "painting" | "blasting" | "scaffolding"; qty: number; unit: "m2" | "m3"; rate: number; claimed: number }[] };
@@ -352,11 +350,9 @@ export interface SiteSeedRows {
   safetyDays: SafetyChecklistDay[];
   finance: FinanceEntry[];
   predictions: PredictionAlert[];
-  billing: BillingSnapshot[];
   compliance: ComplianceDoc[];
   transfers: MaterialTransfer[];
   acplMatches: AcplMatchRow[];
-  jmsPackages: JmsPackage[];
   wageLedger: WageLedgerEntry[];
   equipmentRequests: EquipmentRequest[];
 }
@@ -365,7 +361,7 @@ export function seedOtherSites(): SiteSeedRows {
   const out: SiteSeedRows = {
     staff: [], labourers: [], attendance: [], paintStock: [], equipment: [],
     workPlans: [], safetyDays: [], finance: [], predictions: [],
-    billing: [], compliance: [], transfers: [], acplMatches: [], jmsPackages: [],
+    compliance: [], transfers: [], acplMatches: [],
     wageLedger: [], equipmentRequests: [],
   };
 
@@ -464,7 +460,6 @@ export function seedOtherSites(): SiteSeedRows {
       out.finance.push({ id: `fin-${k}-${i + 1}`, ...f, siteId: sid, enteredBy: i % 2 ? `st-${k}-sic` : "st-owner" })
     );
 
-    p.billing.forEach((b, i) => out.billing.push({ id: `bill-${k}-${i + 1}`, ...b, siteId: sid }));
 
     p.requests.forEach((r, i) =>
       out.equipmentRequests.push({
@@ -485,34 +480,6 @@ export function seedOtherSites(): SiteSeedRows {
     );
 
     if (p.prediction) out.predictions.push({ id: `pred-${k}`, ...p.prediction, siteId: sid });
-
-    if (p.jms) {
-      const lines = p.jms.lines.map((l, i) => ({
-        id: `jl-${k}-${i + 1}`,
-        description: l.description,
-        plant: p.plant,
-        activity: l.activity,
-        qty: l.qty,
-        unit: l.unit,
-        rateInr: l.rate,
-        amountInr: l.qty * l.rate,
-        dprClaimedQty: l.claimed,
-        matchRatio: Math.round((l.qty / l.claimed) * 100) / 100,
-      }));
-      out.jmsPackages.push({
-        id: `jms-${k}`,
-        label: p.jms.label,
-        period: "2026-10-W1",
-        uploadedAt: YDAY,
-        uploadedBy: "st-admin",
-        status: siteIdx % 2 ? "sic_approved" : "uploaded",
-        financeNotified: true,
-        expectedIncome: lines.reduce((s, l) => s + l.amountInr, 0),
-        paymentReceived: false,
-        lines,
-        siteId: sid,
-      });
-    }
 
     p.plans.forEach((w, i) =>
       out.workPlans.push({ id: `wp-${k}-${i + 1}`, date: i ? "2026-10-06" : TODAY, supervisorId: sup1, plant: p.plant, task: w.task, targetM2: w.target, status: w.status, siteId: sid })

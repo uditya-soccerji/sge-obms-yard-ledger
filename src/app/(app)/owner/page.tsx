@@ -20,6 +20,7 @@ import { useStore } from "@/lib/store";
 import { useSiteReports } from "@/lib/work/use-reports";
 import { useWork } from "@/lib/work/store";
 import { reportArea } from "@/lib/work/reports";
+import { supervisorRatings } from "@/lib/work/jms-compare";
 import { paintVariance } from "@/lib/paint-variance";
 import { workedCount } from "@/lib/attendance";
 
@@ -44,13 +45,10 @@ function OwnerHomePage() {
   const acplFlags = state.acplMatches.filter(
     (m) => m.resolveStatus === "open" && m.flag !== "match"
   ).length;
-  const avgRating =
-    state.workRatings.length > 0
-      ? (
-          state.workRatings.reduce((s, r) => s + r.score, 0) /
-          state.workRatings.length
-        ).toFixed(1)
-      : "—";
+  // Ratings and JMS money come from Work (internal vs submitted JMS)
+  const ratings = supervisorRatings(work);
+  const avgRating = ratings.length ? (ratings.reduce((s, r) => s + r.score, 0) / ratings.length).toFixed(1) : "—";
+  const unpaidJms = work.jms.filter((j) => !j.payment).reduce((s, j) => s + j.amount, 0);
   const financeOpen = state.financeAlerts.filter((a) => !a.acknowledged).length;
 
   const varianceLines = state.paintStock.filter(
@@ -86,8 +84,8 @@ function OwnerHomePage() {
 
       <div className="grid gap-3 sm:grid-cols-3">
         <KpiTile label="ACPL open flags" value={String(acplFlags)} tone="warn" />
-        <KpiTile label="Avg JMS rating" value={String(avgRating)} hint={`${state.workRatings.length} scores`} tone="accent" />
-        <KpiTile label="JMS expected" value={formatINR(state.jmsPackages.reduce((s, p) => s + p.expectedIncome, 0))} />
+        <KpiTile label="Avg JMS rating" value={String(avgRating)} hint={`${ratings.length} supervisors`} tone="accent" />
+        <KpiTile label="JMS approved, unpaid" value={formatINR(unpaidJms)} />
       </div>
 
       <MoneyCard />
@@ -109,8 +107,8 @@ function OwnerHomePage() {
               <StatusPill tone="warn">{acplFlags} open</StatusPill>
             </Link>
             <Link href="/jms" className="flex justify-between rounded-md border border-[var(--sge-line)] px-3 py-2 hover:bg-[var(--sge-accent-wash)]/40">
-              <span>JMS packages</span>
-              <StatusPill>{state.jmsPackages.length}</StatusPill>
+              <span>JMS submitted to RIL</span>
+              <StatusPill>{work.submissions.length}</StatusPill>
             </Link>
             <Link href="/finance" className="flex justify-between rounded-md border border-[var(--sge-line)] px-3 py-2 hover:bg-[var(--sge-accent-wash)]/40">
               <span>Finance alerts</span>
@@ -197,14 +195,14 @@ function OwnerHomePage() {
           <h3 className="mb-3 font-heading text-sm font-bold uppercase tracking-wide text-[var(--sge-ink-3)]">
             Work ratings
           </h3>
-          {state.workRatings.length === 0 ? (
+          {ratings.length === 0 ? (
             <EmptyState
               title="No ratings yet"
-              detail="Run Compute ratings on a JMS package after matching."
+              detail="Ratings appear once internal JMS are linked to their RIL submissions (JMS page)."
             />
           ) : (
-            state.workRatings.map((r) => (
-              <div key={r.id} className="mb-2 flex justify-between text-sm">
+            ratings.map((r) => (
+              <div key={r.supervisorId} className="mb-2 flex justify-between text-sm">
                 <span>
                   {state.staff.find((s) => s.id === r.supervisorId)?.name}
                 </span>
@@ -244,17 +242,13 @@ function OwnerHomePage() {
           </TabsContent>
           <TabsContent value="weekly" className="mt-3 text-sm text-[var(--sge-ink-2)]">
             Week roll-up: DPR docs {reports.length} · JMS expected{" "}
-            {formatINR(state.jmsPackages.reduce((s, p) => s + p.expectedIncome, 0))} ·
+            {formatINR(unpaidJms)} approved, unpaid ·
             ACPL flags {acplFlags}.
           </TabsContent>
           <TabsContent value="monthly" className="mt-3 text-sm text-[var(--sge-ink-2)]">
-            September RA bills{" "}
-            {formatINR(
-              state.billing
-                .filter((b) => b.period === "Sep 2026")
-                .reduce((s, b) => s + b.amount, 0)
-            )}
-            ; JMS payment tracking live on Finance.
+            {today.slice(0, 7)} JMS approved{" "}
+            {formatINR(work.jms.filter((j) => j.confirmedOn.startsWith(today.slice(0, 7))).reduce((s, j) => s + j.amount, 0))}
+            ; payments are recorded in Work → Payments.
           </TabsContent>
         </Tabs>
       </Panel>

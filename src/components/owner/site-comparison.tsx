@@ -55,9 +55,8 @@ export function siteRows(s: AppState, w: WorkState): SiteRow[] {
         expenseToday: s.finance
           .filter((f) => f.siteId === id && f.date === todayDate() && f.kind === "expense")
           .reduce((n, f) => n + f.amount, 0),
-        billed: s.billing
-          .filter((b) => b.siteId === id && b.status !== "draft")
-          .reduce((n, b) => n + b.amount, 0),
+        // Billed = approved value of the internal JMS on this site (Work)
+        billed: Math.round(w.jms.filter((j) => w.planLines.find((l) => l.id === j.planLineId)?.siteId === id).reduce((n, j) => n + j.amount, 0)),
       };
     });
 }

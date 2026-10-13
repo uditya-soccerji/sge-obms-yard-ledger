@@ -16,6 +16,7 @@ import type {
   DprEntry,
   DprReport,
   Jms,
+  JmsSubmission,
   JmsStatus,
   Job,
   Member,
@@ -26,7 +27,7 @@ import type {
 } from "./types";
 
 /** v8: fresh start — a new browser starts on an empty current month; the demo loads from Test tools */
-export const WORK_STORAGE_KEY = "sge-work-v9";
+export const WORK_STORAGE_KEY = "sge-work-v10";
 /** "Today" for the work demo (DPR dates, expiry warnings). */
 export const WORK_TODAY = "2026-09-28";
 
@@ -158,6 +159,7 @@ export function createEmptyWork(month: string): WorkState {
     jobs: [],
     reports: [],
     dprs: [],
+    submissions: [],
     jms: [],
     paint: [],
     expenses: [],
@@ -235,6 +237,7 @@ export function createWorkSeed(): WorkState {
     jobs,
     reports: [],
     dprs,
+    submissions: [],
     jms,
     paint: [],
     expenses: [],
@@ -361,7 +364,63 @@ export function createWorkSeed(): WorkState {
     { id: "ex-d-3", date: "2026-09-21", month: "2026-09", siteId: SITE, kind: "direct", category: "Copper slag abrasive", amount: 42000, jobId: j5.id },
   ];
   state.reports = demoReports(state);
+  state.submissions = demoSubmissions(state);
   return state;
+}
+
+/**
+ * JMS submitted to RIL for six August JMS (merge plan Step 6): the real
+ * 2741381 matches; one was cut at A2 (qty differs); one submission has no
+ * internal JMS (uploaded from the JMS book). Linked ones carry the link both ways.
+ */
+function demoSubmissions(w: WorkState): JmsSubmission[] {
+  const aug = w.jms.filter((j) => j.periodTo.startsWith("2026-08")).slice(0, 6);
+  const out: JmsSubmission[] = aug.map((j, i) => {
+    const line = w.planLines.find((l) => l.id === j.planLineId)!;
+    const item = w.serviceItems.find((s) => s.code === j.serviceCode)!;
+    const qty = i === 2 ? round3(j.qty * 0.97) : j.qty;
+    const no = /^\d{7}$/.test(j.jmsNo) ? j.jmsNo : String(2741500 + i);
+    const status = j.status;
+    const sub: JmsSubmission = {
+      id: `jsub-${no}`,
+      rilJmsNo: no,
+      siteId: line.siteId,
+      plant: line.plant,
+      woNo: "CCM/260069431",
+      foNo: "280152290",
+      periodFrom: j.periodFrom,
+      periodTo: j.periodTo,
+      items: [{ serviceCode: j.serviceCode, description: item.description, qty, uom: "M2", rate: j.rate, amount: Math.round(qty * j.rate * 100) / 100 }],
+      qty,
+      amount: Math.round(qty * j.rate * 100) / 100,
+      status,
+      statusLog: [{ status: "JMS SUBMITTED", at: "2026-09-02T11:00:00+05:30", by: "N. Sharma" }, ...(status !== "JMS SUBMITTED" ? [{ status, at: "2026-09-12T15:00:00+05:30", by: "N. Sharma" }] : [])],
+      files: { excelName: `JMS_${no}.xlsx`, pdfName: `JMS_${no}_signed.pdf` },
+      uploadedBy: "N. Sharma",
+      uploadedAt: "2026-09-12T15:00:00+05:30",
+      jmsId: j.id,
+    };
+    j.submissionId = sub.id;
+    return sub;
+  });
+  out.push({
+    id: "jsub-2740977",
+    rilJmsNo: "2740977",
+    siteId: SITE,
+    plant: "CRUDE",
+    woNo: "CCM/260069431",
+    periodFrom: "2026-07-01",
+    periodTo: "2026-07-31",
+    items: [{ serviceCode: "3378180", description: "APLY MPS3 - BLASTING CLG - SPRAY APLY", qty: 212.4, uom: "M2", rate: 684.93, amount: 145479.13 }],
+    qty: 212.4,
+    amount: 145479.13,
+    status: "INVOICE UPLOADED",
+    statusLog: [{ status: "INVOICE UPLOADED", at: "2026-09-05T10:00:00+05:30", by: "N. Sharma" }],
+    files: { excelName: "JMS_BOOK_JUL.xlsx" },
+    uploadedBy: "N. Sharma",
+    uploadedAt: "2026-09-05T10:00:00+05:30",
+  });
+  return out;
 }
 
 /**

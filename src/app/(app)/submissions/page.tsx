@@ -14,7 +14,7 @@ import { canViewModule } from "@/lib/permissions";
 import { useStore } from "@/lib/store";
 import { useSiteReports } from "@/lib/work/use-reports";
 import type { ReportStatus } from "@/lib/work/types";
-import type { JmsPackageStatus } from "@/lib/types";
+import { useWork } from "@/lib/work/store";
 
 const DPR_TONE: Record<ReportStatus, "ok" | "warn" | "accent" | "crit" | "default"> = {
   draft: "default",
@@ -23,17 +23,12 @@ const DPR_TONE: Record<ReportStatus, "ok" | "warn" | "accent" | "crit" | "defaul
   sic_rejected: "crit",
 };
 
-const JMS_TONE: Record<JmsPackageStatus, "ok" | "warn" | "accent" | "crit" | "default"> = {
-  draft: "default",
-  uploaded: "warn",
-  sic_review: "accent",
-  sic_approved: "ok",
-  sic_rejected: "crit",
-};
+const JMS_TONE = (s: string): "ok" | "warn" | "accent" | "crit" | "default" => (s === "PAID" ? "ok" : s === "A1 REJECT" ? "crit" : "accent");
 
 export default function MySubmissionsPage() {
   const { state, currentAccount } = useStore();
   const reports = useSiteReports();
+  const { work } = useWork();
   const canView = canViewModule(currentAccount, state.currentRole, "submissions");
   const userId = state.currentUserId;
   const accountId = state.currentAccountId;
@@ -47,10 +42,12 @@ export default function MySubmissionsPage() {
 
   const myJms = useMemo(() => {
     if (!userId && !accountId) return [];
-    return state.jmsPackages
-      .filter((p) => p.uploadedBy === userId || p.uploadedBy === accountId)
+    // JMS packs this person uploaded (Work submissions keep the uploader's name)
+    const me = state.users.find((u) => u.id === accountId)?.name;
+    return work.submissions
+      .filter((p) => p.uploadedBy === me)
       .sort((a, b) => b.uploadedAt.localeCompare(a.uploadedAt));
-  }, [state.jmsPackages, userId, accountId]);
+  }, [work.submissions, state.users, userId, accountId]);
 
   const awaiting = myDprs.filter((d) => d.status === "submitted").length;
   const drafts = myDprs.filter((d) => d.status === "draft" || d.status === "sic_rejected").length;
@@ -131,12 +128,12 @@ export default function MySubmissionsPage() {
                 className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-[var(--sge-line)] bg-[var(--sge-ground)] px-3 py-2"
               >
                 <div>
-                  <div className="text-sm font-medium">{p.label}</div>
+                  <div className="text-sm font-medium">RIL JMS {p.rilJmsNo} · {p.plant}</div>
                   <div className="text-xs text-[var(--sge-ink-3)]">
-                    {p.period} · {p.lines.length} lines
+                    {p.periodFrom} – {p.periodTo} · {p.items.length} item(s){p.jmsId ? "" : " · not linked"}
                   </div>
                 </div>
-                <StatusPill tone={JMS_TONE[p.status]}>{p.status}</StatusPill>
+                <StatusPill tone={JMS_TONE(p.status)}>{p.status}</StatusPill>
               </Link>
             ))}
           </div>

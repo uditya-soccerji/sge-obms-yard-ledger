@@ -15,10 +15,9 @@ import {
   matchAcplAgainstApproved,
   parseAcplCsv,
 } from "./acpl";
-import { scoreFromMatchRatio } from "./estimate";
 import { effectivePermission } from "./permissions";
 import { PAINT_STAGE_ORDER } from "./paint-lifecycle";
-import { resolveActivityRate, withSupersession } from "./rate-book";
+import { withSupersession } from "./rate-book";
 import { roleMeta } from "./roles";
 import { SAFETY_CHECKLIST_SEED } from "./safety-dpr";
 import { seedMasterCatalog } from "./master/seed-catalog";
@@ -38,7 +37,6 @@ import {
 import type { CatalogItem, Contractor, MasterCatalog, MaterialItem } from "./master/types";
 import { createSeedState, STORAGE_KEY } from "./seed";
 import type { DprReport } from "./work/types";
-import type { LegacyDprView } from "./work/legacy-view";
 import { ALL_SITES, canSeeAllSites, canSwitchSites, entrySiteId, landingSite, scopeState } from "./site-scope";
 import { checkSite } from "./sites";
 import { normalizeEp } from "./ep";
@@ -57,10 +55,7 @@ import type {
   DraftEntityKind,
   EquipmentRequest,
   EquipmentRequestStatus,
-  FinanceAlert,
   FinanceEntry,
-  JmsLine,
-  JmsPackage,
   Labourer,
   MessageType,
   ModuleId,
@@ -74,7 +69,6 @@ import type {
   TradeDefinition,
   UserAccount,
   WageLedgerEntry,
-  WorkRating,
 } from "./types";
 
 interface StoreApi {
@@ -148,16 +142,6 @@ interface StoreApi {
     status: AcplResolveStatus,
     note?: string,
     opts?: { sicOverride?: boolean }
-  ) => { ok: boolean; error?: string };
-  uploadJmsPackage: (pkg: Omit<JmsPackage, "id" | "financeNotified" | "expectedIncome" | "paymentReceived"> & { lines: JmsLine[] }) => string;
-  reviewJmsPackage: (id: string, decision: "sic_approved" | "sic_rejected", note: string) => void;
-  matchJmsLines: (packageId: string, dprs: LegacyDprView[]) => void;
-  computeRatings: (packageId: string, dprs: LegacyDprView[]) => { ok: boolean; error?: string };
-  /** received=true records the payment (amount defaults to expected income); false flags it as due to SIC */
-  markJmsPayment: (
-    packageId: string,
-    received: boolean,
-    opts?: { amount?: number; note?: string }
   ) => { ok: boolean; error?: string };
   updateRateCard: (id: string, patch: Partial<RateCard>) => void;
   /** siteId may be ALL_SITES ("all") for Owner / Super Admin. */
@@ -327,8 +311,6 @@ function migrateState(parsed: Partial<AppState>): AppState {
     ),
     acplPunches: parsed.acplPunches ?? seed.acplPunches,
     acplMatches: parsed.acplMatches ?? seed.acplMatches,
-    jmsPackages: parsed.jmsPackages ?? seed.jmsPackages,
-    workRatings: parsed.workRatings ?? seed.workRatings,
     rateCards: parsed.rateCards ?? seed.rateCards,
     rateLines:
       parsed.rateLines && parsed.rateLines.length > 0
@@ -1100,345 +1082,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       step(stateRef.current);
       setState(step);
       return result;
-    },
-    []
-  );
-
-  const uploadJmsPackage = useCallback(
-    (
-      pkg: Omit<
-        JmsPackage,
-        "id" | "financeNotified" | "expectedIncome" | "paymentReceived"
-      > & { lines: JmsLine[] }
-    ) => {
-      const id = uid("jms");
-      if (!can(stateRef.current, "jms", "upload")) return "";
-      setState((s) => {
-        // Rates come from the package's own site, not whichever site the header shows
-        const site = pkg.siteId ?? entrySiteId(s);
-        const lines = pkg.lines.map((line) => {
-          if (line.rateInr > 0) {
-            return { ...line, rateMissing: undefined, amountInr: Math.round(line.qty * line.rateInr * 100) / 100 };
-          }
-          const book = resolveActivityRate(s.rateLines, site, line.activity, line.unit);
-          // No guessing for billed money: flag it and leave the amount at 0
-          if (!book) return { ...line, amountInr: 0, rateMissing: true };
-          const rateInr = book.rateInr;
-          return {
-            ...line,
-            rateInr,
-            amountInr: Math.round(line.qty * rateInr * 100) / 100,
-          };
-        });
-        const expectedIncome = lines.reduce((sum, l) => sum + l.amountInr, 0);
-        const alert: FinanceAlert = {
-          id: uid("fa"),
-          createdAt: new Date().toISOString(),
-          kind: "jms_uploaded",
-          title: "JMS package uploaded",
-          detail: `${pkg.label} · expected ₹${expectedIncome.toLocaleString("en-IN")}${lines.some((l) => l.rateMissing) ? ` · ${lines.filter((l) => l.rateMissing).length} line(s) have no rate yet` : ""}`,
-          jmsPackageId: id,
-          acknowledged: false,
-          flaggedToSic: false,
-        };
-        const full: JmsPackage = {
-          ...pkg,
-          siteId: site,
-          id,
-          lines,
-          status: "uploaded",
-          financeNotified: true,
-          expectedIncome,
-          paymentReceived: false,
-        };
-        return {
-          ...s,
-          jmsPackages: [full, ...s.jmsPackages],
-          financeAlerts: [alert, ...s.financeAlerts],
-        };
-      });
-      return id;
-    },
-    []
-  );
-
-  /**
-   * Tie each JMS line to the SIC-approved DPR work it measures (docs §10):
-   * same site, same plant, same activity, inside the JMS period. A JMS covers
-   * many DPRs, so their quantities are summed; each DPR work line counts toward
-   * one JMS line only.
-   */
-  const matchJmsLines = useCallback((packageId: string, dprs: LegacyDprView[]) => {
-    if (!can(stateRef.current, "jms", "upload") && !can(stateRef.current, "jms", "approve")) return;
-    setState((s) => {
-      const pkg = s.jmsPackages.find((p) => p.id === packageId);
-      if (!pkg) return s;
-      // Period: a "YYYY-MM…" label means that month; otherwise the 31 days up to upload
-      const monthMatch = /^(\d{4}-\d{2})/.exec(pkg.period);
-      const upTo = pkg.uploadedAt.slice(0, 10);
-      const fromDate = new Date(Date.parse(upTo) - 30 * 86_400_000).toISOString().slice(0, 10);
-      const inPeriod = (date: string) =>
-        monthMatch ? date.startsWith(monthMatch[1]) : date >= fromDate && date <= upTo;
-      const approved = dprs.filter(
-        (d) =>
-          d.status === "sic_approved" &&
-          (!pkg.siteId || d.siteId === pkg.siteId) &&
-          inPeriod(d.date)
-      );
-      const used = new Set<string>();
-      const lines = pkg.lines.map((line) => {
-        const hits: { dprId: string; workId: string; qty: number }[] = [];
-        for (const dpr of approved) {
-          if (line.activity === "scaffolding") {
-            for (const w of dpr.scaffoldWork ?? []) {
-              const qty = w.standingM3 || w.erectM3;
-              if (!qty || used.has(w.id) || (w.plant || dpr.plant) !== line.plant) continue;
-              hits.push({ dprId: dpr.id, workId: w.id, qty });
-            }
-          } else {
-            for (const w of dpr.paintWork ?? []) {
-              if (w.activity !== line.activity || !w.areaM2 || used.has(w.id) || (w.plant || dpr.plant) !== line.plant) continue;
-              hits.push({ dprId: dpr.id, workId: w.id, qty: w.areaM2 });
-            }
-          }
-        }
-        if (!hits.length) {
-          return { ...line, matchedDprId: undefined, matchedWorkLineId: undefined, matchedWorkLineIds: undefined, dprClaimedQty: undefined, matchRatio: undefined };
-        }
-        hits.forEach((h) => used.add(h.workId));
-        const claimed = Math.round(hits.reduce((t, h) => t + h.qty, 0) * 1000) / 1000;
-        const ratio = Math.min(line.qty, claimed) / Math.max(line.qty, claimed);
-        return {
-          ...line,
-          matchedDprId: hits[0].dprId,
-          matchedWorkLineId: hits[0].workId,
-          matchedWorkLineIds: hits.map((h) => h.workId),
-          dprClaimedQty: claimed,
-          matchRatio: Math.round(ratio * 100) / 100,
-        };
-      });
-      // Matching never undoes an SIC decision
-      const status = pkg.status === "uploaded" ? "sic_review" : pkg.status;
-      return {
-        ...s,
-        jmsPackages: s.jmsPackages.map((p) =>
-          p.id === packageId ? { ...p, lines, status } : p
-        ),
-      };
-    });
-  }, []);
-
-  const reviewJmsPackage = useCallback(
-    (id: string, decision: "sic_approved" | "sic_rejected", note: string) => {
-      setState((s) => {
-        if (!can(s, "jms", "approve")) return s;
-        const pkg = s.jmsPackages.find((p) => p.id === id);
-        if (!pkg) return s;
-        const alert: FinanceAlert = {
-          id: uid("fa"),
-          createdAt: new Date().toISOString(),
-          kind: "jms_approved",
-          title:
-            decision === "sic_approved"
-              ? "JMS approved by SIC"
-              : "JMS rejected by SIC",
-          detail: `${pkg.label} · ${note || decision}`,
-          jmsPackageId: id,
-          acknowledged: false,
-          flaggedToSic: false,
-        };
-        return {
-          ...s,
-          jmsPackages: s.jmsPackages.map((p) =>
-            p.id === id
-              ? { ...p, status: decision, sicNote: note }
-              : p
-          ),
-          financeAlerts: [alert, ...s.financeAlerts],
-        };
-      });
-    },
-    []
-  );
-
-  const computeRatings = useCallback((packageId: string, dprs: LegacyDprView[]) => {
-    const cur = stateRef.current;
-    if (!can(cur, "jms", "approve")) return DENIED;
-    const target = cur.jmsPackages.find((p) => p.id === packageId);
-    if (!target) return { ok: false, error: "JMS package not found" };
-    if (target.status !== "sic_approved") return { ok: false, error: "Approve the JMS first — ratings are worked out from an approved JMS" };
-    setState((s) => {
-      const pkg = s.jmsPackages.find((p) => p.id === packageId);
-      if (!pkg || pkg.status !== "sic_approved") return s;
-      const bySup = new Map<
-        string,
-        { jms: number; dpr: number; ratios: number[] }
-      >();
-      for (const line of pkg.lines) {
-        if (!line.matchedDprId) continue;
-        const dpr = dprs.find((d) => d.id === line.matchedDprId);
-        if (!dpr) continue;
-        const cur = bySup.get(dpr.submitterId) ?? {
-          jms: 0,
-          dpr: 0,
-          ratios: [],
-        };
-        cur.jms += line.qty;
-        cur.dpr += line.dprClaimedQty ?? line.qty;
-        if (line.matchRatio != null) cur.ratios.push(line.matchRatio);
-        bySup.set(dpr.submitterId, cur);
-      }
-
-      const ratings: WorkRating[] = [];
-      for (const [supervisorId, agg] of bySup) {
-        const avgRatio =
-          agg.ratios.length > 0
-            ? agg.ratios.reduce((a, b) => a + b, 0) / agg.ratios.length
-            : 0;
-        const score = scoreFromMatchRatio(avgRatio);
-        const dprDocs = dprs.filter(
-          (d) => d.submitterId === supervisorId
-        );
-        const faultEq = dprDocs.flatMap((d) =>
-          d.equipmentMarks.filter((e) => e.status === "fault" || e.status === "due")
-        ).length;
-        const overdue = dprDocs.flatMap((d) =>
-          d.equipmentMarks.filter(
-            (e) => e.expiryDate && e.expiryDate < todayDate()
-          )
-        ).length;
-        const equipmentCare = Math.max(1, 5 - faultEq - overdue);
-        const openFlags = s.acplMatches.filter(
-          (m) => m.resolveStatus === "open" && m.flag !== "match"
-        ).length;
-        const attendanceIntegrity = Math.max(1, 5 - Math.min(4, openFlags));
-        const reqCount = dprDocs.reduce((n, d) => n + d.requests.length, 0);
-        const requestHygiene = reqCount > 6 ? 3 : reqCount > 3 ? 4 : 5;
-        const suggestedSupervisorIncentive = score * 2000;
-        const suggestedLabourIncentive = Math.round(agg.jms * 2);
-
-        ratings.push({
-          id: uid("wr"),
-          supervisorId,
-          period: pkg.period,
-          jmsPackageId: packageId,
-          score,
-          jmsAcceptedQty: agg.jms,
-          dprClaimedQty: agg.dpr,
-          qualityFlags: [
-            ...(avgRatio < 0.9 ? ["qty_gap"] : []),
-            ...(faultEq > 0 ? ["equipment_fault"] : []),
-            ...(overdue > 0 ? ["expiry_overdue"] : []),
-          ],
-          attendanceIntegrity,
-          equipmentCare,
-          requestHygiene,
-          suggestedSupervisorIncentive,
-          suggestedLabourIncentive,
-          note: `Match ratio ${(avgRatio * 100).toFixed(0)}%`,
-        });
-      }
-
-      const wageAdds: WageLedgerEntry[] = ratings.flatMap((r) => [
-        {
-          id: uid("wg"),
-          staffId: r.supervisorId,
-          date: todayDate(),
-          kind: "incentive" as const,
-          amount: r.suggestedSupervisorIncentive,
-          note: `JMS rating incentive · score ${r.score} · ${pkg.label}`,
-          flaggedToSic: false,
-          jmsPackageId: packageId,
-        },
-      ]);
-
-      return {
-        ...s,
-        workRatings: [
-          ...ratings,
-          ...s.workRatings.filter((r) => r.jmsPackageId !== packageId),
-        ],
-        // Re-running replaces this package's incentive drafts instead of adding more
-        wageLedger: [
-          ...wageAdds,
-          ...s.wageLedger.filter((w) => !(w.kind === "incentive" && w.jmsPackageId === packageId)),
-        ],
-      };
-    });
-    return { ok: true };
-  }, []);
-
-  /**
-   * Record money received against an approved JMS package, once; or flag it as
-   * still due to SIC (once while the earlier flag is open).
-   */
-  const markJmsPayment = useCallback(
-    (packageId: string, received: boolean, opts?: { amount?: number; note?: string }) => {
-      const cur = stateRef.current;
-      if (!can(cur, "finance", "create")) return DENIED;
-      const pkg = cur.jmsPackages.find((p) => p.id === packageId);
-      if (!pkg) return { ok: false, error: "JMS package not found" };
-      if (pkg.status !== "sic_approved") return { ok: false, error: "Only an SIC-approved JMS can be paid or chased" };
-      if (pkg.paymentReceived) return { ok: false, error: "Payment is already recorded for this JMS" };
-      if (received) {
-        const amount = opts?.amount ?? pkg.expectedIncome;
-        if (!(amount > 0)) return { ok: false, error: "Amount received must be above zero" };
-        const now = new Date().toISOString();
-        setState((s) => {
-          const p = s.jmsPackages.find((x) => x.id === packageId);
-          if (!p || p.paymentReceived) return s;
-          const next = {
-            ...s,
-            jmsPackages: s.jmsPackages.map((x) =>
-              x.id === packageId
-                ? { ...x, paymentReceived: true, paymentReceivedAt: now, paymentAmount: amount, paymentNote: opts?.note }
-                : x
-            ),
-            finance: [
-              {
-                id: uid("fin"),
-                date: now.slice(0, 10),
-                kind: "income" as const,
-                category: "JMS payment",
-                amount,
-                description: `Payment received — ${p.label}${opts?.note ? ` · ${opts.note}` : ""}`,
-                siteId: p.siteId ?? entrySiteId(s),
-                enteredBy: s.currentUserId ?? "finance",
-              },
-              ...s.finance,
-            ],
-          };
-          return {
-            ...next,
-            auditLog: [
-              makeAudit(next, "finance", "update", `JMS paid ${p.label}: ₹${amount.toLocaleString("en-IN")} (expected ₹${p.expectedIncome.toLocaleString("en-IN")})`),
-              ...s.auditLog,
-            ],
-          };
-        });
-        return { ok: true };
-      }
-      const openFlag = cur.financeAlerts.some(
-        (a) => a.jmsPackageId === packageId && a.kind === "payment_due" && !a.acknowledged
-      );
-      if (openFlag) return { ok: false, error: "Already flagged to SIC — acknowledge that alert first" };
-      setState((s) => ({
-        ...s,
-        financeAlerts: [
-          {
-            id: uid("fa"),
-            createdAt: new Date().toISOString(),
-            kind: "payment_due",
-            title: "JMS payment not received",
-            detail: `${pkg.label} · expected ₹${pkg.expectedIncome.toLocaleString("en-IN")}`,
-            jmsPackageId: packageId,
-            acknowledged: false,
-            flaggedToSic: true,
-          },
-          ...s.financeAlerts,
-        ],
-      }));
-      return { ok: true };
     },
     []
   );
@@ -2365,11 +2008,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       uploadAcplText,
       runAcplMatch,
       resolveAcplFlag,
-      uploadJmsPackage,
-      reviewJmsPackage,
-      matchJmsLines,
-      computeRatings,
-      markJmsPayment,
       updateRateCard,
       switchSite,
       setEntrySite,
@@ -2422,11 +2060,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       uploadAcplText,
       runAcplMatch,
       resolveAcplFlag,
-      uploadJmsPackage,
-      reviewJmsPackage,
-      matchJmsLines,
-      computeRatings,
-      markJmsPayment,
       updateRateCard,
       switchSite,
       setEntrySite,

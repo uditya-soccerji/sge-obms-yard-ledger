@@ -209,13 +209,6 @@ export type AcplMatchFlag =
 
 export type AcplResolveStatus = "open" | "resolved_dpr" | "resolved_acpl" | "dismissed";
 
-export type JmsPackageStatus =
-  | "draft"
-  | "uploaded"
-  | "sic_review"
-  | "sic_approved"
-  | "sic_rejected";
-
 export type RateCardKind =
   | "pipeline"
   | "structures"
@@ -538,16 +531,6 @@ export interface PredictionAlert {
   siteId?: string;
 }
 
-export interface BillingSnapshot {
-  id: string;
-  label: string;
-  amount: number;
-  status: "draft" | "submitted" | "approved" | "paid";
-  period: string;
-  /** Site this row belongs to (unset = company-wide). */
-  siteId?: string;
-}
-
 export interface ComplianceDoc {
   id: string;
   title: string;
@@ -603,65 +586,6 @@ export interface AcplMatchRow {
   siteId?: string;
 }
 
-export interface JmsLine {
-  id: string;
-  description: string;
-  plant: string;
-  activity: "painting" | "blasting" | "scaffolding";
-  qty: number;
-  unit: "m2" | "m3";
-  rateInr: number;
-  amountInr: number;
-  /** First matched DPR (rating is credited to its submitter) */
-  matchedDprId?: string;
-  matchedWorkLineId?: string;
-  /** Every DPR work line summed into dprClaimedQty */
-  matchedWorkLineIds?: string[];
-  /** No rate given and none in the site's rate book: amount left at 0 until a rate is added */
-  rateMissing?: boolean;
-  dprClaimedQty?: number;
-  matchRatio?: number;
-}
-
-export interface JmsPackage {
-  id: string;
-  label: string;
-  period: string;
-  uploadedAt: string;
-  uploadedBy: string;
-  status: JmsPackageStatus;
-  lines: JmsLine[];
-  sicNote?: string;
-  financeNotified: boolean;
-  expectedIncome: number;
-  paymentReceived: boolean;
-  paymentReceivedAt?: string;
-  /** Amount actually received (may differ from expectedIncome) */
-  paymentAmount?: number;
-  paymentNote?: string;
-  /** Site this row belongs to (unset = company-wide). */
-  siteId?: string;
-}
-
-export interface WorkRating {
-  id: string;
-  supervisorId: string;
-  period: string;
-  jmsPackageId: string;
-  score: number;
-  jmsAcceptedQty: number;
-  dprClaimedQty: number;
-  qualityFlags: string[];
-  attendanceIntegrity: number;
-  equipmentCare: number;
-  requestHygiene: number;
-  suggestedSupervisorIncentive: number;
-  suggestedLabourIncentive: number;
-  note?: string;
-  /** Site this row belongs to (unset = company-wide). */
-  siteId?: string;
-}
-
 export interface RateCard {
   id: string;
   kind: RateCardKind;
@@ -683,8 +607,6 @@ export interface WageLedgerEntry {
   amount: number;
   note: string;
   flaggedToSic?: boolean;
-  /** Incentive drafted from this JMS package's ratings (re-running ratings replaces it) */
-  jmsPackageId?: string;
   /** Site this row belongs to (unset = company-wide). */
   siteId?: string;
 }
@@ -692,10 +614,10 @@ export interface WageLedgerEntry {
 export interface FinanceAlert {
   id: string;
   createdAt: string;
-  kind: "jms_uploaded" | "jms_approved" | "payment_due" | "wage_anomaly";
+  /** JMS alerts moved to Work events (merge plan Step 7); wage anomalies stay here */
+  kind: "wage_anomaly";
   title: string;
   detail: string;
-  jmsPackageId?: string;
   acknowledged: boolean;
   flaggedToSic: boolean;
   /** Site this row belongs to (unset = company-wide). */
@@ -735,14 +657,11 @@ export interface AppState {
   finance: FinanceEntry[];
   telegramDrafts: TelegramDraft[];
   predictions: PredictionAlert[];
-  billing: BillingSnapshot[];
   compliance: ComplianceDoc[];
   transfers: MaterialTransfer[];
   vendors: { id: string; name: string; category: string; status: string }[];
   acplPunches: AcplPunchRow[];
   acplMatches: AcplMatchRow[];
-  jmsPackages: JmsPackage[];
-  workRatings: WorkRating[];
   rateCards: RateCard[];
   /** Versioned PO / work-order rate book (history kept; latest wins). */
   rateLines: RateLine[];
