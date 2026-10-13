@@ -379,6 +379,8 @@ export interface Expense {
   enteredAt?: string;
   /** Voided entries stay on record (docs §8: all edits logged) but leave the P&L */
   voided?: { by: string; at: string; reason: string };
+  /** Every edit after entry: who, when, what changed (docs §8) */
+  edits?: { by: string; at: string; changes: string }[];
 }
 
 export type PaymentMode = "cash" | "upi" | "bank" | "credit";

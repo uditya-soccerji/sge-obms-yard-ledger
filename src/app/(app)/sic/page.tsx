@@ -14,6 +14,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { useStore } from "@/lib/store";
 import { useWork } from "@/lib/work/store";
+import { spendOn } from "@/lib/work/money";
 import { useSiteReports } from "@/lib/work/use-reports";
 import { workedCount } from "@/lib/attendance";
 
@@ -136,11 +137,7 @@ function SicHomePage() {
           )}
           <div className="mt-2 text-xs text-[var(--sge-ink-3)]">
             Today expenses{" "}
-            {formatINR(
-              state.finance
-                .filter((f) => f.date === today && f.kind === "expense")
-                .reduce((s, f) => s + f.amount, 0)
-            )}
+            {formatINR(spendOn(work, today, (siteId) => state.currentSiteId === "all" || siteId === state.currentSiteId))}
           </div>
         </Panel>
       </div>

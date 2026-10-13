@@ -27,6 +27,7 @@ export type EventKind =
   | "payment_cleared"
   | "expense_added"
   | "expense_voided"
+  | "expense_edited"
   | "jms_status"
   | "jms_submitted"
   | "jms_linked"
@@ -89,6 +90,7 @@ export const KIND_LABEL: Record<EventKind, string> = {
   payment_cleared: "Payment cleared",
   expense_added: "Cost added",
   expense_voided: "Cost voided",
+  expense_edited: "Cost edited",
   jms_status: "JMS status",
   jms_submitted: "JMS uploaded (submitted to RIL)",
   jms_linked: "JMS linked",
@@ -147,6 +149,7 @@ export function isFor(e: WorkEvent, v: Viewer): boolean {
     case "payment_cleared":
     case "expense_added":
     case "expense_voided":
+    case "expense_edited":
       return v.role === "finance";
   }
 }

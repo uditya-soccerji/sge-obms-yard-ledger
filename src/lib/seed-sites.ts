@@ -19,7 +19,6 @@ import type {
   ComplianceDoc,
   EquipmentItem,
   EquipmentRequest,
-  FinanceEntry,
   Labourer,
   MaterialTransfer,
   PaintLifecycleStage,
@@ -66,7 +65,7 @@ interface SiteProfile {
     rilPosted?: number;
   }[];
   equipment: { type: EquipmentItem["type"]; status: EquipmentItem["status"]; expiry: string }[];
-  finance: { date: string; kind: FinanceEntry["kind"]; category: string; amount: number; description: string }[];
+  finance: { date: string; kind: "expense" | "income"; category: string; amount: number; description: string }[];
   billing: { label: string; amount: number; status: "draft" | "submitted" | "approved" | "paid"; period: string }[];
   requests: { kind: EquipmentRequest["kind"]; description: string; qty: number; urgent?: boolean; status: EquipmentRequest["status"] }[];
   prediction?: { kind: string; severity: "warn" | "crit"; title: string; detail: string; value: number; threshold: number };
@@ -346,7 +345,6 @@ export interface SiteSeedRows {
   equipment: EquipmentItem[];
   workPlans: WorkPlanItem[];
   safetyDays: SafetyChecklistDay[];
-  finance: FinanceEntry[];
   compliance: ComplianceDoc[];
   transfers: MaterialTransfer[];
   acplMatches: AcplMatchRow[];
@@ -357,7 +355,7 @@ export interface SiteSeedRows {
 export function seedOtherSites(): SiteSeedRows {
   const out: SiteSeedRows = {
     staff: [], labourers: [], attendance: [], equipment: [],
-    workPlans: [], safetyDays: [], finance: [],
+    workPlans: [], safetyDays: [],
     compliance: [], transfers: [], acplMatches: [],
     wageLedger: [], equipmentRequests: [],
   };
@@ -435,9 +433,6 @@ export function seedOtherSites(): SiteSeedRows {
       })
     );
 
-    p.finance.forEach((f, i) =>
-      out.finance.push({ id: `fin-${k}-${i + 1}`, ...f, siteId: sid, enteredBy: i % 2 ? `st-${k}-sic` : "st-owner" })
-    );
 
 
     p.requests.forEach((r, i) =>

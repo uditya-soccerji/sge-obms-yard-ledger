@@ -21,6 +21,7 @@ import { useSiteReports } from "@/lib/work/use-reports";
 import { useWork } from "@/lib/work/store";
 import { reportArea } from "@/lib/work/reports";
 import { supervisorRatings } from "@/lib/work/jms-compare";
+import { receivedOn, spendOn } from "@/lib/work/money";
 import { stepVariance } from "@/lib/work/paint-steps";
 import { supervisorPaint } from "@/lib/work/logic";
 import { workedCount } from "@/lib/attendance";
@@ -36,9 +37,10 @@ function OwnerHomePage() {
   const attendToday = state.attendance.filter((a) => a.date === today);
   const present = workedCount(attendToday, today);
   const totalActive = state.labourers.filter((l) => l.active).length;
-  const todayFin = state.finance.filter((f) => f.date === today);
-  const expenseToday = todayFin.filter((f) => f.kind === "expense").reduce((s, f) => s + f.amount, 0);
-  const incomeToday = todayFin.filter((f) => f.kind === "income").reduce((s, f) => s + f.amount, 0);
+  // Day money from Work: costs spent, JMS payments received
+  const inSite = (siteId: string) => allSites || siteId === state.currentSiteId;
+  const expenseToday = spendOn(work, today, inSite);
+  const incomeToday = receivedOn(work, today, inSite);
   // Painting m² today from the job lines on today's reports (one DPR model)
   const paintToday = Math.round(reports.filter((r) => r.date === today).reduce((s, r) => s + reportArea(work, r.id, true), 0) * 1000) / 1000;
 

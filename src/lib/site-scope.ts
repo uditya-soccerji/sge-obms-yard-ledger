@@ -62,7 +62,6 @@ export function scopeState(s: AppState): AppState {
     equipment: s.equipment.filter((e) => keep(e.siteId)),
     workPlans: s.workPlans.filter((w) => keep(w.siteId, staffSite.get(w.supervisorId))),
     safetyDays: s.safetyDays.filter((d) => keep(d.siteId)),
-    finance: s.finance.filter((f) => keep(f.siteId)),
     compliance: s.compliance.filter((c) => keep(c.siteId)),
     transfers: s.transfers.filter((t) => keep(t.siteId)),
     acplPunches: s.acplPunches.filter((p) => keep(p.siteId, epSite.get(p.epNumber))),

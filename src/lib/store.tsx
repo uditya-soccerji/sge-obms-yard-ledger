@@ -54,7 +54,6 @@ import type {
   DraftEntityKind,
   EquipmentRequest,
   EquipmentRequestStatus,
-  FinanceEntry,
   Labourer,
   MessageType,
   ModuleId,
@@ -91,10 +90,6 @@ interface StoreApi {
     date?: string
   ) => { ok: boolean; error?: string };
   /** siteId defaults to the entry site (active site, or the All sites pick). */
-  /** Ledger entry with the docs §8 fields; returns why it was refused */
-  addFinance: (
-    entry: Omit<FinanceEntry, "id" | "siteId" | "enteredBy"> & { siteId?: string }
-  ) => { ok: boolean; error?: string };
   toggleSafetyItem: (dayId: string, itemId: number) => void;
   signSafetyDay: (dayId: string) => void;
   applyTelegram: (input: {
@@ -676,34 +671,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
             ...s.auditLog,
           ],
         };
-      });
-      return { ok: true };
-    },
-    []
-  );
-
-  const addFinance = useCallback(
-    (entry: Omit<FinanceEntry, "id" | "siteId" | "enteredBy"> & { siteId?: string }) => {
-      if (!can(stateRef.current, "finance", "create")) return DENIED;
-      // docs §8: date, time, amount, category, vendor, payment mode, remark
-      if (!(entry.amount > 0)) return { ok: false, error: "Amount must be above zero" };
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(entry.date) || entry.date > todayDate()) return { ok: false, error: "Pick a date that isn't in the future" };
-      if (!entry.time) return { ok: false, error: "Enter the time" };
-      if (!entry.category.trim()) return { ok: false, error: "Pick a category" };
-      if (!entry.vendor?.trim()) return { ok: false, error: "Enter who paid or was paid" };
-      if (!entry.paymentMode) return { ok: false, error: "Pick the payment mode" };
-      if (!entry.description.trim()) return { ok: false, error: "Add a remark" };
-      setState((s) => {
-        const row: FinanceEntry = {
-          ...entry,
-          vendor: entry.vendor?.trim(),
-          description: entry.description.trim(),
-          id: uid("fin"),
-          siteId: entry.siteId ?? entrySiteId(s),
-          enteredBy: s.currentUserId ?? "system",
-        };
-        const next = { ...s, finance: [row, ...s.finance] };
-        return { ...next, auditLog: [makeAudit(next, "finance", "create", `${row.kind} ₹${row.amount.toLocaleString("en-IN")} · ${row.category} · ${row.vendor}`), ...s.auditLog] };
       });
       return { ok: true };
     },
@@ -1758,26 +1725,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         // dpr_note: the Telegram page adds it to today's Work report (telegramToReport)
 
         if (input.mappedEntity === "expense") {
-          // Prefer a number marked as money (₹ / Rs / INR); else the largest number in the message
-          const money = input.content.match(/(?:₹|rs\.?|inr)\s*([\d,]+(?:\.\d+)?)/i);
-          const numbers = [...input.content.matchAll(/\d[\d,]*(?:\.\d+)?/g)].map((m) => Number(m[0].replace(/,/g, "")));
-          const amount = money ? Number(money[1].replace(/,/g, "")) : numbers.length ? Math.max(...numbers) : 0;
-          if (!(amount > 0)) draft.status = "needs_review";
-          const fin: FinanceEntry = {
-            id: uid("fin"),
-            date: today,
-            kind: "expense",
-            category: "Telegram",
-            amount,
-            description: input.content,
-            siteId: entrySiteId(next),
-            enteredBy: `telegram:${input.role}`,
-          };
-          // A message with no amount posts nothing; Finance completes it from the draft
-          if (amount > 0) {
-            draft.entityId = fin.id;
-            next = { ...next, finance: [fin, ...next.finance] };
-          }
+          // Costs need the docs §8 fields: Finance completes it in Work → P&L from this draft
+          draft.status = "needs_review";
         }
 
         // stock_receipt: the Telegram page adds the receipt to Work paint (receivePaint)
@@ -1836,7 +1785,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       logout,
       resetSeed,
       markAttendance,
-      addFinance,
       toggleSafetyItem,
       signSafetyDay,
       applyTelegram,
@@ -1886,7 +1834,6 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       logout,
       resetSeed,
       markAttendance,
-      addFinance,
       toggleSafetyItem,
       signSafetyDay,
       applyTelegram,
