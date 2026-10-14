@@ -62,6 +62,8 @@ const ROLE_PILLS: Record<RoleId, OpsPill[]> = {
   sic: [
     { id: "approvals", label: "Approvals", module: "approvals" },
     { id: "crew", label: "Crews", module: "crew" },
+    // docs §24: the SIC is told of every store request and overrides a store rejection
+    { id: "requests", label: "Requests", module: "requests" },
     { id: "dpr", label: "DPR", module: "dpr" },
     { id: "jms", label: "JMS", module: "jms" },
     { id: "acpl", label: "ACPL", module: "acpl" },
