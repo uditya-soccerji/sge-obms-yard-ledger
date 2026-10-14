@@ -13,7 +13,7 @@ import { cn } from "@/lib/utils";
  * saved as CSV. Every row is checked; only good rows (and ticked possible
  * duplicates) are added. EPs already used, now or before, are refused.
  */
-export function LabourImport({ onClose }: { onClose: () => void }) {
+export function LabourImport({ onClose, title = "Upload labourers (CSV)" }: { onClose: () => void; title?: string }) {
   const { fullState: state, importLabourers } = useStore();
   const siteId = entrySiteId(state);
   const site = state.sites.find((s) => s.id === siteId);
@@ -22,7 +22,7 @@ export function LabourImport({ onClose }: { onClose: () => void }) {
   const [addTrades, setAddTrades] = useState(true);
   const [keep, setKeep] = useState<Record<number, boolean>>({});
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  const [show, setShow] = useState<"all" | "errors" | "dupes">("all");
+  const [show, setShow] = useState<"all" | "errors" | "dupes" | "updates" | "already">("all");
 
   const result = text
     ? checkImport(parseCsv(text), {
@@ -39,9 +39,14 @@ export function LabourImport({ onClose }: { onClose: () => void }) {
   const ready = rows.filter((r) => r.labourer && (!r.possibleDuplicate || keep[r.line]));
   const errors = rows.filter((r) => r.errors.length).length;
   const dupes = rows.filter((r) => !r.errors.length && r.possibleDuplicate).length;
+  // People already registered: RIL details refreshed, or nothing new → not uploaded (docs §24)
+  const updates = rows.filter((r) => r.update);
+  const already = rows.filter((r) => r.alreadyIn).length;
   const newTrades = [...new Map(ready.filter((r) => r.newTrade).map((r) => [r.newTrade!.id, r.newTrade!])).values()];
   const bySite = ready.reduce<Record<string, number>>((m, r) => ({ ...m, [r.siteCode]: (m[r.siteCode] ?? 0) + 1 }), {});
-  const visible = rows.filter((r) => (show === "errors" ? r.errors.length : show === "dupes" ? !r.errors.length && r.possibleDuplicate : true));
+  const visible = rows.filter((r) =>
+    show === "errors" ? r.errors.length : show === "dupes" ? !r.errors.length && r.possibleDuplicate : show === "updates" ? r.update : show === "already" ? r.alreadyIn : true
+  );
 
   async function pick(f: File | undefined) {
     if (!f) return;
@@ -56,12 +61,15 @@ export function LabourImport({ onClose }: { onClose: () => void }) {
   }
 
   function add() {
-    const res = importLabourers(ready.map((r) => r.labourer!), newTrades, file);
+    const res = importLabourers(ready.map((r) => r.labourer!), newTrades, file, updates.map((r) => r.update!));
     if (!res.ok) return setMsg({ ok: false, text: res.error ?? "Not added" });
-    setMsg({
-      ok: true,
-      text: `Added ${res.added} labourer${res.added === 1 ? "" : "s"} (${Object.entries(bySite).map(([k, v]) => `${k} ${v}`).join(", ")})${newTrades.length ? ` and ${newTrades.length} new trade${newTrades.length === 1 ? "" : "s"}` : ""}.`,
-    });
+    const parts = [
+      res.added ? `Added ${res.added} labourer${res.added === 1 ? "" : "s"} (${Object.entries(bySite).map(([k, v]) => `${k} ${v}`).join(", ")})` : "",
+      res.updated ? `updated ${res.updated} (RIL details)` : "",
+      newTrades.length ? `${newTrades.length} new trade${newTrades.length === 1 ? "" : "s"}` : "",
+      already ? `${already} not uploaded — already in the system` : "",
+    ].filter(Boolean);
+    setMsg({ ok: true, text: `${parts.join(" · ")}.` });
     setText(null);
   }
 
@@ -77,14 +85,15 @@ export function LabourImport({ onClose }: { onClose: () => void }) {
   return (
     <Panel className="mb-3 border-dashed">
       <div className="mb-2 flex flex-wrap items-center gap-2">
-        <h3 className="font-heading text-sm font-bold uppercase tracking-wide">Upload labourers (CSV)</h3>
+        <h3 className="font-heading text-sm font-bold uppercase tracking-wide">{title}</h3>
         <Button size="sm" variant="outline" className="h-7 text-xs" onClick={template}>Download template</Button>
         <Button size="sm" variant="ghost" className="ml-auto h-7 text-xs" onClick={onClose}>Close</Button>
       </div>
       <p className="mb-2 text-xs text-[var(--sge-ink-3)]">
         Our template, or RIL&apos;s Employee Details export as it is — in Excel: File → Save As → CSV. Name, EP and Trade are needed.
         Site comes from the Site column, else RIL&apos;s area (DTA / PCG / SOLAR), else {site?.code ?? "the site you're on"}. No contractor = SGE (own).
-        An EP already used, now or before, is refused; the same Name + Trade + Skill as someone registered needs your tick.
+        Someone already registered (same EP) gets their RIL pass status, EIC, area and pass dates (Valid From / Valid To) updated; if nothing changed the row is
+        not uploaded and shows who uploaded it before. An old EP is refused; the same Name + Trade + Skill as someone registered needs your tick.
       </p>
       <div className="flex flex-wrap items-center gap-3 text-sm">
         <input aria-label="CSV file" type="file" accept=".csv,text/csv" onChange={(e) => void pick(e.target.files?.[0])} />
@@ -103,22 +112,32 @@ export function LabourImport({ onClose }: { onClose: () => void }) {
             <span className="font-semibold">{file}</span>
             <StatusPill tone="ok">{rows.filter((r) => r.labourer && !r.possibleDuplicate).length} ready</StatusPill>
             {dupes ? <StatusPill tone="warn">{dupes} possible duplicate{dupes === 1 ? "" : "s"}</StatusPill> : null}
+            {updates.length ? <StatusPill tone="ok">{updates.length} to update</StatusPill> : null}
+            {already ? <StatusPill tone="default">{already} already uploaded</StatusPill> : null}
             {errors ? <StatusPill tone="crit">{errors} with errors (skipped)</StatusPill> : null}
             {newTrades.length ? <span className="text-[var(--sge-ink-3)]">{newTrades.length} new trade{newTrades.length === 1 ? "" : "s"}</span> : null}
             <span className="text-[var(--sge-ink-3)]">{Object.entries(bySite).map(([k, v]) => `${k} ${v}`).join(" · ")}</span>
-            <Button size="sm" className="ml-auto h-8" disabled={!ready.length} onClick={add}>
-              Add {ready.length} labourer{ready.length === 1 ? "" : "s"}
+            <Button size="sm" className="ml-auto h-8" disabled={!ready.length && !updates.length} onClick={add}>
+              {[ready.length ? `Add ${ready.length} labourer${ready.length === 1 ? "" : "s"}` : "", updates.length ? `update ${updates.length}` : ""].filter(Boolean).join(", ") || "Nothing to add"}
             </Button>
           </div>
           <div className="mb-1 flex gap-1">
-            {(["all", "errors", "dupes"] as const).map((v) => (
+            {(["all", "errors", "dupes", "updates", "already"] as const).map((v) => (
               <button
                 key={v}
                 type="button"
                 onClick={() => setShow(v)}
                 className={cn("rounded-sm px-2 py-0.5 text-[11px] font-semibold uppercase", show === v ? "bg-[var(--sge-night)] text-[var(--sge-brass-wash)]" : "bg-[var(--sge-paper-2)] text-[var(--sge-ink-2)]")}
               >
-                {v === "all" ? `All (${rows.length})` : v === "errors" ? `Errors (${errors})` : `Possible duplicates (${dupes})`}
+                {v === "all"
+                  ? `All (${rows.length})`
+                  : v === "errors"
+                    ? `Errors (${errors})`
+                    : v === "dupes"
+                      ? `Possible duplicates (${dupes})`
+                      : v === "updates"
+                        ? `Updates (${updates.length})`
+                        : `Already uploaded (${already})`}
               </button>
             ))}
           </div>
@@ -153,6 +172,10 @@ export function LabourImport({ onClose }: { onClose: () => void }) {
                     <td className="py-1">
                       {r.errors.length ? (
                         <span className="text-[var(--sge-crit)]">{r.errors.join("; ")}</span>
+                      ) : r.update ? (
+                        <span className="text-[var(--sge-ok)]">Update: {r.update.changes.join(", ")}</span>
+                      ) : r.alreadyIn ? (
+                        <span className="text-[var(--sge-ink-3)]">{r.alreadyIn}</span>
                       ) : r.possibleDuplicate ? (
                         <label className="flex items-start gap-1.5 text-[var(--sge-brass-ink)]">
                           <input type="checkbox" aria-label={`Add line ${r.line} anyway`} checked={!!keep[r.line]} onChange={(e) => setKeep({ ...keep, [r.line]: e.target.checked })} />

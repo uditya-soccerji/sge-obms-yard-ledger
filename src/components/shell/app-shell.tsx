@@ -254,7 +254,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 </SelectContent>
               </Select>
             ) : null}
-            {canAccessWork(role) ? <NotificationBell /> : null}
+            {/* HR has no Work tab but gets gate-pass alerts (docs §24) */}
+            {canAccessWork(role) || role === "hr" ? <NotificationBell /> : null}
             {assigned.length > 1 ? (
               <Select
                 value={role}

@@ -1,5 +1,6 @@
 "use client";
 
+import { PassExpiryPanel } from "@/components/hr/pass-expiry-panel";
 import { guarded } from "@/components/shared/require-module";
 import Link from "next/link";
 import { useMemo } from "react";
@@ -74,6 +75,9 @@ function SupervisorHomePage() {
           </div>
         }
       />
+
+      {/* docs §24: RIL passes expiring within 10 days */}
+      <PassExpiryPanel supervisorId={supervisorId} />
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <KpiTile label="My crew" value={String(myCrew.length)} />

@@ -164,7 +164,12 @@ interface StoreApi {
     >
   ) => { ok: boolean; error?: string };
   /** Bulk add from the CSV upload, with any new trades (B09) */
-  importLabourers: (rows: Omit<Labourer, "id">[], newTrades: { id: string; label: string }[], fileName: string) => { ok: boolean; error?: string; added: number };
+  importLabourers: (
+    rows: Omit<Labourer, "id">[],
+    newTrades: { id: string; label: string }[],
+    fileName: string,
+    updates?: { id: string; patch: Partial<Labourer> }[]
+  ) => { ok: boolean; error?: string; added: number; updated: number };
   /** Master Data saves go to the server first when it's configured; local state changes only on success (B5) */
   upsertContractor: (row: Contractor) => Promise<{ ok: boolean; error?: string; id?: string }>;
   setContractorActive: (id: string, active: boolean) => Promise<{ ok: boolean; error?: string }>;
@@ -269,6 +274,10 @@ function migrateState(parsed: Partial<AppState>): AppState {
   const seed = createSeedState();
   const users =
     parsed.users && parsed.users.length > 0 ? parsed.users : seed.users;
+  const importAudit = (parsed.auditLog ?? []).filter((a) => a.module === "labourer" && a.action === "import").sort((a, b) => a.at.localeCompare(b.at))[0];
+  const firstImport = importAudit
+    ? { by: (parsed.users ?? []).find((u) => u.id === importAudit.userId)?.name || importAudit.username, at: importAudit.at, file: /from (.+?)( ·|$)/.exec(importAudit.detail)?.[1] ?? "upload" }
+    : null;
   return {
     ...seed,
     ...parsed,
@@ -302,6 +311,8 @@ function migrateState(parsed: Partial<AppState>): AppState {
     labourers: (parsed.labourers ?? seed.labourers).map((l) => ({
       ...l,
       contractorId: l.contractorId ?? "con-sge",
+      // Rows from the RIL upload before upload stamps existed (docs §24): credit the first import
+      ...(!l.upload && l.eic && firstImport ? { upload: firstImport } : {}),
     })),
     sites:
       parsed.sites && parsed.sites.length >= 6
@@ -332,7 +343,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         setState(migrateState(parsed));
       }
     } catch {
-      /* keep seed */
+      // Keep seed, but never let it overwrite saved data we failed to read: keep a copy
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) localStorage.setItem(`sge-backup-ops-${Date.now()}`, raw);
+      } catch {
+        /* storage full / blocked */
+      }
     }
     setHydrated(true);
   }, []);
@@ -1324,30 +1341,39 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
    * that Master Data doesn't have yet. Rows were checked by checkImport; EPs are
    * checked again here so nothing already used slips in.
    */
-  const importLabourers = useCallback((rows: Omit<Labourer, "id">[], newTrades: { id: string; label: string }[], fileName: string) => {
+  const importLabourers = useCallback((
+    rows: Omit<Labourer, "id">[],
+    newTrades: { id: string; label: string }[],
+    fileName: string,
+    updates: { id: string; patch: Partial<Labourer> }[] = []
+  ) => {
     const cur = stateRef.current;
-    if (!can(cur, "labourer", "create") && !can(cur, "master", "update")) return { ...DENIED, added: 0 };
-    if (!rows.length) return { ok: false, error: "Nothing to add", added: 0 };
+    if (!can(cur, "labourer", "create") && !can(cur, "labourer", "upload") && !can(cur, "master", "update")) return { ...DENIED, added: 0, updated: 0 };
+    if (!rows.length && !updates.length) return { ok: false, error: "Nothing to add", added: 0, updated: 0 };
+    const account = cur.users.find((u) => u.id === cur.currentAccountId);
+    const stamp = { by: account?.name || account?.username || "someone", at: new Date().toISOString(), file: fileName };
     const used = new Set(cur.labourers.flatMap((l) => [normalizeEp(l.epNumber), ...(l.epHistory ?? []).map((h) => normalizeEp(h.ep))]).filter(Boolean));
     const clash = rows.find((r) => used.has(normalizeEp(r.epNumber)));
-    if (clash) return { ok: false, error: `EP ${clash.epNumber} is already used — check the file again`, added: 0 };
-    const made = rows.map((r) => ({ ...r, id: uid("lb"), name: r.name.trim(), epNumber: normalizeEp(r.epNumber)! }));
+    if (clash) return { ok: false, error: `EP ${clash.epNumber} is already used — check the file again`, added: 0, updated: 0 };
+    const made = rows.map((r) => ({ ...r, id: uid("lb"), name: r.name.trim(), epNumber: normalizeEp(r.epNumber)!, upload: stamp }));
+    // RIL details refreshed for people already registered (pass dates, status, EIC, area)
+    const patchOf = new Map(updates.map((u) => [u.id, u.patch]));
     const trades = newTrades.filter((t) => !cur.tradeCatalogue.some((x) => x.id === t.id));
     setState((s) => {
       const next = {
         ...s,
-        labourers: [...made, ...s.labourers],
+        labourers: [...made, ...s.labourers.map((l) => (patchOf.has(l.id) ? { ...l, ...patchOf.get(l.id), upload: stamp } : l))],
         tradeCatalogue: [...s.tradeCatalogue, ...trades.map((t) => ({ id: t.id, label: t.label, subcategories: [], active: true, siteId: null }))],
       };
       return {
         ...next,
         auditLog: [
-          makeAudit(next, "labourer", "import", `${made.length} labourers from ${fileName}${trades.length ? ` · ${trades.length} new trades` : ""}`),
+          makeAudit(next, "labourer", "import", `${made.length} labourers added${updates.length ? `, ${updates.length} updated` : ""} from ${fileName}${trades.length ? ` · ${trades.length} new trades` : ""}`),
           ...s.auditLog,
         ],
       };
     });
-    return { ok: true, added: made.length };
+    return { ok: true, added: made.length, updated: updates.length };
   }, []);
 
   const upsertContractor = useCallback(async (row: Contractor) => {

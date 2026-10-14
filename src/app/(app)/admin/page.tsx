@@ -1,5 +1,6 @@
 "use client";
 
+import { PassExpiryPanel } from "@/components/hr/pass-expiry-panel";
 import { guarded } from "@/components/shared/require-module";
 import Link from "next/link";
 import {
@@ -33,6 +34,9 @@ function AdminHomePage() {
         title="Admin home"
         subtitle="Excel / paste upload and data entry across ACPL, JMS, rate cards, and master labour. Creates verification packages for SIC."
       />
+
+      {/* docs §24: RIL passes expiring within 10 days */}
+      <PassExpiryPanel />
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <KpiTile label="SIC DPR queue" value={String(pendingDpr)} tone="accent" />

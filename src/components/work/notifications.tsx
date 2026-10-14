@@ -217,7 +217,7 @@ function EventRow({ e, isNew, onClick, compact }: { e: WorkEvent; isNew: boolean
         {e.problem ? <span className="rounded-sm bg-[var(--sge-crit-wash)] px-1.5 text-[10px] font-bold uppercase text-[var(--sge-crit)]">Problem</span> : null}
       </div>
       <div className="text-xs text-[var(--sge-ink-3)]">
-        {e.detail} · {e.actorName} ({e.actorRole?.replace("_", " ")}){e.impersonatedBy ? ` via ${e.impersonatedBy}` : ""} · {e.day}
+        {e.detail} · {e.actorName}{e.actorRole ? ` (${e.actorRole.replace("_", " ")})` : ""}{e.impersonatedBy ? ` via ${e.impersonatedBy}` : ""} · {e.day}
       </div>
     </button>
   );

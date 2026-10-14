@@ -7,6 +7,8 @@
  * the same Name + Trade + Skill as someone registered is a "possible
  * duplicate" added only when the user ticks it.
  */
+import { parseDate, showDate } from "./gate-pass";
+import { realToday } from "./today";
 import { normalizeEp } from "./ep";
 import type { Labourer, Site, SkillLevel, StaffMember, TradeDefinition } from "./types";
 import type { Contractor } from "./master/types";
@@ -81,7 +83,7 @@ export function parseCsv(text: string): string[][] {
   return rows.filter((r) => r.some((x) => x.trim() !== ""));
 }
 
-type Col = "name" | "ep" | "trade" | "skill" | "contractor" | "site" | "supervisor" | "wage" | "eic" | "status" | "area";
+type Col = "name" | "ep" | "trade" | "skill" | "contractor" | "site" | "supervisor" | "wage" | "eic" | "status" | "area" | "validFrom" | "validTo";
 const HEADERS: Record<Col, string[]> = {
   name: ["name", "full name", "labourer name", "labour name", "ep name", "worker name"],
   ep: ["ep number", "ep no", "ep no.", "ep", "worker id", "ep_number"],
@@ -94,6 +96,8 @@ const HEADERS: Record<Col, string[]> = {
   eic: ["eic", "select eic", "ril eic"],
   status: ["ril status", "workman status", "pass status"],
   area: ["ril area", "area of movement", "area"],
+  validFrom: ["valid from", "pass valid from", "validity from", "pass start date", "start date", "issue date"],
+  validTo: ["valid to", "valid upto", "valid up to", "valid till", "validity to", "valid until", "expiry", "expiry date", "pass expiry", "pass expiry date", "pass end date", "end date"],
 };
 
 export interface ImportRow {
@@ -107,6 +111,10 @@ export interface ImportRow {
   /** Fine to add, but something must be filled in later (no crew, wage, Aadhaar, skill…) */
   notes: string[];
   possibleDuplicate?: string;
+  /** Already registered (same current EP) and the file changes its RIL details: applied as an update */
+  update?: { id: string; patch: Partial<Labourer>; changes: string[] };
+  /** Already registered and nothing new in this row: not uploaded (docs §24) */
+  alreadyIn?: string;
   /** Trade that isn't in Master Data yet (added only if the user agrees) */
   newTrade?: { id: string; label: string };
   labourer?: Omit<Labourer, "id">;
@@ -136,9 +144,10 @@ export function checkImport(table: string[][], ctx: ImportContext): { rows: Impo
   if (missingColumns.length) return { rows: [], missingColumns };
 
   const usedEp = new Map<string, string>();
+  const byCurrentEp = new Map<string, Labourer>();
   for (const l of ctx.labourers) {
     const cur = normalizeEp(l.epNumber);
-    if (cur) usedEp.set(cur, `${l.name} (current EP)`);
+    if (cur) byCurrentEp.set(cur, l);
     for (const h of l.epHistory ?? []) {
       const old = normalizeEp(h.ep);
       if (old) usedEp.set(old, `${l.name} (old EP until ${h.until})`);
@@ -160,9 +169,40 @@ export function checkImport(table: string[][], ctx: ImportContext): { rows: Impo
     if (!name) r.errors.push("Name is missing");
     if (!epRaw) r.errors.push("EP number is missing");
     else if (!ep) r.errors.push(`EP "${epRaw}" must be PP + 10 digits`);
-    else if (usedEp.has(ep)) r.errors.push(`EP ${ep} already belongs to ${usedEp.get(ep)}`);
     else if (seenEp.has(ep)) r.errors.push(`EP ${ep} is also on line ${seenEp.get(ep)}`);
+    else if (usedEp.has(ep)) r.errors.push(`EP ${ep} already belongs to ${usedEp.get(ep)}`);
     if (ep) seenEp.set(ep, seenEp.get(ep) ?? r.line);
+
+    const validFromRaw = get("validFrom");
+    const validToRaw = get("validTo");
+    const validFrom = parseDate(validFromRaw);
+    const validTo = parseDate(validToRaw);
+    if (validFrom === null) r.errors.push(`Valid-from "${validFromRaw}" isn't a date`);
+    if (validTo === null) r.errors.push(`Expiry "${validToRaw}" isn't a date`);
+    if (validFrom && validTo && validTo < validFrom) r.errors.push("Expiry is before valid-from");
+
+    // Someone already registered under this EP: refresh their RIL details, or say it's already in (docs §24)
+    const existing = ep && !r.errors.length ? byCurrentEp.get(ep) : undefined;
+    if (existing) {
+      const status = get("status");
+      const fresh: Partial<Labourer> = {
+        ...(get("eic") ? { eic: get("eic") } : {}),
+        ...(status ? { rilStatus: status, ...(activeFromRilStatus(status) ? {} : { active: false }) } : {}),
+        ...(get("area") ? { rilArea: get("area") } : {}),
+        ...(validFrom ? { passValidFrom: validFrom } : {}),
+        ...(validTo ? { passExpiry: validTo } : {}),
+      };
+      const names: Record<string, string> = { eic: "EIC", rilStatus: "pass status", rilArea: "area", passValidFrom: "valid-from", passExpiry: "expiry", active: "inactive (Terminated)" };
+      const patch = Object.fromEntries(Object.entries(fresh).filter(([k, v]) => existing[k as keyof Labourer] !== v)) as Partial<Labourer>;
+      const changes = Object.entries(patch).map(([k, v]) => (k === "active" ? names[k] : `${names[k]} → ${k.startsWith("pass") ? showDate(String(v)) : v}`));
+      if (changes.length) r.update = { id: existing.id, patch, changes };
+      else
+        r.alreadyIn = existing.upload
+          ? `Not uploaded — already uploaded by ${existing.upload.by} on ${showDate(realToday(new Date(existing.upload.at)))}`
+          : "Not uploaded — already in the register (added by hand)";
+      r.siteCode = ctx.sites.find((s) => s.id === existing.siteId)?.code ?? "";
+      return r;
+    }
 
     // Trade: Master Data, or a new one when the user allows it
     let tradeId: string | undefined;
@@ -233,6 +273,8 @@ export function checkImport(table: string[][], ctx: ImportContext): { rows: Impo
         ...(get("eic") ? { eic: get("eic") } : {}),
         ...(status ? { rilStatus: status } : {}),
         ...(area ? { rilArea: area } : {}),
+        ...(validFrom ? { passValidFrom: validFrom } : {}),
+        ...(validTo ? { passExpiry: validTo } : {}),
       };
     }
     return r;

@@ -20,6 +20,7 @@ import { effectivePermission } from "../permissions";
 import { dprCrew, validateDprForSubmit } from "../dpr-validate";
 import type { DprSubmitterType, ModuleId, PermissionAction } from "../types";
 import { STAGES } from "./types";
+import { passesNeedingAction, showDate } from "../gate-pass";
 
 type Result = { ok: true; id?: string } | { ok: false; error: string };
 
@@ -136,7 +137,9 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
   const log = useCallback((e: Omit<WorkEvent, "id" | "seq" | "at" | "day" | "actorName" | "actorRole">) => {
     setWork((s) => {
       const seq = (s.events[s.events.length - 1]?.seq ?? 0) + 1;
-      const ev: WorkEvent = { ...e, id: `ev-${seq}`, seq, at: new Date().toISOString(), day: today(), actorName: actor.current.name, actorRole: actor.current.role, impersonatedBy: actor.current.impersonatedBy };
+      // Pass alerts come from the clock, not from whoever happened to open the app (docs §24)
+      const system = e.kind === "pass_expiring";
+      const ev: WorkEvent = { ...e, id: `ev-${seq}`, seq, at: new Date().toISOString(), day: today(), actorName: system ? "System" : actor.current.name, actorRole: system ? null : actor.current.role, impersonatedBy: system ? undefined : actor.current.impersonatedBy };
       return { ...s, events: [...s.events, ev] };
     });
     // Merge plan Step 11: the same event goes to the shared audit_log (Test tools reset never touches it)
@@ -178,6 +181,29 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
       /* storage full / blocked */
     }
   }, [work, hydrated]);
+
+  // docs §24: a RIL pass within 10 days of expiry (or expired) alerts HR, Admin and the
+  // labourer's supervisor once per pass — a new expiry date from the RIL upload alerts again
+  const passLabourers = fullState.labourers;
+  useEffect(() => {
+    if (!hydrated) return;
+    const sent = new Set(ref.current.events.filter((e) => e.kind === "pass_expiring").map((e) => e.refId));
+    for (const p of passesNeedingAction(passLabourers, today())) {
+      const l = p.labourer;
+      const refId = `${l.id}:${l.passExpiry}`;
+      if (sent.has(refId)) continue;
+      log({
+        kind: "pass_expiring",
+        siteId: l.siteId,
+        subjectStaffId: l.supervisorId || undefined,
+        problem: p.state === "expired",
+        title: p.state === "expired" ? `${l.name}: RIL pass expired` : `${l.name}: RIL pass expires in ${p.days} day${p.days === 1 ? "" : "s"}`,
+        detail: `EP ${l.epNumber} · expiry ${showDate(l.passExpiry)} · renew / reissue`,
+        tab: "/home",
+        refId,
+      });
+    }
+  }, [hydrated, passLabourers, log]);
 
   const addPlanLine = useCallback<WorkApi["addPlanLine"]>((input) => {
     if (!rights().canPlan) return NOT_ALLOWED;

@@ -1,5 +1,6 @@
 "use client";
 
+import { PassExpiryPanel } from "@/components/hr/pass-expiry-panel";
 import { guarded } from "@/components/shared/require-module";
 import { today as todayDate } from "@/lib/today";
 import Link from "next/link";
@@ -57,6 +58,9 @@ function HrHomePage() {
           </Link>
         }
       />
+
+      {/* docs §24: RIL passes expiring within 10 days */}
+      <PassExpiryPanel />
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <KpiTile label="Present today" value={`${present}`} tone="ok" />

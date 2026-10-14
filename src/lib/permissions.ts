@@ -81,6 +81,7 @@ const ROLE_MATRIX: Record<RoleId, Partial<Record<ModuleId, PermissionAction[]>>>
   },
   admin: {
     admin: ["view", "create", "update", "upload"],
+    labourer: ["upload"],
     dpr: ["view", "create", "update", "upload", "submit"],
     acpl: ["view", "upload"],
     jms: ["view", "upload", "update"],
@@ -92,7 +93,8 @@ const ROLE_MATRIX: Record<RoleId, Partial<Record<ModuleId, PermissionAction[]>>>
   },
   hr: {
     hr: ["view", "create", "update"],
-    labourer: ["view", "create", "update"],
+    // HR and Admin upload RIL's export (pass dates) and the monthly pay file (docs §24)
+    labourer: ["view", "create", "update", "upload"],
     acpl: ["view", "upload", "update"],
     calculators: ["view"],
     submissions: ["view"],

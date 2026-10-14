@@ -287,6 +287,18 @@ export interface Labourer {
   rilStatus?: string;
   /** RIL "Area Of Movement", e.g. "Refining - DTA-ISBL" */
   rilArea?: string;
+  /** RIL pass validity from the RIL export (YYYY-MM-DD); HR / Admin / supervisor alerted before expiry (docs §24) */
+  passValidFrom?: string;
+  passExpiry?: string;
+  /** Last upload that added or changed this row: shown when the same data is uploaded again (docs §24) */
+  upload?: UploadStamp;
+}
+
+/** Who uploaded a row, when and from which file (every upload checks for duplicates, docs §24) */
+export interface UploadStamp {
+  by: string;
+  at: string;
+  file: string;
 }
 
 export type SkillLevel = "highly_skilled" | "skilled" | "semi_skilled" | "unskilled";
@@ -587,7 +599,8 @@ export interface WageLedgerEntry {
   labourerId?: string;
   staffId?: string;
   date: string;
-  kind: "salary" | "bonus" | "advance" | "ot" | "incentive";
+  /** Pay lines; pf … deduction come from the monthly pay upload (docs §24) */
+  kind: "salary" | "bonus" | "advance" | "ot" | "incentive" | "pf" | "room_rent" | "travel" | "food" | "deduction";
   amount: number;
   note: string;
   flaggedToSic?: boolean;

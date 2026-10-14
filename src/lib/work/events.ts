@@ -37,7 +37,9 @@ export type EventKind =
   | "crew_changed"
   | "crew_requested"
   | "crew_released"
-  | "crew_decided";
+  | "crew_decided"
+  // RIL gate pass (docs §24)
+  | "pass_expiring";
 
 export interface WorkEvent {
   id: string;
@@ -73,7 +75,7 @@ export interface Viewer {
 }
 
 /** Events that need someone to act, or tell the submitter the outcome: instant. */
-export const INSTANT: EventKind[] = ["job_closed", "jms_confirmed", "job_sent_back", "dpr_submitted", "dpr_approved", "dpr_sent_back", "crew_requested", "crew_released", "crew_decided"];
+export const INSTANT: EventKind[] = ["job_closed", "jms_confirmed", "job_sent_back", "dpr_submitted", "dpr_approved", "dpr_sent_back", "crew_requested", "crew_released", "crew_decided", "pass_expiring"];
 
 export const KIND_LABEL: Record<EventKind, string> = {
   dpr_added: "DPR entry",
@@ -107,6 +109,7 @@ export const KIND_LABEL: Record<EventKind, string> = {
   crew_requested: "Crew request",
   crew_released: "Labourer released",
   crew_decided: "Crew request decided",
+  pass_expiring: "Gate pass expiring",
 };
 
 const onSite = (v: Viewer, siteId: string) => v.siteIds.length === 0 || v.siteIds.includes(siteId);
@@ -169,6 +172,9 @@ export function isFor(e: WorkEvent, v: Viewer): boolean {
     case "crew_released":
     case "crew_decided":
       return mine || v.role === "sic";
+    // docs §24: HR renews; Admin and the labourer's supervisor are told too
+    case "pass_expiring":
+      return mine || v.role === "hr" || v.role === "admin";
   }
 }
 

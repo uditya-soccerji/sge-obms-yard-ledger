@@ -279,3 +279,12 @@ Screenshots, when saved as files, go in `docs/bugs/` as `B<nn>-<n>.png`. Never i
 - DPR shows a message when the supervisor has no crew yet; trade shows its name, not its id.
 - Checked locally: SIC assigned 2 labourers (crew 24 → 26); the supervisor's DPR lists the imported labourers; a submitted DPR recorded attendance for 3 (audit "attendance recorded at submit for 3"). `tsc` + `eslint src` clean.
 
+## Access plan round 1 — step 1 (branch `feat/access-round-1`, 2026-10-15)
+Rules in `rules-decisions.md` §24.
+- Labourer profile: month picker; Present / Absent / Leave / OT-hour tiles; month pay with empty lines hidden; pass valid-from / expiry with days-left; equipment expiry; `?id=` opens a profile from the pass list.
+- RIL export upload (HR, Admin, from their desks): Valid From / Valid To read in common date formats; existing people updated, unchanged rows "Not uploaded — already uploaded by X on date". Upload stamps on every row.
+- Pass alerts: HR, Admin and the supervisor are notified 10 days before expiry (from "System"); "gate passes to renew" panel on HR, Admin and Supervisor homes (supervisor sees his crew only). HR has the bell now.
+- Safety: if saved data can't be read, the app keeps a backup copy instead of overwriting it (`sge-backup-ops-*`).
+- Checked locally as HR, Admin and Supervisor (V. Chauhan): 3 updated, 1 bad date refused, re-upload says already uploaded by S. Patel; pay ₹7,150 + ₹500 − ₹6,572 = ₹1,078 on test data. `tsc` + `eslint src` clean.
+- Note: the local test data was found reset to the seed on 2026-10-15 (cause unknown); the owner's labourer file was re-imported (1,815, the 5 held still held).
+
