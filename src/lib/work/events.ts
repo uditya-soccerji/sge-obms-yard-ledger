@@ -51,7 +51,8 @@ export type EventKind =
   | "job_plan_decided"
   | "jms_admin_pending"
   | "jms_admin_approved"
-  | "jms_returned";
+  | "jms_returned"
+  | "pay_uploaded";
 
 export interface WorkEvent {
   id: string;
@@ -132,9 +133,11 @@ export const KIND_LABEL: Record<EventKind, string> = {
   jms_admin_pending: "JMS for Admin",
   jms_admin_approved: "JMS approved by Admin",
   jms_returned: "JMS sent back",
+  pay_uploaded: "Monthly pay uploaded",
 };
 
-const onSite = (v: Viewer, siteId: string) => v.siteIds.length === 0 || v.siteIds.includes(siteId);
+// Company-wide events (no site, e.g. the monthly pay upload) reach every viewer of the right role
+const onSite = (v: Viewer, siteId: string) => !siteId || v.siteIds.length === 0 || v.siteIds.includes(siteId);
 
 /** Does this viewer get a notification for this event? (docs §19) */
 export function isFor(e: WorkEvent, v: Viewer): boolean {
@@ -221,6 +224,9 @@ export function isFor(e: WorkEvent, v: Viewer): boolean {
       return mine || v.role === "finance" || v.role === "sic";
     case "jms_returned":
       return mine || v.role === "sic";
+    // docs §24: Admin / HR upload the month's pay; Finance is told
+    case "pay_uploaded":
+      return v.role === "finance";
   }
 }
 

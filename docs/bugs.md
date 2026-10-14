@@ -311,3 +311,8 @@ Rules in `rules-decisions.md` §24.
 - Admin role gets `jms: approve`. Older JMS rows (no Admin status) count as approved.
 - Checked locally on the demo data (demo date 2026-09-28): SIC confirmed J-DTA-0134 → Admin queue; JMS no. 12345 refused, 2741999 + ₹23,000 accepted → Finance bell "₹23,000 (worked out ₹23,208.12) · now with Finance" and Payments row. K. Solanki submitted plan J-DTA-0136 (300 m² by 2026-10-10) → SIC bell → approved ("day 1 of 13"). End job with 2026-08-01 refused (DPR lines up to 2026-09-18); 2026-09-20 accepted. Not run: the Admin send-back. `tsc` + `eslint src` clean.
 
+## Access plan round 1 — step 6: monthly pay upload (2026-10-15)
+- "Monthly pay upload" panel on HR and Admin homes (`lib/pay-import.ts`, `components/hr/pay-upload.tsx`): template download; headers by name (Wage/Salary, OT, Bonus, Incentive, Advance, PF/EPF, Room rent, Travel, Food, Other deductions); month as 2026-10, 10/2026 or Oct 2026; each line new / changed (shows the old amount) / already uploaded (shows by whom); bad EP, bad month, duplicate person+month refused. Finance gets "Monthly pay uploaded" (company-wide events now pass the bell's site filter).
+- Waiting on the owner's real pay file to confirm the column names.
+- Checked locally as HR: SOURAV MAHATO Oct 2026 → Wage ₹7,150 new, Food ₹1,500 → ₹1,600 changed, 4 lines already in; NOBODY's EP and month "13/2026" refused. Profile: ₹7,150 + ₹500 − ₹6,672 = ₹978 net. Finance's bell summary shows the upload. `tsc` + `eslint src` clean.
+

@@ -1,5 +1,6 @@
 "use client";
 
+import { PayUploadPanel } from "@/components/hr/pay-upload";
 import { JmsAdminQueue } from "@/components/work/jms-admin-queue";
 import { PassExpiryPanel } from "@/components/hr/pass-expiry-panel";
 import { guarded } from "@/components/shared/require-module";
@@ -40,6 +41,8 @@ function AdminHomePage() {
       {/* docs §24: JMS waiting for the Admin's number and amount */}
       <JmsAdminQueue />
       <PassExpiryPanel />
+      {/* docs §24: monthly pay upload (Admin / HR); Finance is told */}
+      <PayUploadPanel />
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <KpiTile label="SIC DPR queue" value={String(pendingDpr)} tone="accent" />

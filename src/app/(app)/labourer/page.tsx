@@ -27,7 +27,7 @@ import { Suspense, useMemo, useState } from "react";
 
 /** Pay lines on the profile, in this order; empty ones are hidden (docs §24) */
 const EARN: { kind: WageLedgerEntry["kind"]; label: string }[] = [
-  { kind: "salary", label: "Salary" },
+  { kind: "salary", label: "Wage" },
   { kind: "ot", label: "OT" },
   { kind: "bonus", label: "Bonus" },
   { kind: "incentive", label: "Incentive" },
@@ -83,7 +83,8 @@ function LabourerHomePage() {
   const otTotal = inMonth.reduce((n, a) => n + otHours(a.inTime, a.outTime), 0);
   const monthLedger = ledger.filter((w) => w.date.startsWith(month));
   const sumOf = (k: WageLedgerEntry["kind"]) => monthLedger.filter((w) => w.kind === k).reduce((n, w) => n + w.amount, 0);
-  const wage = labourer ? labourer.wageDaily * presentDays : 0;
+  // An uploaded wage for the month (docs §24) replaces the days × rate estimate
+  const wage = labourer && sumOf("salary") === 0 ? labourer.wageDaily * presentDays : 0;
   const earnLines = [
     ...(wage > 0 ? [{ label: `Wage (${presentDays} days × ${formatINR(labourer!.wageDaily)})`, amount: wage }] : []),
     ...EARN.map((e) => ({ label: e.label, amount: sumOf(e.kind) })),

@@ -164,6 +164,10 @@ interface StoreApi {
     >
   ) => { ok: boolean; error?: string };
   /** Bulk add from the CSV upload, with any new trades (B09) */
+  importPay: (
+    rows: { labourerId: string; month: string; lines: { kind: WageLedgerEntry["kind"]; amount: number; state: "new" | "changed" | "same"; existingId?: string }[] }[],
+    fileName: string
+  ) => { ok: boolean; error?: string; added: number; changed: number };
   importLabourers: (
     rows: Omit<Labourer, "id">[],
     newTrades: { id: string; label: string }[],
@@ -1557,6 +1561,32 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     return id;
   }, []);
 
+  /** docs §24: monthly pay upload — add new lines, change lines whose amount differs; Admin / HR */
+  const importPay = useCallback((rows: { labourerId: string; month: string; lines: { kind: WageLedgerEntry["kind"]; amount: number; state: "new" | "changed" | "same"; existingId?: string }[] }[], fileName: string) => {
+    const cur = stateRef.current;
+    if (!can(cur, "labourer", "upload")) return { ...DENIED, added: 0, changed: 0 };
+    const account = cur.users.find((u) => u.id === cur.currentAccountId);
+    const stamp = { by: account?.name || account?.username || "someone", at: new Date().toISOString(), file: fileName };
+    const adds: WageLedgerEntry[] = [];
+    const changes = new Map<string, number>();
+    for (const r of rows) {
+      const lab = cur.labourers.find((l) => l.id === r.labourerId);
+      for (const x of r.lines) {
+        if (x.state === "new") adds.push({ id: uid("wl"), labourerId: r.labourerId, date: `${r.month}-01`, kind: x.kind, amount: x.amount, note: `Pay upload ${r.month}`, siteId: lab?.siteId, upload: stamp });
+        else if (x.state === "changed" && x.existingId) changes.set(x.existingId, x.amount);
+      }
+    }
+    if (!adds.length && !changes.size) return { ok: false, error: "Nothing new — every line is already uploaded", added: 0, changed: 0 };
+    setState((s) => {
+      const next = {
+        ...s,
+        wageLedger: [...adds, ...s.wageLedger.map((w) => (changes.has(w.id) ? { ...w, amount: changes.get(w.id)!, upload: stamp, note: `${w.note} · changed by pay upload` } : w))],
+      };
+      return { ...next, auditLog: [makeAudit(next, "labourer", "pay_upload", `${adds.length} pay lines added, ${changes.size} changed from ${fileName}`), ...s.auditLog] };
+    });
+    return { ok: true, added: adds.length, changed: changes.size };
+  }, []);
+
   const addWageEntry = useCallback((entry: Omit<WageLedgerEntry, "id">) => {
     setState((s) => {
       if (!can(s, "finance", "create") || !(entry.amount > 0)) return s;
@@ -2057,6 +2087,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       updateLabourer,
       addLabourer,
       importLabourers,
+      importPay,
       removeLabourer,
       upsertContractor,
       setContractorActive,
@@ -2112,6 +2143,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       updateLabourer,
       addLabourer,
       importLabourers,
+      importPay,
       removeLabourer,
       upsertContractor,
       setContractorActive,

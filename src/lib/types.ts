@@ -620,6 +620,8 @@ export interface WageLedgerEntry {
   flaggedToSic?: boolean;
   /** Site this row belongs to (unset = company-wide). */
   siteId?: string;
+  /** Set when the line came from the monthly pay upload (docs §24) */
+  upload?: UploadStamp;
 }
 
 export interface FinanceAlert {
