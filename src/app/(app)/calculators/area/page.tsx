@@ -5,7 +5,17 @@ import { useState } from "react";
 import { Panel, SectionHeader } from "@/components/shared/ui-bits";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Button } from "@/components/ui/button";
 import { areaFromDims } from "@/lib/paint-calc";
+
+function PdfButton({ href }: { href: string }) {
+  // docs §24: the working and result, with the user's profile, saved as PDF
+  return (
+    <a href={href} target="_blank" rel="noreferrer">
+      <Button size="sm" variant="outline">Download PDF</Button>
+    </a>
+  );
+}
 
 function AreaScopePage() {
   const [length, setLength] = useState(40);
@@ -18,6 +28,7 @@ function AreaScopePage() {
       <SectionHeader
         title="Area & scope"
         subtitle="Quick scope take-off for painting / blasting areas before paint calc or DPR."
+        action={<PdfButton href={`/print/calc?type=area&l=${length}&w=${width}&f=${faces}`} />}
       />
       <Panel className="max-w-lg space-y-4">
         <div className="grid grid-cols-3 gap-3">

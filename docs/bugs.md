@@ -299,3 +299,8 @@ Rules in `rules-decisions.md` §24.
 - A request for someone on another crew is flagged; that supervisor, the SIC, Admin and HR are notified. SIC approval after the current supervisor's release is unchanged (§23).
 - Checked locally: K. Solanki (no tick) asked for SOURAV MAHATO from V. Chauhan's crew → HR's bell shows "K. Solanki asks for SOURAV MAHATO · Now on V. Chauhan's crew — they must release first". `tsc` + `eslint src` clean.
 
+## Access plan round 1 — step 4: calculators + PDF (2026-10-15)
+- Estimator, Paint calc, Area and Scaffold calc tabs for Supervisor, SIC, Admin, Store and Safety.
+- "Download PDF" on each calculator → `/print/calc?...` (inputs only in the URL, recalculated with the same functions): prepared-by profile, inputs, step-by-step working, result, notes, signature line.
+- Checked locally as Store (A. Joshi): all four tabs shown; paint MPS 2, 1,000 m², brush, 5 % → 0.237 × 1,000 × 1.05 = 248.85 L primer (+24.89 L thinner) etc.; estimate structures 500 m² → ₹3,15,590 at the PO rate, 7.5 crew-days, 225 L. `tsc` + `eslint src` clean.
+
