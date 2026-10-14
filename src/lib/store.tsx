@@ -221,7 +221,7 @@ interface StoreApi {
   ) => void;
 }
 
-export type RequestAction = "approve" | "start" | "fulfil" | "part_fill" | "cancel" | "receive";
+export type RequestAction = "approve" | "start" | "fulfil" | "part_fill" | "cancel" | "receive" | "reject" | "override";
 
 const StoreContext = createContext<StoreApi | null>(null);
 
@@ -792,7 +792,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         if (equipmentRequests.some((e) => e.sourceDprId === report.id && e.description === req.description)) continue;
         const now = new Date().toISOString();
         equipmentRequests = [
-          { id: uid("er"), createdAt: now, updatedAt: now, createdBy: report.submitterId, siteId: report.siteId, plant: report.plant, kind: req.kind, description: req.description, qty: req.qty, urgent: req.urgent, status: "open", sourceDprId: report.id },
+          { id: uid("er"), createdAt: now, updatedAt: now, createdBy: report.submitterId, siteId: report.siteId, plant: report.plant, kind: req.kind, description: req.description, qty: req.qty, urgent: req.urgent || req.reason === "urgent", reason: req.reason, status: "open", sourceDprId: report.id },
           ...equipmentRequests,
         ];
       }
@@ -1830,13 +1830,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     if (!r) return { ok: false, error: "Request not found" };
     const why = note?.trim();
     const mine = r.createdBy === (cur.currentUserId ?? cur.currentAccountId);
-    // Who may do what, from which status (docs §9)
+    // Who may do what, from which status (docs §9, changed by §24: requests go straight to the
+    // store with the SIC told; the store may reject, and the SIC may override a rejection)
+    const store = can(cur, "requests", "update");
+    const sic = can(cur, "requests", "approve");
     const rules: Record<RequestAction, { from: EquipmentRequestStatus[]; to: EquipmentRequestStatus; allowed: boolean; needsNote?: boolean }> = {
-      approve: { from: ["open"], to: "sic_approved", allowed: can(cur, "requests", "approve") },
-      start: { from: ["sic_approved"], to: "fulfilling", allowed: can(cur, "requests", "update") },
-      fulfil: { from: ["sic_approved", "fulfilling"], to: "fulfilled", allowed: can(cur, "requests", "update") },
-      part_fill: { from: ["sic_approved", "fulfilling"], to: "part_filled", allowed: can(cur, "requests", "update"), needsNote: true },
-      cancel: { from: ["open", "sic_approved", "fulfilling"], to: "cancelled", allowed: can(cur, "requests", "approve") || can(cur, "requests", "update") || mine, needsNote: true },
+      approve: { from: ["open"], to: "sic_approved", allowed: sic },
+      start: { from: ["open", "sic_approved"], to: "fulfilling", allowed: store },
+      fulfil: { from: ["open", "sic_approved", "fulfilling"], to: "fulfilled", allowed: store },
+      part_fill: { from: ["open", "sic_approved", "fulfilling"], to: "part_filled", allowed: store, needsNote: true },
+      reject: { from: ["open", "fulfilling"], to: "rejected", allowed: store, needsNote: true },
+      override: { from: ["rejected"], to: "sic_approved", allowed: sic },
+      cancel: { from: ["open", "sic_approved", "fulfilling", "rejected"], to: "cancelled", allowed: sic || store || mine, needsNote: true },
       receive: { from: ["fulfilled", "part_filled"], to: "received", allowed: mine || cur.currentRole === "super_admin" },
     };
     const rule = rules[action];
@@ -1853,6 +1858,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         if (action === "fulfil" || action === "part_fill") Object.assign(next, { fulfilledBy: by, fulfilledAt: now, fulfillNote: why || "Issued from store" });
         if (action === "part_fill" || action === "cancel") next.cancelNote = why;
         if (action === "receive") next.receivedAt = now;
+        if (action === "reject") Object.assign(next, { rejectedBy: by, rejectedAt: now, rejectNote: why });
+        if (action === "override") Object.assign(next, { overriddenBy: by, overriddenAt: now, overrideNote: why || undefined });
         return next;
       });
       const next = { ...s, equipmentRequests };

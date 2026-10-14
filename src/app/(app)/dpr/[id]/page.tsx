@@ -134,6 +134,12 @@ function DprDetailPage() {
             </StatusPill>
             {isLate(doc) ? <StatusPill tone="warn">late · due {deadlineOf(doc).slice(0, 10)} 10:00</StatusPill> : null}
             {doc.enteredBy === "admin" ? <StatusPill>entered by Admin</StatusPill> : null}
+            {/* docs §24: the supervisor keeps a PDF of the submitted DPR as proof */}
+            {doc.status !== "draft" ? (
+              <a href={`/print/dpr/${doc.id}`} target="_blank" rel="noreferrer">
+                <Button size="sm">Download PDF</Button>
+              </a>
+            ) : null}
             <Link href="/dpr">
               <Button size="sm" variant="outline">
                 Desk

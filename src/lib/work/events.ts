@@ -39,7 +39,13 @@ export type EventKind =
   | "crew_released"
   | "crew_decided"
   // RIL gate pass (docs §24)
-  | "pass_expiring";
+  | "pass_expiring"
+  // Store requests (docs §24)
+  | "request_raised"
+  | "request_rejected"
+  | "request_overridden"
+  | "request_done"
+  | "dpr_issue";
 
 export interface WorkEvent {
   id: string;
@@ -75,7 +81,7 @@ export interface Viewer {
 }
 
 /** Events that need someone to act, or tell the submitter the outcome: instant. */
-export const INSTANT: EventKind[] = ["job_closed", "jms_confirmed", "job_sent_back", "dpr_submitted", "dpr_approved", "dpr_sent_back", "crew_requested", "crew_released", "crew_decided", "pass_expiring"];
+export const INSTANT: EventKind[] = ["job_closed", "jms_confirmed", "job_sent_back", "dpr_submitted", "dpr_approved", "dpr_sent_back", "crew_requested", "crew_released", "crew_decided", "pass_expiring", "request_rejected", "request_overridden", "dpr_issue"];
 
 export const KIND_LABEL: Record<EventKind, string> = {
   dpr_added: "DPR entry",
@@ -110,6 +116,11 @@ export const KIND_LABEL: Record<EventKind, string> = {
   crew_released: "Labourer released",
   crew_decided: "Crew request decided",
   pass_expiring: "Gate pass expiring",
+  request_raised: "Store request",
+  request_rejected: "Store rejected a request",
+  request_overridden: "SIC overrode the store",
+  request_done: "Request fulfilled",
+  dpr_issue: "Issue on site",
 };
 
 const onSite = (v: Viewer, siteId: string) => v.siteIds.length === 0 || v.siteIds.includes(siteId);
@@ -175,6 +186,18 @@ export function isFor(e: WorkEvent, v: Viewer): boolean {
     // docs §24: HR renews; Admin and the labourer's supervisor are told too
     case "pass_expiring":
       return mine || v.role === "hr" || v.role === "admin";
+    // docs §24: requests go straight to the store and the SIC is told; a rejection is urgent
+    // for the SIC; an override goes back to the store; the requester hears the outcome
+    case "request_raised":
+      return v.role === "store" || v.role === "sic";
+    case "request_rejected":
+      return mine || v.role === "sic";
+    case "request_overridden":
+      return mine || v.role === "store";
+    case "request_done":
+      return mine;
+    case "dpr_issue":
+      return v.role === "sic";
   }
 }
 

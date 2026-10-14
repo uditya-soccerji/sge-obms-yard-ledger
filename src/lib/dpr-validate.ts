@@ -46,6 +46,12 @@ export function validateDprForSubmit(
     }
   }
 
+  // docs §24: every store request says what is needed and why
+  doc.requests.forEach((q, i) => {
+    if (!q.description.trim()) out.push(`Request ${i + 1}: say what is needed`);
+    if (!q.reason) out.push(`Request ${i + 1}: pick a reason (urgent, damaged, required, replacement, scrapped, expired)`);
+  });
+
   if (doc.submitterType === "painting_blasting") {
     // Quantities are the job lines (Work entries) under this report
     const total = entries.reduce((s, e) => s + entryArea(e), 0);

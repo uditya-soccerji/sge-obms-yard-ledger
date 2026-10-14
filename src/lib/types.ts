@@ -92,7 +92,12 @@ export type EquipmentRequestStatus =
   | "fulfilled"
   | "part_filled"
   | "received"
-  | "cancelled";
+  | "cancelled"
+  /** Store said no; the SIC is alerted and may override (docs §24) */
+  | "rejected";
+
+/** Why a supervisor asks the store (docs §24) */
+export type RequestReason = "urgent" | "damaged" | "required" | "replacement" | "scrapped" | "expired";
 
 export interface EquipmentRequest {
   id: string;
@@ -115,6 +120,14 @@ export interface EquipmentRequest {
   receivedAt?: string;
   /** Why it was cancelled or only part-filled (required for those, docs §9) */
   cancelNote?: string;
+  reason?: RequestReason;
+  /** Store rejection, and the SIC's override of it (docs §24) */
+  rejectedBy?: string;
+  rejectedAt?: string;
+  rejectNote?: string;
+  overriddenBy?: string;
+  overriddenAt?: string;
+  overrideNote?: string;
 }
 
 export type SupervisorType =
@@ -358,6 +371,7 @@ export interface DprRequest {
   description: string;
   qty?: number;
   urgent?: boolean;
+  reason?: RequestReason;
 }
 
 export interface DprScaffoldWorkLine {

@@ -15,6 +15,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { REQUEST_REASONS } from "@/lib/requests";
 import { SafetyDprForm } from "@/components/dpr/safety-dpr-form";
 import type {
   AttendanceStatus,
@@ -180,6 +181,19 @@ export function DprForm({
           />
         </div>
         <div className="mt-3">
+          {/* docs §24: problems on site go to the SIC as an alert when the DPR is submitted */}
+          <Label htmlFor="dpr-issues">Issues on site (the SIC is alerted)</Label>
+          <Textarea
+            id="dpr-issues"
+            className="mt-1"
+            disabled={readOnly}
+            placeholder="e.g. compressor down 2 hrs, permit delayed, short of thinner — leave empty if none"
+            value={value.issues ?? ""}
+            onChange={(e) => onChange({ ...value, issues: e.target.value })}
+            rows={2}
+          />
+        </div>
+        <div className="mt-3">
           <Label>Next-day plan</Label>
           <Textarea
             className="mt-1"
@@ -306,7 +320,7 @@ export function DprForm({
       {value.submitterType !== "safety" ? (
       <Panel>
         <h3 className="mb-3 font-heading text-sm font-bold uppercase tracking-wide text-[var(--sge-ink-3)]">
-          Equipment assigned
+          Equipment &amp; material on crew
         </h3>
         <div className="space-y-2">
           {equipment.map((eq) => {
@@ -362,7 +376,7 @@ export function DprForm({
       <Panel>
         <div className="mb-3 flex items-center justify-between">
           <h3 className="font-heading text-sm font-bold uppercase tracking-wide text-[var(--sge-ink-3)]">
-            Requests (spare / equipment / material)
+            Requests to the store (spare / equipment / material)
           </h3>
           {!readOnly ? (
             <Button size="sm" variant="outline" type="button" onClick={addRequest}>
@@ -377,7 +391,7 @@ export function DprForm({
             {value.requests.map((r, idx) => (
               <div
                 key={r.id}
-                className="grid gap-2 rounded-md border border-[var(--sge-line)] p-2 sm:grid-cols-5"
+                className="grid gap-2 rounded-md border border-[var(--sge-line)] p-2 sm:grid-cols-6"
               >
                 <Select
                   disabled={readOnly}
@@ -404,6 +418,24 @@ export function DprForm({
                     )}
                   </SelectContent>
                 </Select>
+                <select
+                  aria-label={`Reason for request ${idx + 1}`}
+                  disabled={readOnly}
+                  className="h-8 rounded-md border border-[var(--sge-line)] bg-[var(--sge-paper)] px-2 text-xs"
+                  value={r.reason ?? ""}
+                  onChange={(e) => {
+                    const reason = (e.target.value || undefined) as DprRequest["reason"];
+                    const requests = value.requests.map((x, i) => (i === idx ? { ...x, reason, urgent: reason === "urgent" } : x));
+                    onChange({ ...value, requests });
+                  }}
+                >
+                  <option value="">Reason…</option>
+                  {REQUEST_REASONS.map((x) => (
+                    <option key={x.value} value={x.value}>
+                      {x.label}
+                    </option>
+                  ))}
+                </select>
                 <Input
                   disabled={readOnly}
                   className="sm:col-span-2"

@@ -288,3 +288,9 @@ Rules in `rules-decisions.md` §24.
 - Checked locally as HR, Admin and Supervisor (V. Chauhan): 3 updated, 1 bad date refused, re-upload says already uploaded by S. Patel; pay ₹7,150 + ₹500 − ₹6,572 = ₹1,078 on test data. `tsc` + `eslint src` clean.
 - Note: the local test data was found reset to the seed on 2026-10-15 (cause unknown); the owner's labourer file was re-imported (1,815, the 5 held still held).
 
+## Access plan round 1 — step 2: Supervisor DPR + store requests (2026-10-15)
+- DPR: "Issues on site" box (the SIC gets a problem alert on submit); "Equipment & material on crew"; each store request needs a **reason** (Urgent, Damaged, Required, Replacement, Scrapped, Expired) and a description, checked at submit.
+- Requests (§24 replaces §9's SIC approval): a request goes straight to the store, the SIC and store are notified (urgent = instant). The store fulfils, part-fills or **rejects** (with a note); a rejection is an urgent alert to the SIC, who can **override** (store must fulfil). Rejected and urgent requests sort to the top. The new-request form on Requests uses the same reasons.
+- **Download PDF** on a submitted DPR (`/print/dpr/<id>`, browser "Save as PDF"): header, work / scaffold lines, crew attendance with EP and OT, equipment, requests, issues, SIC review, "proof of submission" footer.
+- Checked locally: V. Chauhan submitted a DPR (25 crew, 1 urgent request, 1 issue) → SIC bell showed submit, urgent request and issue; store (A. Joshi) rejected "Out of thinner until Friday" → SIC got the urgent alert and overrode → status "SIC override — store to fulfil". PDF page renders. `tsc` + `eslint src` clean.
+

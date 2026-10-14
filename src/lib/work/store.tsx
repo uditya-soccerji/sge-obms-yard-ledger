@@ -485,6 +485,12 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
     mainActs.current.applyDprAttendance(sent);
     const late = isLate(sent);
     log({ kind: "dpr_submitted", problem: late, siteId: r.siteId, subjectStaffId: r.submitterId, title: `DPR ${r.date} · ${r.plant} submitted${late ? " late" : ""}`, detail: `${r.submitterType.replace("_", " & ")} · ${entriesOf(w, id).length} job line(s) · crew ${r.labourMarks.length}`, tab: "jobs", refId: id });
+    // docs §24: each request goes to the store and the SIC is told; issues alert the SIC
+    for (const q of sent.requests) {
+      const urgent = q.urgent || q.reason === "urgent";
+      log({ kind: "request_raised", problem: urgent, siteId: r.siteId, subjectStaffId: r.submitterId, title: urgent ? `URGENT · ${q.description}` : `${q.reason ? `${q.reason[0].toUpperCase()}${q.reason.slice(1)}: ` : ""}${q.description}`, detail: `${q.kind} · qty ${q.qty ?? "—"} · ${r.plant} · from DPR ${r.date}`, tab: "/requests", refId: id });
+    }
+    if (sent.issues?.trim()) log({ kind: "dpr_issue", problem: true, siteId: r.siteId, subjectStaffId: r.submitterId, title: `Issue on ${r.plant} · DPR ${r.date}`, detail: sent.issues.trim(), tab: `/dpr/${id}`, refId: id });
     return { ok: true };
   }, [log]);
 

@@ -134,6 +134,8 @@ export interface DprReport {
   requests: DprRequest[];
   nextDayPlan: string;
   note: string;
+  /** Problems on site today; the SIC is alerted when the DPR is submitted (docs §24) */
+  issues?: string;
   telegramDraftLines: string[];
   scaffoldWork?: DprScaffoldWorkLine[];
   safetyBody?: DprSafetyBody;
