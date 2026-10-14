@@ -109,8 +109,8 @@ const ROLE_MATRIX: Record<RoleId, Partial<Record<ModuleId, PermissionAction[]>>>
   },
   supervisor: {
     supervisor: ["view", "create", "update", "submit"],
-    // Sees own crew; picking labourers ("create") is granted per person by Owner / SA (docs §23)
-    crew: ["view"],
+    // Sees own crew and asks the SIC for labourers (docs §24: every supervisor, no per-person tick)
+    crew: ["view", "create"],
     dpr: ["view", "create", "update", "submit", "upload"],
     store: ["view"],
     calculators: ["view"],

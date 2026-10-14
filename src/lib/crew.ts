@@ -1,8 +1,9 @@
 /**
  * Supervisor crews (docs §23). A labourer's standing crew is `Labourer.supervisorId`.
- * SIC / Owner / Super Admin change crews directly; a supervisor with the
- * "pick own crew" right raises a request the SIC approves. A labourer already
- * on another crew moves only after that supervisor releases them.
+ * SIC / Owner / Super Admin change crews directly; any supervisor raises a
+ * request the SIC approves (docs §24 dropped the per-person "pick" tick). A
+ * labourer already on another crew moves only after that supervisor releases
+ * them; that supervisor, the SIC, Admin and HR are told.
  */
 import { effectivePermission } from "./permissions";
 import type { CrewRequest, Labourer, PermissionOverride, RoleId, StaffMember, UserAccount } from "./types";

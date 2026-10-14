@@ -182,7 +182,8 @@ export function isFor(e: WorkEvent, v: Viewer): boolean {
     case "crew_requested":
     case "crew_released":
     case "crew_decided":
-      return mine || v.role === "sic";
+      // docs §24: moves between crews (flagged as problems) also go to Admin and HR
+      return mine || v.role === "sic" || (!!e.problem && (v.role === "admin" || v.role === "hr"));
     // docs §24: HR renews; Admin and the labourer's supervisor are told too
     case "pass_expiring":
       return mine || v.role === "hr" || v.role === "admin";

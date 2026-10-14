@@ -20,7 +20,6 @@ import { MASTER_SHEETS, type MasterSheetId } from "@/lib/master/types";
 import { canAccessMasterData, masterSheetsFor } from "@/lib/desk";
 import { ROLES } from "@/lib/roles";
 import { useStore } from "@/lib/store";
-import { hasPickRight, withPickRight } from "@/lib/crew";
 import { useWork } from "@/lib/work/store";
 import { missingFields } from "@/lib/labourers";
 import { rilStatusProblem, SKILL_LEVELS } from "@/lib/labour-import";
@@ -712,12 +711,6 @@ function UsersSheet({ showInactive }: { showInactive: boolean }) {
                   if (!r.ok) setMsg({ ok: false, text: r.error ?? "Failed" });
                 });
               }}
-              onPickRight={(on) => {
-                // docs §23: Owner / SA let a supervisor pick their own crew (requests still need the SIC)
-                void updateUser(u.id, { permissionOverrides: withPickRight(u.permissionOverrides, on) }).then((r) => {
-                  setMsg(r.ok ? { ok: true, text: `@${u.username} ${on ? "can now" : "can no longer"} pick their own crew` } : { ok: false, text: r.error ?? "Failed" });
-                });
-              }}
             />
           ))}
         </tbody>
@@ -788,7 +781,6 @@ function UserRow({
   onSites,
   onViewAs,
   onLink,
-  onPickRight,
 }: {
   user: UserAccount;
   isSa: boolean;
@@ -801,7 +793,6 @@ function UserRow({
   onSites: (ids: string[]) => string | null;
   onViewAs: () => void;
   onLink: (staffId: string) => void;
-  onPickRight: (on: boolean) => void;
 }) {
   const { fullState: state } = useStore();
   const linked = user.staffId
@@ -852,18 +843,6 @@ function UserRow({
       </td>
       <td className="py-2 text-xs">
         {user.roles.join(", ")}
-        {user.roles.includes("supervisor") ? (
-          <label className="mt-1 flex items-center gap-1.5 text-[11px] text-[var(--sge-ink-2)]">
-            <input
-              type="checkbox"
-              aria-label={`@${user.username} can pick own crew`}
-              disabled={!canEdit}
-              checked={hasPickRight(user)}
-              onChange={(e) => onPickRight(e.target.checked)}
-            />
-            Can pick own crew
-          </label>
-        ) : null}
       </td>
       <td className="py-2 text-xs">
         {editing ? (

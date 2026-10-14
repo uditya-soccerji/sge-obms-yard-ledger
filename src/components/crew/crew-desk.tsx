@@ -104,6 +104,8 @@ export function CrewDesk() {
       notify({
         kind: "crew_requested",
         siteId,
+        // From another crew: that supervisor, SIC, Admin and HR are told (docs §24)
+        problem: !!c.fromSupervisorId,
         subjectStaffId: c.fromSupervisorId ?? undefined,
         alsoStaffId: c.toSupervisorId,
         title: `${nameOf(c.toSupervisorId)} asks for ${lab(c.labourerId)?.name ?? c.labourerId}`,
@@ -148,7 +150,7 @@ export function CrewDesk() {
     <div className="space-y-4">
       <SectionHeader
         title={`Crews · ${site?.code ?? ""}`}
-        subtitle="Standing crews (docs §23). SIC changes crews; supervisors with the right ask, the SIC approves. Every change is logged."
+        subtitle="Standing crews (docs §23, §24). The SIC changes crews; a supervisor asks and the SIC approves. Taking someone from another crew tells that supervisor, the SIC, Admin and HR. Every change is logged."
       />
       {msg ? (
         <p className={cn("text-sm", msg.ok ? "text-[var(--sge-ok)]" : "text-[var(--sge-crit)]")}>{msg.text}</p>
@@ -215,7 +217,7 @@ export function CrewDesk() {
             <Input className="ml-auto h-8 w-48 text-sm" placeholder="Search name / EP" value={q} onChange={(e) => setQ(e.target.value)} />
           </div>
           {pool === "others" && !manage ? (
-            <p className="mb-2 text-xs text-[var(--sge-ink-3)]">Their supervisor is told and must release them; then the SIC approves.</p>
+            <p className="mb-2 text-xs text-[var(--sge-ink-3)]">Their supervisor, the SIC, Admin and HR are told. The supervisor releases them, then the SIC approves.</p>
           ) : null}
           {candidates.length === 0 ? (
             <p className="text-sm text-[var(--sge-ink-3)]">{pool === "free" ? "No unassigned labourers on this site." : "No labourers on other crews."}</p>
@@ -247,7 +249,7 @@ export function CrewDesk() {
       ) : (
         <Panel>
           <p className="text-sm text-[var(--sge-ink-3)]">
-            Your SIC assigns labourers to your crew. Owner / Super Admin can let you pick labourers yourself.
+            Your SIC assigns labourers to your crew.
           </p>
         </Panel>
       )}
