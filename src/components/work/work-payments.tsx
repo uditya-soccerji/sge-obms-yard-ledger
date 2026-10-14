@@ -29,7 +29,11 @@ export function WorkPayments() {
   const [filter, setFilter] = useState<Filter>("all");
   const [editing, setEditing] = useState<string | null>(null);
   const [msg, setMsg] = useState<{ ok: boolean; msg: string } | null>(null);
-  const all = paymentRows(work.jms.filter((j) => s.lineIds.has(j.planLineId)), today());
+  // docs §24: Finance sees a JMS once the Admin has entered its number and amount
+  const all = paymentRows(
+    work.jms.filter((j) => s.lineIds.has(j.planLineId) && j.adminStatus !== "pending_admin").map((j) => (j.rilJmsNo ? { ...j, jmsNo: j.rilJmsNo } : j)),
+    today()
+  );
   const sum = paymentSummary(all);
   const rows = all
     .filter((r) =>

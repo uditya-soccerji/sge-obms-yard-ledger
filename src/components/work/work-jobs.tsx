@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useStore } from "@/lib/store";
-import { canCloseJob, effectiveEntries, entryArea, entryDiffs, finalStage, jobStageAreas, memberArea, monthLabel, round3, validMembers } from "@/lib/work/logic";
+import { canCloseJob, effectiveEntries, entryArea, entryDiffs, finalStage, jobProgress, jobStageAreas, memberArea, monthLabel, round3, validMembers } from "@/lib/work/logic";
 import { daysAgo } from "@/lib/today";
 import { today } from "@/lib/today";
 import { useWork } from "@/lib/work/store";
@@ -22,7 +22,10 @@ type Filter = "open" | "awaiting_sic" | "closed";
 
 export function WorkJobs() {
   const { state } = useStore();
-  const { requestClose, confirmJms, rejectClose, reviewReport } = useWork();
+  const { requestClose, confirmJms, rejectClose, reviewReport, decideJobPlan } = useWork();
+  // End date typed per job when ending it, and the plan send-back reason (docs §24)
+  const [endDates, setEndDates] = useState<Record<string, string>>({});
+  const [planBack, setPlanBack] = useState<Record<string, string>>({});
   const s = useWorkScope();
   const { work } = s;
   const [filter, setFilter] = useState<Filter>("open");
@@ -93,15 +96,27 @@ export function WorkJobs() {
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-heading text-base font-bold tracking-wide">{job.jobNo}</span>
                   <StatusPill tone={job.status === "open" ? "accent" : job.status === "awaiting_sic" ? "warn" : "ok"}>
-                    {job.status === "open" ? "Open" : job.status === "awaiting_sic" ? "Waiting for SIC" : `JMS ${jms?.jmsNo ?? ""}`}
+                    {job.status === "open" ? "Open" : job.status === "awaiting_sic" ? "Ended — waiting for SIC" : jms?.adminStatus === "pending_admin" ? `JMS ${jms.jmsNo} · with Admin` : `JMS ${jms?.rilJmsNo ?? jms?.jmsNo ?? ""}`}
                   </StatusPill>
+                  {job.planStatus ? (
+                    <StatusPill tone={job.planStatus === "approved" ? "ok" : job.planStatus === "pending" ? "warn" : "crit"}>
+                      {job.planStatus === "approved" ? "Plan approved" : job.planStatus === "pending" ? "Plan waiting for SIC" : "Plan sent back"}
+                    </StatusPill>
+                  ) : null}
                   {line.month !== s.monthOf(line.siteId) ? <StatusPill>{monthLabel(line.month)}</StatusPill> : null}
                 </div>
                 <div className="mt-0.5 text-sm">{lineLabel(line, it)}</div>
                 <div className="text-xs text-[var(--sge-ink-3)]">
                   {job.location} · {s.staffName(job.supervisorId)} · started {job.startDate}
+                  {job.endDate ? ` · ended ${job.endDate}` : ""}
                   {s.allSites ? ` · ${s.siteCode(line.siteId)}` : ""}
                 </div>
+                {job.plannedM2 ? <PlanProgress job={job} /> : null}
+                {job.planStatus === "sent_back" && job.planNote ? (
+                  <p className="mt-1 rounded-sm bg-[var(--sge-crit-wash)] px-2 py-1 text-[11px] text-[var(--sge-crit)]">
+                    <b>Plan sent back by {job.planDecidedBy}:</b> {job.planNote}
+                  </p>
+                ) : null}
                 <Trail jobId={job.id} jmsId={job.jmsId} />
                 {job.status === "open" && job.sentBack ? (
                   <p className="mt-1 rounded-sm bg-[var(--sge-crit-wash)] px-2 py-1 text-[11px] text-[var(--sge-crit)]">
@@ -116,17 +131,40 @@ export function WorkJobs() {
                   </Button>
                 ) : null}
                 {job.status === "open" && s.canEnter ? (
-                  <Button
-                    size="sm"
-                    disabled={!close.ok}
-                    title={close.ok ? "Send to SIC to confirm as a JMS" : `Missing: ${close.missing.map((m) => STAGES.find((x) => x.id === m)?.label).join(", ")}`}
-                    onClick={() => {
-                      const r = requestClose(job.id);
-                      setMsg(r.ok ? { ok: true, msg: `${job.jobNo} closed — waiting for SIC to confirm.` } : { ok: false, msg: r.error });
-                    }}
-                  >
-                    Close job
-                  </Button>
+                  <span className="flex items-center gap-1.5">
+                    {/* docs §24: ending the job at final shade gives the end date; the JMS covers start → end */}
+                    <Input
+                      type="date"
+                      aria-label={`End date for ${job.jobNo}`}
+                      className="h-8 w-[150px]"
+                      max={today()}
+                      min={job.startDate}
+                      value={endDates[job.id] ?? today()}
+                      onChange={(e) => setEndDates({ ...endDates, [job.id]: e.target.value })}
+                    />
+                    <Button
+                      size="sm"
+                      disabled={!close.ok}
+                      title={close.ok ? "Final shade done — send to SIC to confirm as a JMS" : `Missing: ${close.missing.map((m) => STAGES.find((x) => x.id === m)?.label).join(", ")}`}
+                      onClick={() => {
+                        const r = requestClose(job.id, endDates[job.id] ?? today());
+                        setMsg(r.ok ? { ok: true, msg: `${job.jobNo} ended — waiting for SIC to confirm.` } : { ok: false, msg: r.error });
+                      }}
+                    >
+                      End job
+                    </Button>
+                  </span>
+                ) : null}
+                {job.planStatus === "pending" && s.canConfirm ? (
+                  <span className="flex flex-wrap items-center gap-1.5">
+                    <Input aria-label={`Plan send-back reason for ${job.jobNo}`} className="h-8 w-48" placeholder="Reason (to send back)" value={planBack[job.id] ?? ""} onChange={(e) => setPlanBack({ ...planBack, [job.id]: e.target.value })} />
+                    <Button size="sm" variant="outline" onClick={() => { const r = decideJobPlan(job.id, false, planBack[job.id] ?? ""); setMsg(r.ok ? { ok: true, msg: `${job.jobNo} plan sent back.` } : { ok: false, msg: r.error }); }}>
+                      Send plan back
+                    </Button>
+                    <Button size="sm" onClick={() => { const r = decideJobPlan(job.id, true, ""); setMsg(r.ok ? { ok: true, msg: `${job.jobNo} plan approved.` } : { ok: false, msg: r.error }); }}>
+                      Approve plan
+                    </Button>
+                  </span>
                 ) : null}
                 {job.status === "awaiting_sic" && s.canConfirm ? (
                   <>
@@ -473,12 +511,15 @@ function StartJob({ onDone }: { onDone: (m: { ok: boolean; msg: string }) => voi
   const it = line ? s.item(line.serviceCode) : undefined;
   const [location, setLocation] = useState("");
   const [startDate, setStartDate] = useState(today());
+  const [plannedM2, setPlannedM2] = useState("");
+  const [plannedEnd, setPlannedEnd] = useState("");
   const [stages, setStages] = useState<Stage[] | null>(null);
   const chosen = stages ?? it?.defaultStages ?? ["prep", "coat1", "coat2", "final"];
 
   return (
     <Panel>
-      <h3 className="mb-3 font-heading text-sm font-bold">Start a job</h3>
+      <h3 className="mb-1 font-heading text-sm font-bold">Plan &amp; start a job</h3>
+      <p className="mb-3 text-xs text-[var(--sge-ink-3)]">Your plan goes to the SIC for approval; your daily DPRs are measured against it.</p>
       {lines.length === 0 ? (
         <p className="text-sm text-[var(--sge-ink-3)]">No plan lines this month for you. Add one on the Plan vs actual tab.</p>
       ) : (
@@ -486,9 +527,11 @@ function StartJob({ onDone }: { onDone: (m: { ok: boolean; msg: string }) => voi
           className="space-y-3"
           onSubmit={(e) => {
             e.preventDefault();
-            const r = startJob({ planLineId: lineId, location, stages: chosen, startDate });
-            onDone(r.ok ? { ok: true, msg: "Job started — add DPR entries as work progresses." } : { ok: false, msg: r.error });
-            if (r.ok) { setLocation(""); setStages(null); }
+            // docs §24: the plan (m² and end date) is what the SIC approves and progress is measured against
+            if (!(Number(plannedM2) > 0) || !plannedEnd) return onDone({ ok: false, msg: "Give the planned m² and the planned end date" });
+            const r = startJob({ planLineId: lineId, location, stages: chosen, startDate, plannedM2: Number(plannedM2), plannedEnd });
+            onDone(r.ok ? { ok: true, msg: "Job plan sent to the SIC — add DPR entries as work progresses." } : { ok: false, msg: r.error });
+            if (r.ok) { setLocation(""); setStages(null); setPlannedM2(""); setPlannedEnd(""); }
           }}
         >
           <div className="grid gap-3 sm:grid-cols-2">
@@ -506,6 +549,16 @@ function StartJob({ onDone }: { onDone: (m: { ok: boolean; msg: string }) => voi
               <Label>Location / area</Label>
               <Input className="mt-1" value={location} onChange={(e) => setLocation(e.target.value)} placeholder="e.g. TT4 NORTH SIDE SR NO. 269–276" />
             </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label htmlFor="plan-m2">Planned m² (final shade)</Label>
+                <Input id="plan-m2" type="number" min={0} className="mt-1" value={plannedM2} onChange={(e) => setPlannedM2(e.target.value)} placeholder="e.g. 450" />
+              </div>
+              <div>
+                <Label htmlFor="plan-end">Planned end date</Label>
+                <Input id="plan-end" type="date" className="mt-1" min={startDate} value={plannedEnd} onChange={(e) => setPlannedEnd(e.target.value)} />
+              </div>
+            </div>
           </div>
           <div>
             <Label>Stages this job needs (the last one is the final shade → JMS qty)</Label>
@@ -522,10 +575,32 @@ function StartJob({ onDone }: { onDone: (m: { ok: boolean; msg: string }) => voi
               ))}
             </div>
           </div>
-          <Button type="submit">Start job</Button>
+          <Button type="submit">Submit plan &amp; start job</Button>
         </form>
       )}
     </Panel>
+  );
+}
+
+/** Planned vs done (final-shade m²) and days used vs planned (docs §24) */
+function PlanProgress({ job }: { job: Job }) {
+  const { work } = useWork();
+  const p = jobProgress(job, work.dprs, today());
+  const behind = p.pct != null && p.timePct != null && p.timePct > p.pct + 10;
+  return (
+    <div className="mt-1.5 max-w-md">
+      <div className="flex justify-between text-[11px] text-[var(--sge-ink-2)]">
+        <span>
+          {fmtM2(p.done)} of {fmtM2(job.plannedM2 ?? 0)} m² · {p.pct ?? 0}%
+        </span>
+        <span className={behind ? "font-semibold text-[var(--sge-crit)]" : ""}>
+          day {p.usedDays} of {p.planDays} (by {job.plannedEnd}){behind ? " · behind plan" : ""}
+        </span>
+      </div>
+      <div className="mt-0.5 h-1.5 overflow-hidden rounded-full bg-[var(--sge-paper-2)]">
+        <div className={cn("h-full", behind ? "bg-[var(--sge-crit)]" : "bg-[var(--sge-ok)]")} style={{ width: `${Math.min(100, p.pct ?? 0)}%` }} />
+      </div>
+    </div>
   );
 }
 

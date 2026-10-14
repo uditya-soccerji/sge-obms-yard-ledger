@@ -84,7 +84,8 @@ const ROLE_MATRIX: Record<RoleId, Partial<Record<ModuleId, PermissionAction[]>>>
     labourer: ["upload"],
     dpr: ["view", "create", "update", "upload", "submit"],
     acpl: ["view", "upload"],
-    jms: ["view", "upload", "update"],
+    // docs §24: the Admin enters the JMS no. and amount and approves it for Finance
+    jms: ["view", "upload", "update", "approve"],
     calculators: ["view"],
     requests: ["view", "create"],
     submissions: ["view", "create", "submit"],

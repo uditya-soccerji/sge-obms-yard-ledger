@@ -28,7 +28,12 @@ interface WorkApi {
   work: WorkState;
   hydrated: boolean;
   addPlanLine: (input: Omit<PlanLine, "id" | "carriedM2" | "month"> & { month?: string }) => Result;
-  startJob: (input: { planLineId: string; location: string; stages: Stage[]; startDate: string }) => Result;
+  startJob: (input: { planLineId: string; location: string; stages: Stage[]; startDate: string; plannedM2?: number; plannedEnd?: string }) => Result;
+  /** SIC approves the supervisor's job plan or sends it back (docs §24) */
+  decideJobPlan: (jobId: string, approve: boolean, note: string) => Result;
+  /** Admin enters the JMS no. and amount and approves it for Finance, or sends it back (docs §24) */
+  adminApproveJms: (jmsId: string, rilJmsNo: string, amount: number) => Result;
+  adminReturnJms: (jmsId: string, reason: string) => Result;
   /** Add a job line; it goes on the day's open report (made if none), or on `reportId` */
   addDpr: (input: Omit<DprEntry, "id" | "supervisorId">) => Result;
   /** Remove a job line while its report is still a draft or sent back */
@@ -43,7 +48,7 @@ interface WorkApi {
   unlockReport: (id: string, reason: string) => Result;
   /** Telegram: add a message to today's open report of that submitter (made if none) */
   telegramToReport: (input: { content: string; submitterId: string; submitterType: DprSubmitterType; siteId: string; observation?: boolean }) => Result;
-  requestClose: (jobId: string) => Result;
+  requestClose: (jobId: string, endDate?: string) => Result;
   confirmJms: (jobId: string) => Result;
   /** SIC sends a closed job back to the supervisor, with the reason (docs §5, §19) */
   rejectClose: (jobId: string, reason: string) => Result;
@@ -244,6 +249,10 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
     if (input.stages.length === 0) return { ok: false, error: "Pick at least one stage" };
     if (!/^\d{4}-\d{2}-\d{2}$/.test(input.startDate)) return { ok: false, error: "Pick the start date" };
     if (input.startDate > today()) return { ok: false, error: "A job can't start in the future" };
+    // docs §24: the supervisor's plan — what he expects to finish and by when
+    if (input.plannedM2 != null && !(input.plannedM2 > 0)) return { ok: false, error: "Planned m² must be above zero" };
+    if (input.plannedEnd && input.plannedEnd < input.startDate) return { ok: false, error: "The planned end can't be before the start" };
+    const planned = input.plannedM2 && input.plannedEnd;
     const siteCode = sitesRef.current.find((x) => x.id === line.siteId)?.code ?? line.siteId.replace("site-", "").toUpperCase();
     const job: Job = {
       id: uid("job"),
@@ -255,9 +264,11 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
       stages: input.stages,
       status: "open",
       supervisorId: line.supervisorId,
+      ...(planned ? { plannedM2: round3(input.plannedM2!), plannedEnd: input.plannedEnd, planStatus: "pending" as const } : {}),
     };
     setWork((s) => ({ ...s, jobs: [...s.jobs, job] }));
     log({ kind: "job_started", siteId: line.siteId, subjectStaffId: job.supervisorId, title: `${job.jobNo} started`, detail: `${line.plant} · ${job.location}`, tab: "jobs", refId: job.id });
+    if (planned) log({ kind: "job_plan", siteId: line.siteId, subjectStaffId: job.supervisorId, title: `${job.jobNo} plan: ${job.plannedM2} m² by ${job.plannedEnd}`, detail: `${line.plant} · ${job.location} · from ${job.startDate} — approve or send back`, tab: "jobs", refId: job.id });
     return { ok: true, id: job.id };
   }, [log]);
 
@@ -339,7 +350,7 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
     return { ok: true, id: entry.id };
   }, [log]);
 
-  const requestClose = useCallback<WorkApi["requestClose"]>((jobId) => {
+  const requestClose = useCallback<WorkApi["requestClose"]>((jobId, endDate) => {
     if (!rights().canEnter) return NOT_ALLOWED;
     const w = ref.current;
     const job = w.jobs.find((j) => j.id === jobId);
@@ -350,13 +361,19 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
     // The day's reports go to SIC first (merge plan Step 3)
     const unsent = pendingReports(job, w).filter(reportOpen);
     if (unsent.length) return { ok: false, error: `Submit the DPR for ${unsent.map((r) => r.date).sort().join(", ")} first` };
+    // docs §24: ending the job gives the end date; the JMS covers the DPRs from start to end
+    const lastDpr = w.dprs.filter((d) => d.jobId === jobId).map((d) => d.date).sort().pop() ?? job.startDate;
+    const end = endDate || today();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(end)) return { ok: false, error: "Pick the end date" };
+    if (end > today()) return { ok: false, error: "The end date can't be in the future" };
+    if (end < lastDpr) return { ok: false, error: `There are DPR lines up to ${lastDpr} — the end date can't be earlier` };
     // A real timestamp, so the 24-hour escalation (docs §19) can age it
     const at = new Date().toISOString();
     setWork((s) => ({
       ...s,
-      jobs: s.jobs.map((j) => (j.id === jobId ? { ...j, status: "awaiting_sic", closeRequestedAt: at, closeRequestedBy: actor.current.accountId, sentBack: undefined } : j)),
+      jobs: s.jobs.map((j) => (j.id === jobId ? { ...j, status: "awaiting_sic", endDate: end, closeRequestedAt: at, closeRequestedBy: actor.current.accountId, sentBack: undefined } : j)),
     }));
-    log({ kind: "job_closed", siteId: siteOfJob(w, job), subjectStaffId: job.supervisorId, title: `${job.jobNo} closed — confirm JMS`, detail: `${job.location} · ${round3(jobJmsQty(job, w.dprs))} m² final shade`, tab: "jobs", refId: job.id });
+    log({ kind: "job_closed", siteId: siteOfJob(w, job), subjectStaffId: job.supervisorId, title: `${job.jobNo} ended ${end} — confirm JMS`, detail: `${job.location} · ${round3(jobJmsQty(job, w.dprs))} m² final shade · ${job.startDate} → ${end}`, tab: "jobs", refId: job.id });
     return { ok: true };
   }, [log]);
 
@@ -370,6 +387,64 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
     log({ kind: "job_sent_back", problem: true, siteId: siteOfJob(w, job), subjectStaffId: job.supervisorId, title: `${job.jobNo} sent back by SIC`, detail: `${job.location} · ${why}`, tab: "jobs", refId: job.id });
     const sentBack = { by: actor.current.name, at: new Date().toISOString(), reason: why };
     setWork((s) => ({ ...s, jobs: s.jobs.map((j) => (j.id === jobId ? { ...j, status: "open", closeRequestedAt: undefined, closeRequestedBy: undefined, sentBack } : j)) }));
+    return { ok: true };
+  }, [log]);
+
+  /** docs §24: the SIC approves the supervisor's plan for a job, or sends it back with a reason */
+  const decideJobPlan = useCallback<WorkApi["decideJobPlan"]>((jobId, approve, note) => {
+    if (!rights().canConfirm) return NOT_ALLOWED;
+    const w = ref.current;
+    const job = w.jobs.find((j) => j.id === jobId);
+    if (!job || job.planStatus !== "pending") return { ok: false, error: "This job has no plan waiting for approval" };
+    const why = note.trim();
+    if (!approve && !why) return { ok: false, error: "Give a reason so the supervisor can re-plan" };
+    setWork((s) => ({ ...s, jobs: s.jobs.map((j) => (j.id === jobId ? { ...j, planStatus: approve ? "approved" : "sent_back", planNote: why || undefined, planDecidedBy: actor.current.name } : j)) }));
+    log({ kind: "job_plan_decided", problem: !approve, siteId: siteOfJob(w, job), subjectStaffId: job.supervisorId, title: `${job.jobNo} plan ${approve ? "approved" : "sent back"}`, detail: why || `${job.plannedM2} m² by ${job.plannedEnd}`, tab: "jobs", refId: job.id });
+    return { ok: true };
+  }, [log]);
+
+  /** docs §24: the Admin enters RIL's JMS no. and the amount and submits — then Finance sees it */
+  const adminApproveJms = useCallback<WorkApi["adminApproveJms"]>((jmsId, rilJmsNo, amount) => {
+    if (actor.current.role !== "admin" && !rights().isBoss) return NOT_ALLOWED;
+    const w = ref.current;
+    const j = w.jms.find((x) => x.id === jmsId);
+    if (!j || j.adminStatus !== "pending_admin") return { ok: false, error: "This JMS isn't waiting for the Admin" };
+    const no = rilJmsNo.trim();
+    if (!/^\d{7}$/.test(no)) return { ok: false, error: "The JMS no. is 7 digits" };
+    if (w.jms.some((x) => x.id !== jmsId && x.rilJmsNo === no)) return { ok: false, error: `JMS no. ${no} is already used on another JMS` };
+    if (!(amount > 0)) return { ok: false, error: "Amount must be above zero" };
+    const at = new Date().toISOString();
+    const amt = Math.round(amount * 100) / 100;
+    setWork((s) => ({
+      ...s,
+      jms: s.jms.map((x) =>
+        x.id === jmsId
+          ? { ...x, adminStatus: "approved", rilJmsNo: no, amount: amt, computedAmount: x.computedAmount ?? x.amount, adminBy: actor.current.name, adminAt: at, statusLog: [...(x.statusLog ?? []), { at, by: actor.current.name, from: x.status, to: x.status, note: `Admin: JMS no. ${no}, ₹${amt.toLocaleString("en-IN")}` }] }
+          : x
+      ),
+    }));
+    const job = w.jobs.find((x) => x.id === j.jobId);
+    const diff = (j.computedAmount ?? j.amount) !== amt;
+    log({ kind: "jms_admin_approved", problem: diff, siteId: job ? siteOfJob(w, job) : "", subjectStaffId: job?.supervisorId, title: `JMS ${no} approved · ${job?.jobNo ?? ""}`, detail: `₹${amt.toLocaleString("en-IN")}${diff ? ` (worked out ₹${(j.computedAmount ?? j.amount).toLocaleString("en-IN")})` : ""} · ${j.qty} m² · now with Finance`, tab: "payments", refId: jmsId });
+    return { ok: true };
+  }, [log]);
+
+  /** docs §24: the Admin sends a JMS back when the DPR compilation is wrong — the job reopens for the supervisor */
+  const adminReturnJms = useCallback<WorkApi["adminReturnJms"]>((jmsId, reason) => {
+    if (actor.current.role !== "admin" && !rights().isBoss) return NOT_ALLOWED;
+    const w = ref.current;
+    const j = w.jms.find((x) => x.id === jmsId);
+    if (!j || j.adminStatus !== "pending_admin") return { ok: false, error: "Only a JMS waiting for the Admin can be sent back" };
+    const why = reason.trim();
+    if (!why) return { ok: false, error: "Say what's wrong so the supervisor can fix the DPRs" };
+    const job = w.jobs.find((x) => x.id === j.jobId);
+    const sentBack = { by: actor.current.name, at: new Date().toISOString(), reason: `JMS ${j.jmsNo}: ${why}` };
+    setWork((s) => ({
+      ...s,
+      jms: s.jms.filter((x) => x.id !== jmsId),
+      jobs: s.jobs.map((x) => (x.id === j.jobId ? { ...x, status: "open", jmsId: undefined, closedAt: undefined, closeRequestedAt: undefined, closeRequestedBy: undefined, sentBack } : x)),
+    }));
+    log({ kind: "jms_returned", problem: true, siteId: job ? siteOfJob(w, job) : "", subjectStaffId: job?.supervisorId, title: `JMS ${j.jmsNo} sent back by Admin · ${job?.jobNo ?? ""}`, detail: `${why} · job reopened ${j.periodFrom} → ${j.periodTo}, ${j.qty} m²`, tab: "jobs", refId: j.jobId });
     return { ok: true };
   }, [log]);
 
@@ -390,7 +465,7 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
     const item = w.serviceItems.find((s) => s.code === line.serviceCode)!;
     const qty = jobJmsQty(job, w.dprs);
     const dates = w.dprs.filter((d) => d.jobId === jobId).map((d) => d.date).sort();
-    const periodTo = dates[dates.length - 1] ?? today();
+    const periodTo = job.endDate ?? dates[dates.length - 1] ?? today();
     // The work order must be valid on the JMS date (docs §17)
     const wo = pickWorkOrder(w, line.siteId, line.serviceCode, periodTo);
     if (!wo) return { ok: false, error: `No valid work order covers ${line.serviceCode} on ${periodTo} — add or extend the work order first` };
@@ -405,13 +480,16 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
       qty,
       rate: item.rate,
       amount: Math.round(qty * item.rate * 100) / 100,
-      periodFrom: [job.startDate, ...dates].sort()[0],
+      periodFrom: job.startDate,
       periodTo,
       status: "JMS SUBMITTED",
       woId: wo.id,
       confirmedOn: today(),
       ratePending: item.ratePending || undefined,
       statusLog: [{ at: new Date().toISOString(), by: actor.current.name, from: "JMS SUBMITTED", to: "JMS SUBMITTED", note: "Created on SIC confirm" }],
+      // docs §24: the Admin enters the JMS no. and amount before Finance sees it
+      adminStatus: "pending_admin",
+      computedAmount: Math.round(qty * item.rate * 100) / 100,
     };
     setWork((s) => ({
       ...s,
@@ -419,6 +497,7 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
       jobs: s.jobs.map((j) => (j.id === jobId ? { ...j, status: "closed", closedAt: today(), jmsId: id } : j)),
     }));
     log({ kind: "jms_confirmed", siteId: line.siteId, subjectStaffId: job.supervisorId, title: `JMS ${row.jmsNo} confirmed · ${job.jobNo}`, detail: `${qty} m² × ₹${item.rate}${item.ratePending ? " (placeholder rate — ARC list pending)" : ""} = ₹${row.amount.toLocaleString("en-IN")}`, tab: "jms", refId: id });
+    log({ kind: "jms_admin_pending", siteId: line.siteId, subjectStaffId: job.supervisorId, title: `JMS ${row.jmsNo} · ${job.jobNo}: enter JMS no. and amount`, detail: `${qty} m² · ${row.periodFrom} → ${row.periodTo} · worked out ₹${row.amount.toLocaleString("en-IN")}`, tab: "/home", refId: id });
     // Tell Owner / SIC / Finance when this JMS takes the WO past its cap or an item past its scope
     const before = woUsage(wo.id, w);
     if (before) {
@@ -791,6 +870,7 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
     if (!rights().canMoney) return NOT_ALLOWED;
     const j = ref.current.jms.find((x) => x.id === jmsId);
     if (!j) return { ok: false, error: "JMS not found" };
+    if (j.adminStatus === "pending_admin") return { ok: false, error: "This JMS is waiting for the Admin to enter its number and amount" };
     if (!payment && !clearReason?.trim()) return { ok: false, error: "Give a reason for clearing this payment" };
     if (payment) {
       if (!(payment.amount > 0)) return { ok: false, error: "Amount received must be above zero" };
@@ -915,8 +995,8 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const api = useMemo<WorkApi>(
-    () => ({ work, hydrated, editExpense, receivePaint, advancePaintLifecycle, recoMonth, postMonth, setRilRef, uploadSubmission, linkSubmission, unlinkSubmission, addPlanLine, startJob, addDpr, removeEntry, saveReport, submitReport, reviewReport, unlockReport, telegramToReport, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork, notify: log }),
-    [work, hydrated, editExpense, receivePaint, advancePaintLifecycle, recoMonth, postMonth, setRilRef, uploadSubmission, linkSubmission, unlinkSubmission, addPlanLine, startJob, addDpr, removeEntry, saveReport, submitReport, reviewReport, unlockReport, telegramToReport, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork, log]
+    () => ({ work, hydrated, editExpense, receivePaint, advancePaintLifecycle, recoMonth, postMonth, setRilRef, uploadSubmission, linkSubmission, unlinkSubmission, addPlanLine, startJob, decideJobPlan, adminApproveJms, adminReturnJms, addDpr, removeEntry, saveReport, submitReport, reviewReport, unlockReport, telegramToReport, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork, notify: log }),
+    [work, hydrated, editExpense, receivePaint, advancePaintLifecycle, recoMonth, postMonth, setRilRef, uploadSubmission, linkSubmission, unlinkSubmission, addPlanLine, startJob, decideJobPlan, adminApproveJms, adminReturnJms, addDpr, removeEntry, saveReport, submitReport, reviewReport, unlockReport, telegramToReport, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork, log]
   );
   return <WorkContext.Provider value={api}>{children}</WorkContext.Provider>;
 }

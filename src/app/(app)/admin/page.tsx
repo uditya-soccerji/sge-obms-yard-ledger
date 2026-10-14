@@ -1,5 +1,6 @@
 "use client";
 
+import { JmsAdminQueue } from "@/components/work/jms-admin-queue";
 import { PassExpiryPanel } from "@/components/hr/pass-expiry-panel";
 import { guarded } from "@/components/shared/require-module";
 import Link from "next/link";
@@ -36,6 +37,8 @@ function AdminHomePage() {
       />
 
       {/* docs §24: RIL passes expiring within 10 days */}
+      {/* docs §24: JMS waiting for the Admin's number and amount */}
+      <JmsAdminQueue />
       <PassExpiryPanel />
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">

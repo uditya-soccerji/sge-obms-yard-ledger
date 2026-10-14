@@ -96,6 +96,14 @@ export interface Job {
   supervisorId: string;
   /** Jobs imported as history (no DPR crew): labour-days and cost brought in */
   importedLabour?: { days: number; cost: number };
+  /** The supervisor's plan for the job, approved by the SIC; progress is measured against it (docs §24) */
+  plannedM2?: number;
+  plannedEnd?: string;
+  planStatus?: "pending" | "approved" | "sent_back";
+  planNote?: string;
+  planDecidedBy?: string;
+  /** Set when the supervisor ends the job at final shade (docs §24) */
+  endDate?: string;
 }
 
 /** One measured member: NOS × SIDE × LENGTH × CF = area (m²). */
@@ -209,6 +217,16 @@ export interface Jms {
   statusLog?: { at: string; by: string; from: JmsStatus; to: JmsStatus; note?: string }[];
   /** The JMS submitted to RIL this internal JMS is compared with (docs §10) */
   submissionId?: string;
+  /**
+   * docs §24: after the SIC confirms, the Admin enters the JMS no. and amount and submits;
+   * only then does Finance see it. Unset on older rows (treated as approved).
+   */
+  adminStatus?: "pending_admin" | "approved";
+  rilJmsNo?: string;
+  /** The amount worked out from the DPRs, kept when the Admin enters a different one */
+  computedAmount?: number;
+  adminBy?: string;
+  adminAt?: string;
 }
 
 /** RIL's status flow for a submitted JMS (docs §14) — the internal flow plus a reject at A1. */

@@ -304,3 +304,10 @@ Rules in `rules-decisions.md` §24.
 - "Download PDF" on each calculator → `/print/calc?...` (inputs only in the URL, recalculated with the same functions): prepared-by profile, inputs, step-by-step working, result, notes, signature line.
 - Checked locally as Store (A. Joshi): all four tabs shown; paint MPS 2, 1,000 m², brush, 5 % → 0.237 × 1,000 × 1.05 = 248.85 L primer (+24.89 L thinner) etc.; estimate structures 500 m² → ₹3,15,590 at the PO rate, 7.5 crew-days, 225 L. `tsc` + `eslint src` clean.
 
+## Access plan round 1 — step 5: plan → end job → JMS → Admin → Finance (2026-10-15)
+- Start a job = **Submit plan**: planned final-shade m² and planned end date; the SIC approves or sends it back with a reason. Job cards show done vs planned m² and day x of y, red when time runs ahead of work.
+- **End job** takes an end date (not before the last DPR line, not in the future); the JMS period is job start → end date.
+- SIC **Confirm → JMS** now leaves the JMS "with Admin". The Admin (Admin home and Work → JMS) enters RIL's 7-digit JMS no. and the amount (pre-filled with qty × rate) and submits → Finance is notified and sees it on Payments (shown under the RIL no.); a changed amount is flagged and the worked-out one kept. The Admin can send it back (reason) → JMS removed, job reopened for the supervisor.
+- Admin role gets `jms: approve`. Older JMS rows (no Admin status) count as approved.
+- Checked locally on the demo data (demo date 2026-09-28): SIC confirmed J-DTA-0134 → Admin queue; JMS no. 12345 refused, 2741999 + ₹23,000 accepted → Finance bell "₹23,000 (worked out ₹23,208.12) · now with Finance" and Payments row. K. Solanki submitted plan J-DTA-0136 (300 m² by 2026-10-10) → SIC bell → approved ("day 1 of 13"). End job with 2026-08-01 refused (DPR lines up to 2026-09-18); 2026-09-20 accepted. Not run: the Admin send-back. `tsc` + `eslint src` clean.
+

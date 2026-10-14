@@ -136,6 +136,21 @@ export function canCloseJob(job: Job, dprs: DprEntry[]): { ok: boolean; missing:
   return { ok: job.status === "open" && missing.length === 0, missing };
 }
 
+/** Progress against the supervisor's plan (docs §24): final-shade m² and days used */
+export function jobProgress(job: Job, dprs: DprEntry[], today: string) {
+  const done = jobJmsQty(job, dprs);
+  const day = (d: string) => Date.parse(`${d}T00:00:00Z`) / 86_400_000;
+  const planDays = job.plannedEnd ? Math.max(1, day(job.plannedEnd) - day(job.startDate) + 1) : 0;
+  const usedDays = Math.max(1, day(job.endDate ?? today) - day(job.startDate) + 1);
+  return {
+    done,
+    pct: job.plannedM2 ? Math.round((done / job.plannedM2) * 100) : null,
+    planDays,
+    usedDays,
+    timePct: planDays ? Math.round((usedDays / planDays) * 100) : null,
+  };
+}
+
 /** JMS quantity = finished (final-shade) m² of the job. */
 export function jobJmsQty(job: Job, dprs: DprEntry[]): number {
   return jobStageAreas(job, dprs)[finalStage(job)];
