@@ -7,6 +7,7 @@ import { useWork } from "@/lib/work/store";
 import type { JmsStatus } from "@/lib/work/types";
 import { cn } from "@/lib/utils";
 import { fmtM2, fmtPct, selectCls, tdCls, thCls, useWorkScope } from "./common";
+import { JmsAdminQueue } from "./jms-admin-queue";
 
 
 export function WorkJms() {
@@ -25,6 +26,8 @@ export function WorkJms() {
 
   return (
     <div className="space-y-4">
+      {/* docs §24: SIC-confirmed JMS wait here for the Admin's JMS no. and amount */}
+      <JmsAdminQueue />
       <div className="flex flex-wrap items-end gap-3">
         <div>
           <div className="text-[11px] uppercase tracking-wide text-[var(--sge-ink-3)]">Plan month</div>

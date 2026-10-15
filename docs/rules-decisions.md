@@ -10,6 +10,9 @@ Answers from the module-by-module review. Not built yet; implemented together at
 - **Daily wage:** a min–max range per trade, set in Master Data.
 - **Required fields:** mobile (10 digits, starts 6–9), trade sub-category (when the trade has them), contractor, supervisor.
 - **Delete:** Owner / Super Admin can delete; everyone else can only deactivate.
+- **Skill level (decided 2026-10-13):** Highly skilled, Skilled, Semi-skilled or Unskilled (RIL's "CATEGORY").
+- **Bulk upload (decided 2026-10-13/14):** CSV upload of our template or RIL's Employee Details export. An EP already used, now or in the past, is refused; the same Name + Trade + Skill as someone registered is a possible duplicate, added only when confirmed. People without a supervisor, wage or Aadhaar yet come in as incomplete and are flagged until filled.
+- **RIL details on the profile (decided 2026-10-14):** EIC (RIL Engineer-in-Charge, a reference contact, fixed text), RIL pass status (Valid / Expired / Hibernated / Terminated…) and RIL area of movement. Terminated → inactive. Site from the area: DTA, PCG (incl. SEZ) or SOLAR.
 
 ## 2. Users & logins
 - **Username:** lowercase, 3–20 chars, a–z / 0–9 / dot, no spaces (e.g. `uditya`, `r.mehta`).
@@ -279,3 +282,25 @@ GitHub PRs #15–#20 built the merge plan (X1). Each object now lives once, in W
 - **Money:** costs are Work costs with the §8 fields; same-day edits by the person who entered them, later the Owner; every edit kept.
 - **Audit:** every audit line and Work event also goes to the shared Supabase `audit_log` (once migration 004 is applied, through `write_audit()`); the audit page reads it when the backend is on.
 - Kept on purpose: job lines keep `supervisorId` / `enteredBy` (history lines from before reports have no report); the wage ledger stays payroll and never enters P&L.
+
+## 23. Supervisor crews (decided 2026-10-13)
+- **Standing crew:** each labourer belongs to one supervisor's crew on a site, and stays there until changed. The supervisor's DPR lists their crew for attendance.
+- **Who changes crews:** the SIC (for their sites), Owner and Super Admin. Every crew change is logged (who, when, from → to, labourer).
+- **Major change:** Owner and Super Admin are notified when a labourer is moved off a supervisor's crew (transfer or removal).
+- **Supervisor picking labourers:** only when Owner / Super Admin has given that supervisor the right. A pick is a **request** that the SIC approves before the labourer joins the crew.
+- **Labourer already on another crew:** the request needs SIC approval, and the current supervisor is notified. If the current supervisor **releases** the labourer, they become free and the transfer can go ahead (still through SIC approval).
+- **Attendance:** marking attendance for one's own crew is submitted directly; the SIC gets a notification, not an approval step. Work quantities on the DPR are still approved, by the SIC or by Admin on the SIC's behalf (§5, B04).
+
+## 24. Access plan, round 1 (decided 2026-10-15)
+The owner is reworking every role's access, starting at the labourer and moving up. Source: `SGE_Access_Sheet_v2.xlsx` (owner's edits + answers).
+- **Labourer screen:** read-only, own profile only, Home only. Shows the month's Present / Absent / Leave / OT hours; the month's pay (wage, OT, bonus, incentive, minus advance, PF, room rent, travel, food, deductions → net) with **empty lines hidden**; RIL pass status, valid-from and expiry; equipment assigned with expiry; attendance history (view only).
+- **Gate pass expiry:** dates come from RIL's export. **HR, Admin and the labourer's supervisor** are notified **10 days** before expiry (and when expired), once per pass and expiry date; HR renews / reissues. HR now has the notification bell.
+- **RIL export upload:** HR and Admin. A row for someone already registered (same current EP) updates their pass status, EIC, area and pass dates.
+- **Every upload checks for duplicates:** a row already in the system is not uploaded and says who uploaded it and when. Each uploaded row keeps who / when / which file.
+- **Monthly pay upload:** Admin and HR upload a CSV (EP, month, pay columns: wage, OT, bonus, incentive, advance, PF, room rent, travel, food, other deductions); Finance is notified. Matched by EP (current or old). Only new or changed lines are applied (same labourer, month, line and amount = already uploaded, with who uploaded it). An uploaded wage replaces the days × rate estimate on the labourer's screen. *(built in step 6)*
+- **Supervisor DPR:** only his own work, consumption, issues, crew attendance, equipment and material on the crew, and requests to the Store Manager (urgent, damaged, required, replacement, scrapped, expired). Export a submitted DPR as PDF as proof. Issues on site alert the SIC at submit. *(built in step 2)*
+- **Store requests:** go straight to the Store Manager and the SIC is notified (this replaces §9's SIC approval step); if the Store rejects (with a note), the SIC gets an urgent alert and can override, and the store must then fulfil. Every request has a reason: urgent, damaged, required, replacement, scrapped or expired. *(built in step 2)*
+- **Crews:** as §23 — a pick is a request the SIC approves, and a labourer on another crew is released by that supervisor first. Changed: **every supervisor** may ask (the per-person "Can pick own crew" tick is gone), and a pick or move from another crew also notifies **Admin and HR** (as well as that supervisor and the SIC). *(built in step 3)*
+- **Calculators:** Supervisor, SIC, Admin, Store, Safety; a detailed PDF of the working with the user's profile (name, designation, staff ID, role, site, login, date). *(built in step 4)*
+- **Plan → job → JMS:** the supervisor plans a job (start date …) and submits; SIC approves; progress is tracked against the plan from daily DPRs. The supervisor ends the job (final shade + end date) → **SIC confirms** (then view only) → a JMS is generated from the DPRs between start and end → **Admin** enters the JMS number and amount and submits → Finance is updated. SIC and Admin can send it back if the DPR compilation is wrong (SIC before confirming, Admin after — the job reopens for the supervisor). Finance sees a JMS only after the Admin has submitted it. *(built in step 5)*
+- **SIC approvals:** the SIC can edit DPR quantities before approving; both values are kept in the audit log.

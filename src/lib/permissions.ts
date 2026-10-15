@@ -11,6 +11,7 @@ export type PermissionKey = `${ModuleId}:${PermissionAction}`;
 /** Default rights matrix per role (locked ACL picks). */
 const ROLE_MATRIX: Record<RoleId, Partial<Record<ModuleId, PermissionAction[]>>> = {
   super_admin: {
+    crew: ["view", "approve", "update"],
     owner: ["view"],
     sic: ["view", "approve"],
     admin: ["view", "create", "update", "upload"],
@@ -36,6 +37,7 @@ const ROLE_MATRIX: Record<RoleId, Partial<Record<ModuleId, PermissionAction[]>>>
   },
   owner: {
     owner: ["view"],
+    crew: ["view", "approve", "update"],
     sic: ["view", "approve"],
     admin: ["view"],
     hr: ["view"],
@@ -61,6 +63,8 @@ const ROLE_MATRIX: Record<RoleId, Partial<Record<ModuleId, PermissionAction[]>>>
     master: ["view", "create", "update", "admin"],
   },
   sic: {
+    // SIC changes crews and approves supervisors' requests (docs §23)
+    crew: ["view", "approve"],
     sic: ["view"],
     dpr: ["view", "approve"],
     approvals: ["view", "approve"],
@@ -77,9 +81,11 @@ const ROLE_MATRIX: Record<RoleId, Partial<Record<ModuleId, PermissionAction[]>>>
   },
   admin: {
     admin: ["view", "create", "update", "upload"],
+    labourer: ["upload"],
     dpr: ["view", "create", "update", "upload", "submit"],
     acpl: ["view", "upload"],
-    jms: ["view", "upload", "update"],
+    // docs §24: the Admin enters the JMS no. and amount and approves it for Finance
+    jms: ["view", "upload", "update", "approve"],
     calculators: ["view"],
     requests: ["view", "create"],
     submissions: ["view", "create", "submit"],
@@ -88,7 +94,8 @@ const ROLE_MATRIX: Record<RoleId, Partial<Record<ModuleId, PermissionAction[]>>>
   },
   hr: {
     hr: ["view", "create", "update"],
-    labourer: ["view", "create", "update"],
+    // HR and Admin upload RIL's export (pass dates) and the monthly pay file (docs §24)
+    labourer: ["view", "create", "update", "upload"],
     acpl: ["view", "upload", "update"],
     calculators: ["view"],
     submissions: ["view"],
@@ -103,6 +110,8 @@ const ROLE_MATRIX: Record<RoleId, Partial<Record<ModuleId, PermissionAction[]>>>
   },
   supervisor: {
     supervisor: ["view", "create", "update", "submit"],
+    // Sees own crew and asks the SIC for labourers (docs §24: every supervisor, no per-person tick)
+    crew: ["view", "create"],
     dpr: ["view", "create", "update", "submit", "upload"],
     store: ["view"],
     calculators: ["view"],

@@ -20,8 +20,13 @@ import { MASTER_SHEETS, type MasterSheetId } from "@/lib/master/types";
 import { canAccessMasterData, masterSheetsFor } from "@/lib/desk";
 import { ROLES } from "@/lib/roles";
 import { useStore } from "@/lib/store";
+import { useWork } from "@/lib/work/store";
+import { missingFields } from "@/lib/labourers";
+import { rilStatusProblem, SKILL_LEVELS } from "@/lib/labour-import";
+import { LabourImport } from "./labour-import";
+import { buildPlantDetails, parseRpTags, plantRp, sitePlantDetails } from "@/lib/sites";
 import type { CatalogItem, MaterialItem } from "@/lib/master/types";
-import type { Labourer, RoleId, Site, UserAccount } from "@/lib/types";
+import type { Labourer, PlantDetail, RoleId, Site, UserAccount } from "@/lib/types";
 import { entrySiteId } from "@/lib/site-scope";
 import { checkSeat, checkSites, MIN_PASSWORD } from "@/lib/users";
 import type { StaffMember } from "@/lib/types";
@@ -188,6 +193,7 @@ function SitesSheet({ showInactive }: { showInactive: boolean }) {
               enabled: true,
               rpTags: [],
               plants: [],
+              plantDetails: [],
             })
           }
         >
@@ -200,7 +206,11 @@ function SitesSheet({ showInactive }: { showInactive: boolean }) {
           onChange={setDraft}
           error={formErr}
           onSave={async () => {
-            const r = await upsertSite({ ...draft, code: draft.code.toUpperCase() });
+            const r = await upsertSite({
+              ...draft,
+              code: draft.code.toUpperCase(),
+              plantDetails: buildPlantDetails(draft.plants, sitePlantDetails(draft)),
+            });
             if (!r.ok) return setFormErr(r.error ?? "Couldn't save");
             setFormErr(null);
             setDraft(null);
@@ -217,18 +227,30 @@ function SitesSheet({ showInactive }: { showInactive: boolean }) {
             <th className="py-2">Code</th>
             <th>Name</th>
             <th>RP</th>
-            <th>Plants</th>
+            <th>Plants · RP · locations</th>
             <th>State</th>
             <th />
           </tr>
         </thead>
         <tbody>
           {rows.map((s) => (
-            <tr key={s.id} className="border-t border-[var(--sge-line)]">
-              <td className="py-2 font-mono text-xs">{s.code}</td>
-              <td>{s.name}</td>
-              <td className="text-xs">{s.rpTags.join("/") || "—"}</td>
-              <td className="text-xs">{s.plants.join(", ")}</td>
+            <tr key={s.id} className="border-t border-[var(--sge-line)] align-top">
+              <td className="py-2 pr-3 font-mono text-xs">{s.code}</td>
+              <td className="py-2 pr-3">{s.name}</td>
+              <td className="whitespace-nowrap py-2 pr-3 text-xs">{s.rpTags.join(" / ") || "—"}</td>
+              <td className="py-2 pr-3 text-xs">
+                {sitePlantDetails(s).map((d, i) => {
+                  const rp = plantRp(s, d.name);
+                  const extra = [rp, d.locations.length ? `${d.locations.length} loc` : ""].filter(Boolean).join(" · ");
+                  return (
+                    <span key={d.name}>
+                      {i ? ", " : ""}
+                      {d.name}
+                      {extra ? <span className="text-[var(--sge-ink-3)]"> ({extra})</span> : null}
+                    </span>
+                  );
+                })}
+              </td>
               <td>
                 <StatusPill tone={s.enabled ? "ok" : "default"}>
                   {s.enabled ? "active" : "switched off · read only"}
@@ -269,6 +291,7 @@ function SiteForm({
 }) {
   // Typed as text so a trailing comma survives while typing; split on save
   const [plantsText, setPlantsText] = useState(value.plants.join(", "));
+  const [rpText, setRpText] = useState(value.rpTags.join(", "));
   return (
     <div className="mb-4 grid gap-2 rounded-sm border border-[var(--sge-line)] bg-[var(--sge-linen)] p-3 sm:grid-cols-2">
       <div>
@@ -305,6 +328,28 @@ function SiteForm({
           }}
         />
       </div>
+      <div className="sm:col-span-2">
+        <Label>RPs run at this site (comma between each)</Label>
+        <Input
+          className="mt-1"
+          value={rpText}
+          placeholder="e.g. RP2, RP5"
+          onChange={(e) => {
+            setRpText(e.target.value);
+            onChange({ ...value, rpTags: parseRpTags(e.target.value) });
+          }}
+        />
+      </div>
+      {value.plants.length ? (
+        <div className="sm:col-span-2">
+          <PlantDetailsEditor
+            plants={value.plants}
+            rpTags={value.rpTags}
+            details={value.plantDetails ?? []}
+            onDetails={(plantDetails) => onChange({ ...value, plantDetails })}
+          />
+        </div>
+      ) : null}
       <div className="flex gap-2 sm:col-span-2">
         <Button size="sm" onClick={onSave}>
           Save
@@ -314,6 +359,114 @@ function SiteForm({
         </Button>
         {error ? <span className="self-center text-xs text-[var(--sge-crit)]">{error}</span> : null}
       </div>
+    </div>
+  );
+}
+
+const rpSelectCls =
+  "h-8 rounded-sm border border-[var(--sge-line)] bg-[var(--sge-paper)] px-1.5 text-xs text-[var(--sge-ink)]";
+
+/** Each plant's RP and its locations (a location may override the RP). B02. */
+function PlantDetailsEditor({
+  plants,
+  rpTags,
+  details,
+  onDetails,
+}: {
+  plants: string[];
+  rpTags: string[];
+  details: PlantDetail[];
+  onDetails: (d: PlantDetail[]) => void;
+}) {
+  const key = (n: string) => n.trim().toLowerCase();
+  const find = (name: string) => details.find((d) => key(d.name) === key(name));
+  const put = (name: string, next: PlantDetail) =>
+    onDetails([...details.filter((d) => key(d.name) !== key(name)), next]);
+  const siteRp = rpTags.length === 1 ? rpTags[0] : "";
+
+  return (
+    <div className="rounded-sm border border-[var(--sge-line)] bg-[var(--sge-paper)]">
+      <div className="border-b border-[var(--sge-line)] px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--sge-ink-3)]">
+        Plants · RP · locations
+      </div>
+      {plants.map((plant) => {
+        const d: PlantDetail = find(plant) ?? { name: plant, locations: [] };
+        const setLocs = (locations: PlantDetail["locations"]) => put(plant, { ...d, name: plant, locations });
+        return (
+          <div key={key(plant)} className="border-b border-[var(--sge-line)] px-3 py-2 last:border-b-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="font-heading text-sm font-bold tracking-wide">{plant}</span>
+              <select
+                aria-label={`RP for ${plant}`}
+                className={rpSelectCls}
+                value={d.rp ?? ""}
+                onChange={(e) => put(plant, { ...d, name: plant, rp: e.target.value || undefined })}
+              >
+                <option value="">{siteRp ? `Site RP (${siteRp})` : "RP —"}</option>
+                {rpTags.map((rp) => (
+                  <option key={rp} value={rp}>
+                    {rp}
+                  </option>
+                ))}
+              </select>
+              <span className="text-[11px] text-[var(--sge-ink-3)]">
+                {d.locations.length} location{d.locations.length === 1 ? "" : "s"}
+              </span>
+              <Button
+                size="sm"
+                variant="outline"
+                className="ml-auto h-7 text-xs"
+                onClick={() => setLocs([...d.locations, { name: "" }])}
+              >
+                Add location
+              </Button>
+            </div>
+            {d.locations.length ? (
+              <div className="mt-2 space-y-1.5 pl-3">
+                {d.locations.map((loc, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <Input
+                      aria-label={`${plant} location ${i + 1}`}
+                      className="h-8 text-sm"
+                      value={loc.name}
+                      placeholder="Location / area"
+                      onChange={(e) => setLocs(d.locations.map((l, j) => (j === i ? { ...l, name: e.target.value } : l)))}
+                    />
+                    <select
+                      aria-label={`RP for ${plant} location ${i + 1}`}
+                      className={rpSelectCls}
+                      value={loc.rp ?? ""}
+                      onChange={(e) =>
+                        setLocs(
+                          d.locations.map((l, j) =>
+                            j === i ? { name: l.name, ...(e.target.value ? { rp: e.target.value } : {}) } : l
+                          )
+                        )
+                      }
+                    >
+                      <option value="">Same as plant</option>
+                      {rpTags.map((rp) => (
+                        <option key={rp} value={rp}>
+                          {rp}
+                        </option>
+                      ))}
+                    </select>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      className="h-8 text-xs"
+                      aria-label={`Remove ${loc.name || "location"}`}
+                      onClick={() => setLocs(d.locations.filter((_, j) => j !== i))}
+                    >
+                      Remove
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -688,7 +841,9 @@ function UserRow({
           )}
         </div>
       </td>
-      <td className="py-2 text-xs">{user.roles.join(", ")}</td>
+      <td className="py-2 text-xs">
+        {user.roles.join(", ")}
+      </td>
       <td className="py-2 text-xs">
         {editing ? (
           <div className="space-y-1.5">
@@ -793,8 +948,28 @@ function LabourSheet({
   scope: ScopeFilter;
   showInactive: boolean;
 }) {
-  const { fullState: state, updateLabourer, addLabourer, removeLabourer } = useStore();
+  const { fullState: state, updateLabourer, addLabourer, removeLabourer, assignCrew, removeFromCrew } = useStore();
   const report = useReport();
+  const { notify } = useWork();
+  const staffName = (id: string) => state.staff.find((x) => x.id === id)?.name ?? id;
+  /** A supervisor change here is a crew change: logged and notified (docs §23) */
+  function setSupervisor(l: Labourer, supervisorId: string) {
+    if (supervisorId === l.supervisorId) return;
+    const r = supervisorId ? assignCrew([l.id], supervisorId) : removeFromCrew(l.id);
+    report(r);
+    if (!r.ok) return;
+    notify({
+      kind: "crew_changed",
+      siteId: l.siteId,
+      problem: !!l.supervisorId,
+      subjectStaffId: l.supervisorId || supervisorId,
+      alsoStaffId: supervisorId || undefined,
+      title: supervisorId ? `${l.name} → ${staffName(supervisorId)}'s crew` : `${l.name} taken off ${staffName(l.supervisorId)}'s crew`,
+      detail: l.supervisorId ? `Was with ${staffName(l.supervisorId)} · changed in Master Data` : "Was unassigned · changed in Master Data",
+      tab: "/operations?p=crew",
+      refId: l.id,
+    });
+  }
   const [q, setQ] = useState("");
   const contractors = state.masterCatalog.contractors.filter((c) => c.active);
   const trades = state.tradeCatalogue.filter((t) => t.active);
@@ -809,7 +984,7 @@ function LabourSheet({
       if (!showInactive && !l.active) return false;
       if (!matchScope(l.siteId, activeSite, scope)) return false;
       if (!q.trim()) return true;
-      const hay = `${l.name} ${l.epNumber} ${l.trade}`.toLowerCase();
+      const hay = `${l.name} ${l.epNumber} ${l.trade} ${l.skill ?? ""} ${l.eic ?? ""} ${l.rilStatus ?? ""} ${(l.epHistory ?? []).map((h) => h.ep).join(" ")}`.toLowerCase();
       return hay.includes(q.trim().toLowerCase());
     });
   }, [state.labourers, activeSite, scope, showInactive, q]);
@@ -851,7 +1026,9 @@ function LabourSheet({
   }
 
   const sel = "h-8 w-full rounded-sm border border-[var(--sge-line)] bg-[var(--sge-paper)] text-xs";
-  const cols = "grid-cols-[1.3fr_0.8fr_0.8fr_1fr_0.9fr_0.5fr_4rem_6.5rem]";
+  // B10: fixed minimum widths; cells may shrink, the register scrolls sideways on small screens
+  const cols = "grid-cols-[minmax(10rem,1.3fr)_minmax(7rem,0.8fr)_minmax(6.5rem,0.6fr)_minmax(8rem,0.8fr)_minmax(8rem,0.9fr)_minmax(8.5rem,0.9fr)_3.5rem_minmax(7rem,0.7fr)_4.5rem_6.5rem] [&>*]:min-w-0";
+  const [importing, setImporting] = useState(false);
 
   return (
     <Panel>
@@ -867,6 +1044,9 @@ function LabourSheet({
         </div>
         <Button size="sm" onClick={() => setForm(form ? null : blank())}>
           {form ? "Close form" : "Add labourer"}
+        </Button>
+        <Button size="sm" variant="outline" onClick={() => setImporting(!importing)}>
+          {importing ? "Close upload" : "Upload CSV"}
         </Button>
         <span className="text-xs text-[var(--sge-ink-3)]">{rows.length} rows</span>
       </div>
@@ -934,13 +1114,18 @@ function LabourSheet({
           </div>
         </div>
       ) : null}
+      {importing ? <LabourImport onClose={() => setImporting(false)} /> : null}
+      <div className="overflow-x-auto">
+      <div className="min-w-[1180px]">
       <div className={cn("grid gap-2 border-b border-[var(--sge-line)] px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--sge-ink-3)]", cols)}>
         <span>Name</span>
         <span>Trade</span>
+        <span>Skill</span>
         <span>Contractor</span>
         <span>Supervisor</span>
         <span>EP</span>
         <span>Site</span>
+        <span>RIL pass · EIC</span>
         <span>Wage</span>
         <span />
       </div>
@@ -950,10 +1135,23 @@ function LabourSheet({
         height={Math.min(520, Math.max(180, rows.length * 44 + 8))}
         render={(l: Labourer) => (
           <div className={cn("grid h-full items-center gap-2 border-b border-[var(--sge-line)] px-2 text-sm", cols)}>
-            <BlurInput value={l.name} onSave={(v) => report(updateLabourer(l.id, { name: v }))} />
+            <div className="flex min-w-0 items-center gap-1">
+              <BlurInput value={l.name} onSave={(v) => report(updateLabourer(l.id, { name: v }))} />
+              {missingFields(l).length ? (
+                <span title={`Still to fill: ${missingFields(l).join(", ")}`} className="shrink-0 rounded-sm bg-[var(--sge-warn-wash)] px-1 text-[10px] font-semibold text-[var(--sge-brass-ink)]">
+                  {missingFields(l).length}
+                </span>
+              ) : null}
+            </div>
             <select className={sel} value={l.trade} onChange={(e) => report(updateLabourer(l.id, { trade: e.target.value }))}>
               {trades.map((t) => (
                 <option key={t.id} value={t.id}>{t.label}</option>
+              ))}
+            </select>
+            <select aria-label={`Skill for ${l.name}`} className={sel} value={l.skill ?? ""} onChange={(e) => report(updateLabourer(l.id, { skill: (e.target.value || undefined) as Labourer["skill"] }))}>
+              <option value="">—</option>
+              {SKILL_LEVELS.map((x) => (
+                <option key={x.id} value={x.id}>{x.label}</option>
               ))}
             </select>
             <select className={sel} value={l.contractorId ?? ""} onChange={(e) => report(updateLabourer(l.id, { contractorId: e.target.value }))}>
@@ -961,18 +1159,28 @@ function LabourSheet({
                 <option key={c.id} value={c.id}>{c.name}</option>
               ))}
             </select>
-            <select className={sel} value={l.supervisorId} onChange={(e) => report(updateLabourer(l.id, { supervisorId: e.target.value }))}>
+            <select aria-label={`Supervisor for ${l.name}`} className={sel} value={l.supervisorId} onChange={(e) => setSupervisor(l, e.target.value)}>
               <option value="">—</option>
               {supervisorsOn(l.siteId).map((x) => (
                 <option key={x.id} value={x.id}>{x.name}</option>
               ))}
             </select>
-            <BlurInput
-              className="font-mono text-xs"
-              value={l.epNumber}
-              onSave={(v) => report(updateLabourer(l.id, { epNumber: normalizeEp(v) ?? v }))}
-            />
+            <span title={l.epHistory?.length ? `Old EPs: ${l.epHistory.map((h) => `${h.ep} (until ${h.until})`).join(", ")}` : undefined}>
+              <BlurInput
+                className="font-mono text-xs"
+                value={l.epNumber}
+                onSave={(v) => report(updateLabourer(l.id, { epNumber: normalizeEp(v) ?? v }))}
+              />
+            </span>
             <span className="text-xs">{siteCode(l.siteId)}</span>
+            <span className="truncate text-[11px]" title={[l.rilStatus && `RIL pass: ${l.rilStatus}`, l.rilArea && `Area: ${l.rilArea}`, l.eic && `EIC: ${l.eic}`].filter(Boolean).join(" · ") || undefined}>
+              {l.rilStatus ? (
+                <span className={rilStatusProblem(l.rilStatus) ? "font-semibold text-[var(--sge-crit)]" : "text-[var(--sge-ok)]"}>{l.rilStatus}</span>
+              ) : (
+                <span className="text-[var(--sge-ink-3)]">—</span>
+              )}
+              {l.eic ? <span className="block truncate text-[var(--sge-ink-3)]">{l.eic}</span> : null}
+            </span>
             <BlurInput
               type="number"
               min={1}
@@ -999,6 +1207,8 @@ function LabourSheet({
           </div>
         )}
       />
+      </div>
+      </div>
     </Panel>
   );
 }

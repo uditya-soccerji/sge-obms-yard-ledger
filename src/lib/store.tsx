@@ -37,7 +37,8 @@ import type { CatalogItem, Contractor, MasterCatalog, MaterialItem } from "./mas
 import { createSeedState, STORAGE_KEY } from "./seed";
 import type { DprReport } from "./work/types";
 import { ALL_SITES, canSeeAllSites, canSwitchSites, entrySiteId, landingSite, scopeState } from "./site-scope";
-import { checkSite } from "./sites";
+import { checkPlantRps, checkSite } from "./sites";
+import { approveBlock, checkCrewRequest } from "./crew";
 import { normalizeEp } from "./ep";
 import { checkLabourer, describeChanges } from "./labourers";
 import { daysAgo } from "./today";
@@ -45,6 +46,7 @@ import { WORKING } from "./attendance";
 import { checkSeat, checkSites, checkUserChange, MIN_PASSWORD } from "./users";
 import type {
   AcplMatchRow,
+  CrewRequest,
   AcplPunchRow,
   AcplResolveStatus,
   AppState,
@@ -128,6 +130,15 @@ interface StoreApi {
     input: Omit<RateLine, "id" | "superseded"> & { id?: string; superseded?: boolean }
   ) => string;
   updateTrade: (id: string, patch: Partial<TradeDefinition>) => { ok: boolean; error?: string };
+  /** Crews (docs §23) */
+  assignCrew: (
+    labourerIds: string[],
+    supervisorId: string
+  ) => { ok: boolean; error?: string; moved: { labourerId: string; name: string; fromSupervisorId: string | null }[] };
+  removeFromCrew: (labourerId: string) => { ok: boolean; error?: string };
+  requestCrew: (labourerIds: string[], note?: string) => { ok: boolean; error?: string; created: CrewRequest[] };
+  releaseCrew: (requestId: string) => { ok: boolean; error?: string };
+  decideCrew: (requestId: string, approve: boolean, note: string) => { ok: boolean; error?: string };
   /** Refuses a label that already exists (case-insensitive) */
   addTrade: (input: Omit<TradeDefinition, "id"> & { id?: string }) => { ok: boolean; error?: string; id?: string };
   updateLabourer: (
@@ -147,9 +158,22 @@ interface StoreApi {
         | "supervisorId"
         | "aadhaar"
         | "mobile"
+        | "skill"
+        | "eic"
       >
     >
   ) => { ok: boolean; error?: string };
+  /** Bulk add from the CSV upload, with any new trades (B09) */
+  importPay: (
+    rows: { labourerId: string; month: string; lines: { kind: WageLedgerEntry["kind"]; amount: number; state: "new" | "changed" | "same"; existingId?: string }[] }[],
+    fileName: string
+  ) => { ok: boolean; error?: string; added: number; changed: number };
+  importLabourers: (
+    rows: Omit<Labourer, "id">[],
+    newTrades: { id: string; label: string }[],
+    fileName: string,
+    updates?: { id: string; patch: Partial<Labourer> }[]
+  ) => { ok: boolean; error?: string; added: number; updated: number };
   /** Master Data saves go to the server first when it's configured; local state changes only on success (B5) */
   upsertContractor: (row: Contractor) => Promise<{ ok: boolean; error?: string; id?: string }>;
   setContractorActive: (id: string, active: boolean) => Promise<{ ok: boolean; error?: string }>;
@@ -201,7 +225,7 @@ interface StoreApi {
   ) => void;
 }
 
-export type RequestAction = "approve" | "start" | "fulfil" | "part_fill" | "cancel" | "receive";
+export type RequestAction = "approve" | "start" | "fulfil" | "part_fill" | "cancel" | "receive" | "reject" | "override";
 
 const StoreContext = createContext<StoreApi | null>(null);
 
@@ -254,6 +278,10 @@ function migrateState(parsed: Partial<AppState>): AppState {
   const seed = createSeedState();
   const users =
     parsed.users && parsed.users.length > 0 ? parsed.users : seed.users;
+  const importAudit = (parsed.auditLog ?? []).filter((a) => a.module === "labourer" && a.action === "import").sort((a, b) => a.at.localeCompare(b.at))[0];
+  const firstImport = importAudit
+    ? { by: (parsed.users ?? []).find((u) => u.id === importAudit.userId)?.name || importAudit.username, at: importAudit.at, file: /from (.+?)( ·|$)/.exec(importAudit.detail)?.[1] ?? "upload" }
+    : null;
   return {
     ...seed,
     ...parsed,
@@ -263,6 +291,7 @@ function migrateState(parsed: Partial<AppState>): AppState {
     users,
     auditLog: parsed.auditLog ?? seed.auditLog,
     equipmentRequests: parsed.equipmentRequests ?? seed.equipmentRequests,
+    crewRequests: parsed.crewRequests ?? [],
     attendance: (parsed.attendance ?? seed.attendance).map((a) =>
       (a.status as string) === "off" ? { ...a, status: "weekly_off" as const } : a
     ),
@@ -286,6 +315,8 @@ function migrateState(parsed: Partial<AppState>): AppState {
     labourers: (parsed.labourers ?? seed.labourers).map((l) => ({
       ...l,
       contractorId: l.contractorId ?? "con-sge",
+      // Rows from the RIL upload before upload stamps existed (docs §24): credit the first import
+      ...(!l.upload && l.eic && firstImport ? { upload: firstImport } : {}),
     })),
     sites:
       parsed.sites && parsed.sites.length >= 6
@@ -293,6 +324,7 @@ function migrateState(parsed: Partial<AppState>): AppState {
             ...s,
             rpTags: s.rpTags ?? [],
             plants: s.plants ?? [],
+            plantDetails: s.plantDetails ?? [],
           }))
         : seed.sites,
     wageLedger: parsed.wageLedger ?? seed.wageLedger,
@@ -315,7 +347,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         setState(migrateState(parsed));
       }
     } catch {
-      /* keep seed */
+      // Keep seed, but never let it overwrite saved data we failed to read: keep a copy
+      try {
+        const raw = localStorage.getItem(STORAGE_KEY);
+        if (raw) localStorage.setItem(`sge-backup-ops-${Date.now()}`, raw);
+      } catch {
+        /* storage full / blocked */
+      }
     }
     setHydrated(true);
   }, []);
@@ -735,15 +773,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const applyDprAttendance = useCallback((report: DprReport) => {
     setState((s) => {
       const derived = attendanceFromApprovedDpr(report.id, report.date, report.siteId, report.labourMarks, s.currentUserId ?? "st-sic");
-      // The approved report replaces manual marks for those people, but another
-      // approved report's marks stay: a split day across two supervisors (docs §4)
+      // The submitted report replaces manual marks for those people (and its own earlier
+      // marks on a resubmit), but another report's marks stay: a split day (docs §4, §23)
       const keys = new Set(derived.map((a) => `${a.date}:${a.labourerId}`));
       const attendance = [
         ...derived,
         ...s.attendance.filter((a) => a.sourceDprId !== report.id && (a.sourceDprId || !keys.has(`${a.date}:${a.labourerId}`))),
       ];
       const next = { ...s, attendance };
-      return { ...next, auditLog: [makeAudit(next, "approvals", "approve", `DPR ${report.date} · ${report.plant}: attendance for ${derived.length}`, report.plant), ...s.auditLog] };
+      return { ...next, auditLog: [makeAudit(next, "dpr", "attendance", `DPR ${report.date} · ${report.plant}: attendance recorded at submit for ${derived.length}`, report.plant), ...s.auditLog] };
     });
   }, []);
 
@@ -758,7 +796,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         if (equipmentRequests.some((e) => e.sourceDprId === report.id && e.description === req.description)) continue;
         const now = new Date().toISOString();
         equipmentRequests = [
-          { id: uid("er"), createdAt: now, updatedAt: now, createdBy: report.submitterId, siteId: report.siteId, plant: report.plant, kind: req.kind, description: req.description, qty: req.qty, urgent: req.urgent, status: "open", sourceDprId: report.id },
+          { id: uid("er"), createdAt: now, updatedAt: now, createdBy: report.submitterId, siteId: report.siteId, plant: report.plant, kind: req.kind, description: req.description, qty: req.qty, urgent: req.urgent || req.reason === "urgent", reason: req.reason, status: "open", sourceDprId: report.id },
           ...equipmentRequests,
         ];
       }
@@ -1101,6 +1139,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           | "supervisorId"
           | "aadhaar"
           | "mobile"
+          | "skill"
+          | "eic"
+          | "epHistory"
         >
       >
     ) => {
@@ -1109,10 +1150,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const before = cur.labourers.find((l) => l.id === id);
       if (!before) return { ok: false, error: "Labourer not found" };
       const merged = { ...before, ...patch };
-      const bad = checkLabourer(merged, cur.labourers);
+      // Imported people may still lack a crew / wage (B09): don't block other edits on that
+      const bad = checkLabourer(merged, cur.labourers, { allowIncomplete: !before.supervisorId || !(before.wageDaily > 0) });
       if (bad) return { ok: false, error: bad };
       patch = { ...patch, ...(patch.epNumber !== undefined ? { epNumber: normalizeEp(patch.epNumber)! } : {}) };
-      const changes = describeChanges(before, patch, ["aadhaar"]);
+      // docs §1: a new EP archives the old one with its date
+      if (patch.epNumber !== undefined && before.epNumber && normalizeEp(before.epNumber) && patch.epNumber !== normalizeEp(before.epNumber)) {
+        patch = { ...patch, epHistory: [...(before.epHistory ?? []), { ep: normalizeEp(before.epNumber)!, until: new Date().toISOString().slice(0, 10) }] };
+      }
+      const changes = describeChanges(before, patch, ["aadhaar", "epHistory"]);
       if (!changes) return { ok: true };
       setState((s) => {
         const next = { ...s, labourers: s.labourers.map((l) => (l.id === id ? { ...l, ...patch } : l)) };
@@ -1140,6 +1186,139 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     return { ok: true };
   }, []);
 
+  /** SIC / Owner / SA put labourers on a supervisor's crew (docs §23). Reports who moved off another crew. */
+  const assignCrew = useCallback((labourerIds: string[], supervisorId: string) => {
+    const cur = stateRef.current;
+    if (!can(cur, "crew", "approve")) return { ...DENIED, moved: [] };
+    const sup = cur.staff.find((x) => x.id === supervisorId && x.role === "supervisor");
+    if (!sup) return { ok: false as const, error: "Pick a supervisor", moved: [] };
+    const picked = cur.labourers.filter((l) => labourerIds.includes(l.id) && l.active && l.supervisorId !== supervisorId);
+    if (!picked.length) return { ok: false as const, error: "Pick at least one labourer not already on this crew", moved: [] };
+    const off = picked.filter((l) => l.siteId !== sup.siteId);
+    if (off.length) return { ok: false as const, error: `${off[0].name} works on another site`, moved: [] };
+    const moved = picked.map((l) => ({ labourerId: l.id, name: l.name, fromSupervisorId: l.supervisorId || null }));
+    const ids = new Set(picked.map((l) => l.id));
+    setState((s) => {
+      const next = {
+        ...s,
+        labourers: s.labourers.map((l) => (ids.has(l.id) ? { ...l, supervisorId } : l)),
+        // A direct move settles any open request for these labourers
+        crewRequests: s.crewRequests.map((r) =>
+          ids.has(r.labourerId) && (r.status === "requested" || r.status === "released")
+            ? { ...r, status: (r.toSupervisorId === supervisorId ? "approved" : "cancelled") as CrewRequest["status"], decidedBy: s.currentUserId ?? undefined, decidedAt: new Date().toISOString() }
+            : r
+        ),
+      };
+      return {
+        ...next,
+        auditLog: [
+          ...moved.map((m) =>
+            makeAudit(next, "crew", "assign", `${m.name} → ${sup.name}${m.fromSupervisorId ? ` (from ${s.staff.find((x) => x.id === m.fromSupervisorId)?.name ?? m.fromSupervisorId})` : " (was unassigned)"}`)
+          ),
+          ...s.auditLog,
+        ],
+      };
+    });
+    return { ok: true as const, moved };
+  }, []);
+
+  /** Take a labourer off their crew (unassigned). A major change (docs §23). */
+  const removeFromCrew = useCallback((labourerId: string) => {
+    const cur = stateRef.current;
+    if (!can(cur, "crew", "approve")) return DENIED;
+    const lab = cur.labourers.find((l) => l.id === labourerId);
+    if (!lab?.supervisorId) return { ok: false as const, error: "Not on a crew" };
+    const from = cur.staff.find((x) => x.id === lab.supervisorId)?.name ?? lab.supervisorId;
+    setState((s) => {
+      const next = { ...s, labourers: s.labourers.map((l) => (l.id === labourerId ? { ...l, supervisorId: "" } : l)) };
+      return { ...next, auditLog: [makeAudit(next, "crew", "remove", `${lab.name} taken off ${from}'s crew`), ...s.auditLog] };
+    });
+    return { ok: true as const };
+  }, []);
+
+  /** A supervisor with the right asks for labourers; the SIC approves (docs §23). */
+  const requestCrew = useCallback((labourerIds: string[], note?: string) => {
+    const cur = stateRef.current;
+    const me = cur.staff.find((x) => x.id === cur.currentUserId && x.role === "supervisor");
+    if (!me || !can(cur, "crew", "create")) return { ...DENIED, created: [] as CrewRequest[] };
+    const created: CrewRequest[] = [];
+    for (const id of labourerIds) {
+      const lab = cur.labourers.find((l) => l.id === id);
+      if (!lab) continue;
+      const bad = checkCrewRequest(lab, me.id, me.siteId, [...cur.crewRequests, ...created]);
+      if (bad) return { ok: false as const, error: bad, created: [] as CrewRequest[] };
+      created.push({
+        id: uid("cr"),
+        siteId: me.siteId,
+        labourerId: lab.id,
+        toSupervisorId: me.id,
+        fromSupervisorId: lab.supervisorId || null,
+        requestedBy: me.id,
+        requestedAt: new Date().toISOString(),
+        status: "requested",
+        ...(note?.trim() ? { note: note.trim() } : {}),
+      });
+    }
+    if (!created.length) return { ok: false as const, error: "Pick at least one labourer", created };
+    setState((s) => {
+      const next = { ...s, crewRequests: [...created, ...s.crewRequests] };
+      return {
+        ...next,
+        auditLog: [
+          ...created.map((r) => makeAudit(next, "crew", "request", `${me.name} asked for ${s.labourers.find((l) => l.id === r.labourerId)?.name ?? r.labourerId}`)),
+          ...s.auditLog,
+        ],
+      };
+    });
+    return { ok: true as const, created };
+  }, []);
+
+  /** The current supervisor lets a requested labourer go (docs §23). */
+  const releaseCrew = useCallback((requestId: string) => {
+    const cur = stateRef.current;
+    const r = cur.crewRequests.find((x) => x.id === requestId);
+    if (!r || r.status !== "requested" || !r.fromSupervisorId) return { ok: false as const, error: "Nothing to release" };
+    if (cur.currentUserId !== r.fromSupervisorId && !can(cur, "crew", "approve")) return DENIED;
+    setState((s) => {
+      const next = { ...s, crewRequests: s.crewRequests.map((x) => (x.id === requestId ? { ...x, status: "released" as const, releasedAt: new Date().toISOString() } : x)) };
+      return { ...next, auditLog: [makeAudit(next, "crew", "release", `${s.labourers.find((l) => l.id === r.labourerId)?.name ?? r.labourerId} released`), ...s.auditLog] };
+    });
+    return { ok: true as const };
+  }, []);
+
+  /** SIC approves (labourer joins the crew) or rejects a request (docs §23). */
+  const decideCrew = useCallback((requestId: string, approve: boolean, note: string) => {
+    const cur = stateRef.current;
+    if (!can(cur, "crew", "approve")) return DENIED;
+    const r = cur.crewRequests.find((x) => x.id === requestId);
+    if (!r) return { ok: false as const, error: "Request not found" };
+    const lab = cur.labourers.find((l) => l.id === r.labourerId);
+    if (approve) {
+      const block = approveBlock(r, lab);
+      if (block) return { ok: false as const, error: block };
+    } else if (!note.trim()) {
+      return { ok: false as const, error: "Give a reason so the supervisor knows why" };
+    }
+    setState((s) => {
+      const now = new Date().toISOString();
+      const next = {
+        ...s,
+        labourers: approve ? s.labourers.map((l) => (l.id === r.labourerId ? { ...l, supervisorId: r.toSupervisorId } : l)) : s.labourers,
+        crewRequests: s.crewRequests.map((x) =>
+          x.id === requestId
+            ? { ...x, status: (approve ? "approved" : "rejected") as CrewRequest["status"], decidedBy: s.currentUserId ?? undefined, decidedAt: now, ...(note.trim() ? { note: note.trim() } : {}) }
+            : x
+        ),
+      };
+      const to = s.staff.find((x) => x.id === r.toSupervisorId)?.name ?? r.toSupervisorId;
+      return {
+        ...next,
+        auditLog: [makeAudit(next, "crew", approve ? "approve" : "reject", `${lab?.name ?? r.labourerId} → ${to}${note.trim() ? ` · ${note.trim()}` : ""}`), ...s.auditLog],
+      };
+    });
+    return { ok: true as const };
+  }, []);
+
   const addLabourer = useCallback(
     (row: Omit<Labourer, "id"> & { id?: string }) => {
       const id = row.id ?? uid("lb");
@@ -1160,6 +1339,46 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     },
     []
   );
+
+  /**
+   * Add many labourers at once (B09 CSV upload), plus any trades the file needs
+   * that Master Data doesn't have yet. Rows were checked by checkImport; EPs are
+   * checked again here so nothing already used slips in.
+   */
+  const importLabourers = useCallback((
+    rows: Omit<Labourer, "id">[],
+    newTrades: { id: string; label: string }[],
+    fileName: string,
+    updates: { id: string; patch: Partial<Labourer> }[] = []
+  ) => {
+    const cur = stateRef.current;
+    if (!can(cur, "labourer", "create") && !can(cur, "labourer", "upload") && !can(cur, "master", "update")) return { ...DENIED, added: 0, updated: 0 };
+    if (!rows.length && !updates.length) return { ok: false, error: "Nothing to add", added: 0, updated: 0 };
+    const account = cur.users.find((u) => u.id === cur.currentAccountId);
+    const stamp = { by: account?.name || account?.username || "someone", at: new Date().toISOString(), file: fileName };
+    const used = new Set(cur.labourers.flatMap((l) => [normalizeEp(l.epNumber), ...(l.epHistory ?? []).map((h) => normalizeEp(h.ep))]).filter(Boolean));
+    const clash = rows.find((r) => used.has(normalizeEp(r.epNumber)));
+    if (clash) return { ok: false, error: `EP ${clash.epNumber} is already used — check the file again`, added: 0, updated: 0 };
+    const made = rows.map((r) => ({ ...r, id: uid("lb"), name: r.name.trim(), epNumber: normalizeEp(r.epNumber)!, upload: stamp }));
+    // RIL details refreshed for people already registered (pass dates, status, EIC, area)
+    const patchOf = new Map(updates.map((u) => [u.id, u.patch]));
+    const trades = newTrades.filter((t) => !cur.tradeCatalogue.some((x) => x.id === t.id));
+    setState((s) => {
+      const next = {
+        ...s,
+        labourers: [...made, ...s.labourers.map((l) => (patchOf.has(l.id) ? { ...l, ...patchOf.get(l.id), upload: stamp } : l))],
+        tradeCatalogue: [...s.tradeCatalogue, ...trades.map((t) => ({ id: t.id, label: t.label, subcategories: [], active: true, siteId: null }))],
+      };
+      return {
+        ...next,
+        auditLog: [
+          makeAudit(next, "labourer", "import", `${made.length} labourers added${updates.length ? `, ${updates.length} updated` : ""} from ${fileName}${trades.length ? ` · ${trades.length} new trades` : ""}`),
+          ...s.auditLog,
+        ],
+      };
+    });
+    return { ok: true, added: made.length, updated: updates.length };
+  }, []);
 
   const upsertContractor = useCallback(async (row: Contractor) => {
     const id = row.id || uid("con");
@@ -1305,7 +1524,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const upsertSite = useCallback(async (input: AppState["sites"][number]) => {
     if (!can(stateRef.current, "master", "update")) return DENIED;
     const site = { ...input, code: input.code.trim().toUpperCase(), name: input.name.trim(), plants: input.plants.map((p) => p.trim()).filter(Boolean) };
-    const bad = checkSite(site, stateRef.current.sites);
+    const bad = checkSite(site, stateRef.current.sites) ?? checkPlantRps(site.rpTags, site.plantDetails ?? []);
     if (bad) return { ok: false, error: bad };
     const saved = await remoteSaveSite(site);
     if (!saved.ok) return saved;
@@ -1340,6 +1559,32 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       };
     });
     return id;
+  }, []);
+
+  /** docs §24: monthly pay upload — add new lines, change lines whose amount differs; Admin / HR */
+  const importPay = useCallback((rows: { labourerId: string; month: string; lines: { kind: WageLedgerEntry["kind"]; amount: number; state: "new" | "changed" | "same"; existingId?: string }[] }[], fileName: string) => {
+    const cur = stateRef.current;
+    if (!can(cur, "labourer", "upload")) return { ...DENIED, added: 0, changed: 0 };
+    const account = cur.users.find((u) => u.id === cur.currentAccountId);
+    const stamp = { by: account?.name || account?.username || "someone", at: new Date().toISOString(), file: fileName };
+    const adds: WageLedgerEntry[] = [];
+    const changes = new Map<string, number>();
+    for (const r of rows) {
+      const lab = cur.labourers.find((l) => l.id === r.labourerId);
+      for (const x of r.lines) {
+        if (x.state === "new") adds.push({ id: uid("wl"), labourerId: r.labourerId, date: `${r.month}-01`, kind: x.kind, amount: x.amount, note: `Pay upload ${r.month}`, siteId: lab?.siteId, upload: stamp });
+        else if (x.state === "changed" && x.existingId) changes.set(x.existingId, x.amount);
+      }
+    }
+    if (!adds.length && !changes.size) return { ok: false, error: "Nothing new — every line is already uploaded", added: 0, changed: 0 };
+    setState((s) => {
+      const next = {
+        ...s,
+        wageLedger: [...adds, ...s.wageLedger.map((w) => (changes.has(w.id) ? { ...w, amount: changes.get(w.id)!, upload: stamp, note: `${w.note} · changed by pay upload` } : w))],
+      };
+      return { ...next, auditLog: [makeAudit(next, "labourer", "pay_upload", `${adds.length} pay lines added, ${changes.size} changed from ${fileName}`), ...s.auditLog] };
+    });
+    return { ok: true, added: adds.length, changed: changes.size };
   }, []);
 
   const addWageEntry = useCallback((entry: Omit<WageLedgerEntry, "id">) => {
@@ -1615,13 +1860,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     if (!r) return { ok: false, error: "Request not found" };
     const why = note?.trim();
     const mine = r.createdBy === (cur.currentUserId ?? cur.currentAccountId);
-    // Who may do what, from which status (docs §9)
+    // Who may do what, from which status (docs §9, changed by §24: requests go straight to the
+    // store with the SIC told; the store may reject, and the SIC may override a rejection)
+    const store = can(cur, "requests", "update");
+    const sic = can(cur, "requests", "approve");
     const rules: Record<RequestAction, { from: EquipmentRequestStatus[]; to: EquipmentRequestStatus; allowed: boolean; needsNote?: boolean }> = {
-      approve: { from: ["open"], to: "sic_approved", allowed: can(cur, "requests", "approve") },
-      start: { from: ["sic_approved"], to: "fulfilling", allowed: can(cur, "requests", "update") },
-      fulfil: { from: ["sic_approved", "fulfilling"], to: "fulfilled", allowed: can(cur, "requests", "update") },
-      part_fill: { from: ["sic_approved", "fulfilling"], to: "part_filled", allowed: can(cur, "requests", "update"), needsNote: true },
-      cancel: { from: ["open", "sic_approved", "fulfilling"], to: "cancelled", allowed: can(cur, "requests", "approve") || can(cur, "requests", "update") || mine, needsNote: true },
+      approve: { from: ["open"], to: "sic_approved", allowed: sic },
+      start: { from: ["open", "sic_approved"], to: "fulfilling", allowed: store },
+      fulfil: { from: ["open", "sic_approved", "fulfilling"], to: "fulfilled", allowed: store },
+      part_fill: { from: ["open", "sic_approved", "fulfilling"], to: "part_filled", allowed: store, needsNote: true },
+      reject: { from: ["open", "fulfilling"], to: "rejected", allowed: store, needsNote: true },
+      override: { from: ["rejected"], to: "sic_approved", allowed: sic },
+      cancel: { from: ["open", "sic_approved", "fulfilling", "rejected"], to: "cancelled", allowed: sic || store || mine, needsNote: true },
       receive: { from: ["fulfilled", "part_filled"], to: "received", allowed: mine || cur.currentRole === "super_admin" },
     };
     const rule = rules[action];
@@ -1638,6 +1888,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         if (action === "fulfil" || action === "part_fill") Object.assign(next, { fulfilledBy: by, fulfilledAt: now, fulfillNote: why || "Issued from store" });
         if (action === "part_fill" || action === "cancel") next.cancelNote = why;
         if (action === "receive") next.receivedAt = now;
+        if (action === "reject") Object.assign(next, { rejectedBy: by, rejectedAt: now, rejectNote: why });
+        if (action === "override") Object.assign(next, { overriddenBy: by, overriddenAt: now, overrideNote: why || undefined });
         return next;
       });
       const next = { ...s, equipmentRequests };
@@ -1834,6 +2086,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       addTrade,
       updateLabourer,
       addLabourer,
+      importLabourers,
+      importPay,
       removeLabourer,
       upsertContractor,
       setContractorActive,
@@ -1841,6 +2095,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       upsertMaterial,
       setCatalogActive,
       upsertSite,
+      assignCrew,
+      removeFromCrew,
+      requestCrew,
+      releaseCrew,
+      decideCrew,
       addStaff,
       addWageEntry,
       acknowledgeFinanceAlert,
@@ -1883,6 +2142,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       addTrade,
       updateLabourer,
       addLabourer,
+      importLabourers,
+      importPay,
       removeLabourer,
       upsertContractor,
       setContractorActive,
@@ -1890,6 +2151,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       upsertMaterial,
       setCatalogActive,
       upsertSite,
+      assignCrew,
+      removeFromCrew,
+      requestCrew,
+      releaseCrew,
+      decideCrew,
       addStaff,
       addWageEntry,
       acknowledgeFinanceAlert,

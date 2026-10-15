@@ -9,7 +9,6 @@ import {
   StatusPill,
 } from "@/components/shared/ui-bits";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -23,7 +22,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { canViewModule, effectivePermission, plantScopeFor } from "@/lib/permissions";
 import { useStore } from "@/lib/store";
 import { entrySiteId } from "@/lib/site-scope";
-import type { EquipmentRequest } from "@/lib/types";
+import type { EquipmentRequest, RequestReason } from "@/lib/types";
+import { OPEN_STATUSES, queueOrder, reasonLabel, REQUEST_REASONS } from "@/lib/requests";
+import { useWork } from "@/lib/work/store";
 
 const TONE: Record<
   EquipmentRequest["status"],
@@ -36,16 +37,18 @@ const TONE: Record<
   part_filled: "warn",
   received: "ok",
   cancelled: "default",
+  rejected: "crit",
 };
 
 const LABEL: Record<EquipmentRequest["status"], string> = {
-  open: "Waiting for SIC",
-  sic_approved: "SIC approved",
+  open: "With the store",
+  sic_approved: "SIC override — store to fulfil",
   fulfilling: "Store working on it",
   fulfilled: "Fulfilled — confirm receipt",
   part_filled: "Part filled — confirm receipt",
   received: "Received",
   cancelled: "Cancelled",
+  rejected: "Rejected by store — SIC to decide",
 };
 
 /** Whole days since the request was raised */
@@ -58,6 +61,7 @@ export default function RequestsDeskPage() {
     createEquipmentRequest,
     actOnRequest,
   } = useStore();
+  const { notify } = useWork();
   const role = state.currentRole;
   const canView = canViewModule(currentAccount, role, "requests");
   const canCreate = effectivePermission(currentAccount, role, "requests", "create");
@@ -75,23 +79,29 @@ export default function RequestsDeskPage() {
   const [description, setDescription] = useState("");
   const [qty, setQty] = useState("1");
   const [plant, setPlant] = useState("");
-  const [urgent, setUrgent] = useState(false);
+  const [reason, setReason] = useState<RequestReason | "">("");
   const [msg, setMsg] = useState<string | null>(null);
 
   const list = useMemo(() => {
-    return state.equipmentRequests.filter((r) => {
-      if (scope === "all") return true;
-      return scope.includes(r.plant);
-    });
+    // Rejected (SIC to decide) and urgent first (docs §24)
+    return state.equipmentRequests.filter((r) => scope === "all" || scope.includes(r.plant)).sort(queueOrder);
   }, [state.equipmentRequests, scope]);
 
-  const openCount = list.filter((r) => ["open", "sic_approved", "fulfilling"].includes(r.status)).length;
+  const openCount = list.filter((r) => OPEN_STATUSES.includes(r.status)).length;
   const chosenPlant = plantOptions.includes(plant) ? plant : plantOptions[0] ?? "";
 
   function act(id: string, action: Parameters<typeof actOnRequest>[1]) {
+    const r = state.equipmentRequests.find((x) => x.id === id);
     const res = actOnRequest(id, action, notes[id]);
     setMsg(res.ok ? "Updated." : res.error ?? "Couldn't update");
-    if (res.ok) setNotes((n) => ({ ...n, [id]: "" }));
+    if (!res.ok || !r) return;
+    setNotes((n) => ({ ...n, [id]: "" }));
+    // docs §24: a rejection is urgent for the SIC; an override goes back to the store; the requester hears the outcome
+    const note = notes[id]?.trim();
+    const base = { siteId: r.siteId, subjectStaffId: r.createdBy, tab: "/requests", refId: id };
+    if (action === "reject") notify({ ...base, kind: "request_rejected", problem: true, title: `Store rejected: ${r.description}`, detail: `${note ?? ""} · ${r.plant} · SIC can override` });
+    if (action === "override") notify({ ...base, kind: "request_overridden", problem: true, title: `SIC override — fulfil: ${r.description}`, detail: note || `${r.plant} · qty ${r.qty ?? "—"}` });
+    if (action === "fulfil" || action === "part_fill") notify({ ...base, kind: "request_done", title: `${action === "fulfil" ? "Fulfilled" : "Part filled"}: ${r.description}`, detail: note || "Confirm when it arrives" });
   }
 
   if (!canView) {
@@ -106,26 +116,31 @@ export default function RequestsDeskPage() {
   function submit(e: React.FormEvent) {
     e.preventDefault();
     if (!canCreate || !description.trim()) return;
+    if (!reason) return setMsg("Pick a reason: urgent, damaged, required, replacement, scrapped or expired.");
     if (!chosenPlant) return setMsg("This site has no plants set up — add them in Master Data first.");
     const q = Number(qty);
     if (!(q >= 1)) return setMsg("Quantity must be at least 1.");
-    createEquipmentRequest({
-      siteId: entrySiteId(state),
+    const siteId = entrySiteId(state);
+    const id = createEquipmentRequest({
+      siteId,
       plant: chosenPlant,
       kind,
       description: description.trim(),
       qty: q,
-      urgent,
+      urgent: reason === "urgent",
+      reason,
     });
+    notify({ kind: "request_raised", problem: reason === "urgent", siteId, subjectStaffId: me ?? undefined, title: reason === "urgent" ? `URGENT · ${description.trim()}` : `${reasonLabel(reason)}: ${description.trim()}`, detail: `${kind} · qty ${q} · ${chosenPlant}`, tab: "/requests", refId: id });
     setDescription("");
-    setMsg("Request raised — the SIC approves it, then the store fulfils it.");
+    setReason("");
+    setMsg("Request sent to the store — the SIC is told.");
   }
 
   return (
     <div className="sge-enter space-y-6">
       <SectionHeader
         title="Equipment & spare requests"
-        subtitle="Raise → SIC approves → store fulfils (in full or part) → you confirm it arrived."
+        subtitle="Raise → store fulfils (in full or part) or rejects → if rejected, the SIC can override → you confirm it arrived. The SIC is told of every request."
       />
 
       <div className="grid gap-3 sm:grid-cols-3">
@@ -200,13 +215,22 @@ export default function RequestsDeskPage() {
                     onChange={(e) => setQty(e.target.value)}
                   />
                 </div>
-                <label className="mt-6 flex items-center gap-2 text-sm">
-                  <Checkbox
-                    checked={urgent}
-                    onCheckedChange={(c) => setUrgent(!!c)}
-                  />
-                  Urgent
-                </label>
+                <div className="flex-1">
+                  <Label htmlFor="req-reason">Reason</Label>
+                  <select
+                    id="req-reason"
+                    className="mt-1 h-9 w-full rounded-md border border-[var(--sge-line)] bg-[var(--sge-paper)] px-2 text-sm"
+                    value={reason}
+                    onChange={(e) => setReason(e.target.value as RequestReason | "")}
+                  >
+                    <option value="">Pick…</option>
+                    {REQUEST_REASONS.map((x) => (
+                      <option key={x.value} value={x.value}>
+                        {x.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
               <Button type="submit" className="w-full">
                 Submit request
@@ -233,10 +257,13 @@ export default function RequestsDeskPage() {
                     <div className="flex flex-wrap items-center justify-between gap-2">
                       <div className="font-medium text-sm">
                         {r.description}
-                        {r.urgent ? (
+                        {r.urgent || r.reason === "urgent" ? (
                           <span className="ml-2 text-[10px] font-bold uppercase text-[var(--sge-crit)]">
                             Urgent
                           </span>
+                        ) : null}
+                        {r.reason && r.reason !== "urgent" ? (
+                          <span className="ml-2 text-[10px] font-bold uppercase text-[var(--sge-brass-ink)]">{reasonLabel(r.reason)}</span>
                         ) : null}
                       </div>
                       <StatusPill tone={TONE[r.status]}>{LABEL[r.status] ?? r.status}</StatusPill>
@@ -244,21 +271,23 @@ export default function RequestsDeskPage() {
                     <div className="mt-1 text-xs text-[var(--sge-ink-3)]">
                       {r.kind} · {r.plant} · qty {r.qty ?? "—"} · by {creator}
                       {r.sourceDprId ? ` · from ${r.sourceDprId}` : ""}
-                      {["open", "sic_approved", "fulfilling"].includes(r.status) ? ` · ${ageDays(r.createdAt)} day(s) old` : ""}
+                      {OPEN_STATUSES.includes(r.status) ? ` · ${ageDays(r.createdAt)} day(s) old` : ""}
                     </div>
                     {(() => {
                       const buttons: [Parameters<typeof actOnRequest>[1], string, "default" | "outline" | "ghost"][] = [];
-                      if (canApprove && r.status === "open") buttons.push(["approve", "Approve", "default"]);
-                      if (canFulfill && r.status === "sic_approved") buttons.push(["start", "Start", "outline"]);
-                      if (canFulfill && (r.status === "sic_approved" || r.status === "fulfilling")) buttons.push(["fulfil", "Fulfilled in full", "default"], ["part_fill", "Part filled", "outline"]);
-                      if ((canApprove || canFulfill || r.createdBy === me) && ["open", "sic_approved", "fulfilling"].includes(r.status)) buttons.push(["cancel", "Cancel", "ghost"]);
+                      // docs §24: no SIC approval step; the store fulfils or rejects, the SIC overrides a rejection
+                      if (canFulfill && (r.status === "open" || r.status === "sic_approved")) buttons.push(["start", "Start", "outline"]);
+                      if (canFulfill && (r.status === "open" || r.status === "sic_approved" || r.status === "fulfilling")) buttons.push(["fulfil", "Fulfilled in full", "default"], ["part_fill", "Part filled", "outline"]);
+                      if (canFulfill && (r.status === "open" || r.status === "fulfilling")) buttons.push(["reject", "Reject", "outline"]);
+                      if (canApprove && r.status === "rejected") buttons.push(["override", "Override — store must fulfil", "default"]);
+                      if ((canApprove || canFulfill || r.createdBy === me) && OPEN_STATUSES.includes(r.status)) buttons.push(["cancel", "Cancel", "ghost"]);
                       if ((r.createdBy === me || role === "super_admin") && (r.status === "fulfilled" || r.status === "part_filled")) buttons.push(["receive", "Confirm received", "default"]);
                       if (!buttons.length) return null;
                       return (
                         <div className="mt-2 space-y-2">
-                          {buttons.some(([a]) => a === "part_fill" || a === "cancel") ? (
+                          {buttons.some(([a]) => a === "part_fill" || a === "cancel" || a === "reject" || a === "override") ? (
                             <Input
-                              placeholder="Note — needed for part fill or cancel"
+                              placeholder="Note — needed for part fill, reject or cancel"
                               value={notes[r.id] ?? ""}
                               onChange={(e) => setNotes((n) => ({ ...n, [r.id]: e.target.value }))}
                             />
@@ -273,6 +302,12 @@ export default function RequestsDeskPage() {
                         </div>
                       );
                     })()}
+                    {r.rejectNote ? (
+                      <div className="mt-1 text-xs text-[var(--sge-crit)]">Rejected: {r.rejectNote}</div>
+                    ) : null}
+                    {r.overriddenAt ? (
+                      <div className="mt-1 text-xs text-[var(--sge-brass-ink)]">SIC overrode the store{r.overrideNote ? `: ${r.overrideNote}` : ""}</div>
+                    ) : null}
                     {r.cancelNote ? (
                       <div className="mt-1 text-xs text-[var(--sge-warn)]">Note: {r.cancelNote}</div>
                     ) : null}

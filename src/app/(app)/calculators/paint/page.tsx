@@ -22,6 +22,15 @@ import { calculatePaint } from "@/lib/paint-calc";
 import { PAINT_SCHEMES } from "@/lib/paint-schemes";
 import type { AppMethod } from "@/lib/paint-types";
 
+function PdfButton({ href }: { href: string }) {
+  // docs §24: the working and result, with the user's profile, saved as PDF
+  return (
+    <a href={href} target="_blank" rel="noreferrer">
+      <Button size="sm" variant="outline">Download PDF</Button>
+    </a>
+  );
+}
+
 function PaintCalculatorPage() {
   const [schemeId, setSchemeId] = useState(2);
   const [area, setArea] = useState(1000);
@@ -55,6 +64,11 @@ function PaintCalculatorPage() {
       <SectionHeader
         title="Paint calculator"
         subtitle="MPS schemes subset from Hub / Paint Calculator — norms + NO_NORM path with manual litres + reason."
+        action={
+          <PdfButton
+            href={`/print/calc?${new URLSearchParams({ type: "paint", scheme: String(schemeId), area: String(area), method, cont: String(contingency), ...(manualLitres ? { manual: manualLitres } : {}), ...(manualReason.trim() ? { reason: manualReason.trim() } : {}) })}`}
+          />
+        }
       />
 
       <div className="grid gap-4 lg:grid-cols-[1fr_1.1fr]">

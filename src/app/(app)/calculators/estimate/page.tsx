@@ -23,6 +23,15 @@ import { useStore } from "@/lib/store";
 import { entrySiteId } from "@/lib/site-scope";
 import type { RateCardKind } from "@/lib/types";
 
+function PdfButton({ href }: { href: string }) {
+  // docs §24: the working and result, with the user's profile, saved as PDF
+  return (
+    <a href={href} target="_blank" rel="noreferrer">
+      <Button size="sm" variant="outline">Download PDF</Button>
+    </a>
+  );
+}
+
 function CostEstimatePage() {
   const { state, updateRateCard } = useStore();
   const [kind, setKind] = useState<RateCardKind>("pipeline");
@@ -50,6 +59,7 @@ function CostEstimatePage() {
       <SectionHeader
         title="Cost & manpower estimator"
         subtitle="Pipeline, Structures, Tanks (₹/m²) and Scaffolding (₹/m³). When a matching PO rate exists for the active site, the rate book wins over legacy rate cards."
+        action={<PdfButton href={`/print/calc?type=estimate&kind=${kind}&qty=${qty}`} />}
       />
 
       <div className="grid gap-4 lg:grid-cols-2">

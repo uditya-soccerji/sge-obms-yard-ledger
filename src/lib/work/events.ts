@@ -32,7 +32,27 @@ export type EventKind =
   | "jms_submitted"
   | "jms_linked"
   | "jms_difference"
-  | "wo_warning";
+  | "wo_warning"
+  // Crews (docs §23)
+  | "crew_changed"
+  | "crew_requested"
+  | "crew_released"
+  | "crew_decided"
+  // RIL gate pass (docs §24)
+  | "pass_expiring"
+  // Store requests (docs §24)
+  | "request_raised"
+  | "request_rejected"
+  | "request_overridden"
+  | "request_done"
+  | "dpr_issue"
+  // Job plan → JMS → Admin (docs §24)
+  | "job_plan"
+  | "job_plan_decided"
+  | "jms_admin_pending"
+  | "jms_admin_approved"
+  | "jms_returned"
+  | "pay_uploaded";
 
 export interface WorkEvent {
   id: string;
@@ -47,6 +67,8 @@ export interface WorkEvent {
   siteId: string;
   /** Staff id the event is about (job's supervisor), for "tell the submitter" */
   subjectStaffId?: string;
+  /** A second staff member to tell (e.g. the other supervisor in a crew move) */
+  alsoStaffId?: string;
   title: string;
   detail: string;
   /** Super Admin who did it while using "View as" */
@@ -66,7 +88,7 @@ export interface Viewer {
 }
 
 /** Events that need someone to act, or tell the submitter the outcome: instant. */
-export const INSTANT: EventKind[] = ["job_closed", "jms_confirmed", "job_sent_back", "dpr_submitted", "dpr_approved", "dpr_sent_back"];
+export const INSTANT: EventKind[] = ["job_closed", "jms_confirmed", "job_sent_back", "dpr_submitted", "dpr_approved", "dpr_sent_back", "crew_requested", "crew_released", "crew_decided", "pass_expiring", "request_rejected", "request_overridden", "dpr_issue", "job_plan", "job_plan_decided", "jms_admin_pending", "jms_admin_approved", "jms_returned"];
 
 export const KIND_LABEL: Record<EventKind, string> = {
   dpr_added: "DPR entry",
@@ -96,15 +118,32 @@ export const KIND_LABEL: Record<EventKind, string> = {
   jms_linked: "JMS linked",
   jms_difference: "Internal vs submitted JMS differ",
   wo_warning: "Work order warning",
+  crew_changed: "Crew changed",
+  crew_requested: "Crew request",
+  crew_released: "Labourer released",
+  crew_decided: "Crew request decided",
+  pass_expiring: "Gate pass expiring",
+  request_raised: "Store request",
+  request_rejected: "Store rejected a request",
+  request_overridden: "SIC overrode the store",
+  request_done: "Request fulfilled",
+  dpr_issue: "Issue on site",
+  job_plan: "Job plan to approve",
+  job_plan_decided: "Job plan decided",
+  jms_admin_pending: "JMS for Admin",
+  jms_admin_approved: "JMS approved by Admin",
+  jms_returned: "JMS sent back",
+  pay_uploaded: "Monthly pay uploaded",
 };
 
-const onSite = (v: Viewer, siteId: string) => v.siteIds.length === 0 || v.siteIds.includes(siteId);
+// Company-wide events (no site, e.g. the monthly pay upload) reach every viewer of the right role
+const onSite = (v: Viewer, siteId: string) => !siteId || v.siteIds.length === 0 || v.siteIds.includes(siteId);
 
 /** Does this viewer get a notification for this event? (docs §19) */
 export function isFor(e: WorkEvent, v: Viewer): boolean {
   if (v.role === "owner" || v.role === "super_admin") return true;
   if (!onSite(v, e.siteId)) return false;
-  const mine = !!v.staffId && e.subjectStaffId === v.staffId;
+  const mine = !!v.staffId && (e.subjectStaffId === v.staffId || e.alsoStaffId === v.staffId);
   switch (e.kind) {
     case "dpr_added":
     case "job_started":
@@ -150,6 +189,43 @@ export function isFor(e: WorkEvent, v: Viewer): boolean {
     case "expense_added":
     case "expense_voided":
     case "expense_edited":
+      return v.role === "finance";
+    // docs §23: SIC hears every crew change and request on the site; the supervisors
+    // involved are told; Owner / SA get everything (moves off a crew are problems)
+    case "crew_changed":
+    case "crew_requested":
+    case "crew_released":
+    case "crew_decided":
+      // docs §24: moves between crews (flagged as problems) also go to Admin and HR
+      return mine || v.role === "sic" || (!!e.problem && (v.role === "admin" || v.role === "hr"));
+    // docs §24: HR renews; Admin and the labourer's supervisor are told too
+    case "pass_expiring":
+      return mine || v.role === "hr" || v.role === "admin";
+    // docs §24: requests go straight to the store and the SIC is told; a rejection is urgent
+    // for the SIC; an override goes back to the store; the requester hears the outcome
+    case "request_raised":
+      return v.role === "store" || v.role === "sic";
+    case "request_rejected":
+      return mine || v.role === "sic";
+    case "request_overridden":
+      return mine || v.role === "store";
+    case "request_done":
+      return mine;
+    case "dpr_issue":
+      return v.role === "sic";
+    // docs §24: the SIC approves job plans; the Admin finishes the JMS; Finance hears when it's ready
+    case "job_plan":
+      return v.role === "sic";
+    case "job_plan_decided":
+      return mine;
+    case "jms_admin_pending":
+      return v.role === "admin";
+    case "jms_admin_approved":
+      return mine || v.role === "finance" || v.role === "sic";
+    case "jms_returned":
+      return mine || v.role === "sic";
+    // docs §24: Admin / HR upload the month's pay; Finance is told
+    case "pay_uploaded":
       return v.role === "finance";
   }
 }

@@ -7,6 +7,7 @@ export type OpsPanelId =
   | "store"
   | "safety"
   | "approvals"
+  | "crew"
   | "acpl"
   | "jms"
   | "finance"
@@ -31,6 +32,7 @@ export interface OpsPill {
 const ROLE_PILLS: Record<RoleId, OpsPill[]> = {
   super_admin: [
     { id: "dpr", label: "DPR", module: "dpr" },
+    { id: "crew", label: "Crews", module: "crew" },
     { id: "store", label: "Store / FIM", module: "store" },
     { id: "safety", label: "Safety", module: "safety" },
     { id: "approvals", label: "Approvals", module: "approvals" },
@@ -48,6 +50,7 @@ const ROLE_PILLS: Record<RoleId, OpsPill[]> = {
   ],
   owner: [
     { id: "approvals", label: "Approvals", module: "approvals" },
+    { id: "crew", label: "Crews", module: "crew" },
     { id: "store", label: "Store / FIM", module: "store" },
     { id: "jms", label: "JMS", module: "jms" },
     { id: "finance", label: "Finance", module: "finance" },
@@ -58,11 +61,18 @@ const ROLE_PILLS: Record<RoleId, OpsPill[]> = {
   ],
   sic: [
     { id: "approvals", label: "Approvals", module: "approvals" },
+    { id: "crew", label: "Crews", module: "crew" },
+    // docs §24: the SIC is told of every store request and overrides a store rejection
+    { id: "requests", label: "Requests", module: "requests" },
     { id: "dpr", label: "DPR", module: "dpr" },
     { id: "jms", label: "JMS", module: "jms" },
     { id: "acpl", label: "ACPL", module: "acpl" },
     { id: "store", label: "Store / FIM", module: "store" },
     { id: "safety", label: "Safety", module: "safety" },
+    { id: "estimate", label: "Estimator", module: "calculators" },
+    { id: "paint-calc", label: "Paint calc", module: "calculators" },
+    { id: "area-calc", label: "Area", module: "calculators" },
+    { id: "scaffold-calc", label: "Scaffold calc", module: "calculators" },
   ],
   admin: [
     { id: "admin", label: "Uploads", module: "admin" },
@@ -70,6 +80,9 @@ const ROLE_PILLS: Record<RoleId, OpsPill[]> = {
     { id: "acpl", label: "ACPL", module: "acpl" },
     { id: "jms", label: "JMS", module: "jms" },
     { id: "estimate", label: "Estimator", module: "calculators" },
+    { id: "paint-calc", label: "Paint calc", module: "calculators" },
+    { id: "area-calc", label: "Area", module: "calculators" },
+    { id: "scaffold-calc", label: "Scaffold calc", module: "calculators" },
   ],
   hr: [
     { id: "hr", label: "Attendance", module: "hr" },
@@ -82,22 +95,33 @@ const ROLE_PILLS: Record<RoleId, OpsPill[]> = {
   ],
   supervisor: [
     { id: "dpr", label: "DPR", module: "dpr" },
+    { id: "crew", label: "My crew", module: "crew" },
     { id: "store", label: "Store", module: "store" },
     { id: "submissions", label: "My submissions", module: "submissions" },
     { id: "requests", label: "Requests", module: "requests" },
-    { id: "paint-calc", label: "Paint calc", module: "calculators" },
     { id: "estimate", label: "Estimator", module: "calculators" },
+    { id: "paint-calc", label: "Paint calc", module: "calculators" },
+    { id: "area-calc", label: "Area", module: "calculators" },
+    { id: "scaffold-calc", label: "Scaffold calc", module: "calculators" },
   ],
   store: [
     { id: "store", label: "Store / FIM", module: "store" },
     { id: "dpr", label: "DPR", module: "dpr" },
     { id: "requests", label: "Requests", module: "requests" },
     { id: "submissions", label: "My submissions", module: "submissions" },
+    { id: "estimate", label: "Estimator", module: "calculators" },
+    { id: "paint-calc", label: "Paint calc", module: "calculators" },
+    { id: "area-calc", label: "Area", module: "calculators" },
+    { id: "scaffold-calc", label: "Scaffold calc", module: "calculators" },
   ],
   safety: [
     { id: "safety", label: "Safety DPR", module: "safety" },
     { id: "dpr", label: "DPR desk", module: "dpr" },
     { id: "submissions", label: "My submissions", module: "submissions" },
+    { id: "estimate", label: "Estimator", module: "calculators" },
+    { id: "paint-calc", label: "Paint calc", module: "calculators" },
+    { id: "area-calc", label: "Area", module: "calculators" },
+    { id: "scaffold-calc", label: "Scaffold calc", module: "calculators" },
   ],
   labourer: [],
 };

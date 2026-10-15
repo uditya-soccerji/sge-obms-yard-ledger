@@ -34,7 +34,9 @@ export type ModuleId =
   | "submissions"
   | "trades"
   | "rates"
-  | "master";
+  | "master"
+  /** Supervisor crews: who works under whom (docs §23) */
+  | "crew";
 
 export type PermissionAction =
   | "view"
@@ -90,7 +92,12 @@ export type EquipmentRequestStatus =
   | "fulfilled"
   | "part_filled"
   | "received"
-  | "cancelled";
+  | "cancelled"
+  /** Store said no; the SIC is alerted and may override (docs §24) */
+  | "rejected";
+
+/** Why a supervisor asks the store (docs §24) */
+export type RequestReason = "urgent" | "damaged" | "required" | "replacement" | "scrapped" | "expired";
 
 export interface EquipmentRequest {
   id: string;
@@ -113,6 +120,14 @@ export interface EquipmentRequest {
   receivedAt?: string;
   /** Why it was cancelled or only part-filled (required for those, docs §9) */
   cancelNote?: string;
+  reason?: RequestReason;
+  /** Store rejection, and the SIC's override of it (docs §24) */
+  rejectedBy?: string;
+  rejectedAt?: string;
+  rejectNote?: string;
+  overriddenBy?: string;
+  overriddenAt?: string;
+  overrideNote?: string;
 }
 
 export type SupervisorType =
@@ -225,6 +240,24 @@ export interface Site {
   rpTags: string[];
   /** Plants / work areas within the site */
   plants: string[];
+  /**
+   * Per-plant RP and locations (B02), keyed by plant name. A plant with no
+   * entry has no locations and takes the site's RP when the site has one.
+   */
+  plantDetails?: PlantDetail[];
+}
+
+export interface PlantLocation {
+  name: string;
+  /** Unset = same RP as its plant */
+  rp?: string;
+}
+
+export interface PlantDetail {
+  /** Matches a name in `Site.plants` (ignoring case) */
+  name: string;
+  rp?: string;
+  locations: PlantLocation[];
 }
 
 export interface StaffMember {
@@ -257,7 +290,31 @@ export interface Labourer {
   wageDaily: number;
   equipmentIds: string[];
   active: boolean;
+  /** Skill level (B09, owner 2026-10-13); RIL "CATEGORY" */
+  skill?: SkillLevel;
+  /** Old EP numbers, newest last; the current one is `epNumber` (docs §1) */
+  epHistory?: { ep: string; until: string }[];
+  /** RIL Engineer-in-Charge: reference contact at RIL, shown on the profile (owner 2026-10-14) */
+  eic?: string;
+  /** RIL workman (pass) status, e.g. Valid, Expired, Hibernated (from the RIL export) */
+  rilStatus?: string;
+  /** RIL "Area Of Movement", e.g. "Refining - DTA-ISBL" */
+  rilArea?: string;
+  /** RIL pass validity from the RIL export (YYYY-MM-DD); HR / Admin / supervisor alerted before expiry (docs §24) */
+  passValidFrom?: string;
+  passExpiry?: string;
+  /** Last upload that added or changed this row: shown when the same data is uploaded again (docs §24) */
+  upload?: UploadStamp;
 }
+
+/** Who uploaded a row, when and from which file (every upload checks for duplicates, docs §24) */
+export interface UploadStamp {
+  by: string;
+  at: string;
+  file: string;
+}
+
+export type SkillLevel = "highly_skilled" | "skilled" | "semi_skilled" | "unskilled";
 
 export interface AttendanceRecord {
   id: string;
@@ -269,7 +326,7 @@ export interface AttendanceRecord {
   markedBy: string;
   siteId: string;
   note?: string;
-  /** Set when derived from an SIC-approved DPR */
+  /** Set when derived from a submitted DPR (docs §23: attendance counts on submit) */
   sourceDprId?: string;
   reconciled?: boolean;
   /** HR correction of a DPR-derived mark: what it was before (the DPR link stays) */
@@ -314,6 +371,7 @@ export interface DprRequest {
   description: string;
   qty?: number;
   urgent?: boolean;
+  reason?: RequestReason;
 }
 
 export interface DprScaffoldWorkLine {
@@ -555,12 +613,15 @@ export interface WageLedgerEntry {
   labourerId?: string;
   staffId?: string;
   date: string;
-  kind: "salary" | "bonus" | "advance" | "ot" | "incentive";
+  /** Pay lines; pf … deduction come from the monthly pay upload (docs §24) */
+  kind: "salary" | "bonus" | "advance" | "ot" | "incentive" | "pf" | "room_rent" | "travel" | "food" | "deduction";
   amount: number;
   note: string;
   flaggedToSic?: boolean;
   /** Site this row belongs to (unset = company-wide). */
   siteId?: string;
+  /** Set when the line came from the monthly pay upload (docs §24) */
+  upload?: UploadStamp;
 }
 
 export interface FinanceAlert {
@@ -620,6 +681,32 @@ export interface AppState {
   financeAlerts: FinanceAlert[];
   auditLog: AuditEntry[];
   equipmentRequests: EquipmentRequest[];
+  /** Supervisor requests to take a labourer onto their crew (docs §23) */
+  crewRequests: CrewRequest[];
   /** One master store — load once, resolve site-then-company in memory. */
   masterCatalog: MasterCatalog;
 }
+
+export type CrewRequestStatus = "requested" | "released" | "approved" | "rejected" | "cancelled";
+
+/**
+ * A supervisor asking for a labourer (docs §23). Needs SIC approval; when the
+ * labourer is on another crew, that supervisor is told and must release them first.
+ */
+export interface CrewRequest {
+  id: string;
+  siteId: string;
+  labourerId: string;
+  /** Supervisor (staff id) who wants the labourer */
+  toSupervisorId: string;
+  /** Supervisor the labourer is with when asked; null = unassigned */
+  fromSupervisorId: string | null;
+  requestedBy: string;
+  requestedAt: string;
+  status: CrewRequestStatus;
+  releasedAt?: string;
+  decidedBy?: string;
+  decidedAt?: string;
+  note?: string;
+}
+

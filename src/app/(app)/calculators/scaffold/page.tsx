@@ -5,7 +5,17 @@ import { useState } from "react";
 import { Panel, SectionHeader } from "@/components/shared/ui-bits";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Button } from "@/components/ui/button";
 import { scaffoldVolume } from "@/lib/paint-calc";
+
+function PdfButton({ href }: { href: string }) {
+  // docs §24: the working and result, with the user's profile, saved as PDF
+  return (
+    <a href={href} target="_blank" rel="noreferrer">
+      <Button size="sm" variant="outline">Download PDF</Button>
+    </a>
+  );
+}
 
 function ScaffoldPage() {
   const [l, setL] = useState(20);
@@ -19,6 +29,7 @@ function ScaffoldPage() {
       <SectionHeader
         title="Scaffolding volume"
         subtitle="Standing scaffold volume L×B×H×E for DPR and hire tracking."
+        action={<PdfButton href={`/print/calc?type=scaffold&l=${l}&b=${b}&h=${h}&e=${e}`} />}
       />
       <Panel className="max-w-lg space-y-4">
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
