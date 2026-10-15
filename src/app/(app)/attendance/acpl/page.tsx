@@ -17,6 +17,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useStore } from "@/lib/store";
 import { useWork } from "@/lib/work/store";
 import type { AcplMatchFlag, AcplResolveStatus } from "@/lib/types";
+import { OpsExcelTransfer } from "@/components/ops/ops-excel-transfer";
 
 const FLAG_TONE: Record<
   AcplMatchFlag,
@@ -99,6 +100,8 @@ function AcplMatchPage() {
         title="ACPL attendance match"
         subtitle="Upload RIL ACPL punching list (CSV / paste) → match against SIC-approved DPR attendance → HR resolve flags."
       />
+
+      <OpsExcelTransfer kind="acplPunches" />
 
       <div className="grid gap-3 sm:grid-cols-4">
         <KpiTile label="Punches loaded" value={String(state.acplPunches.length)} />

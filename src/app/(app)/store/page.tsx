@@ -11,6 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PaintBoard } from "@/components/work/paint-board";
+import { OpsExcelTransfer } from "@/components/ops/ops-excel-transfer";
 import { useStore } from "@/lib/store";
 import { useSiteReports } from "@/lib/work/use-reports";
 import { useState } from "react";
@@ -42,6 +43,8 @@ function StoreHomePage() {
           </div>
         }
       />
+
+      <OpsExcelTransfer kind="equipment" />
 
       <Panel>
         <h3 className="mb-2 font-heading text-sm font-bold">Store DPRs</h3>

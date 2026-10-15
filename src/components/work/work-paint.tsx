@@ -10,6 +10,7 @@ import { today } from "@/lib/today";
 import { useWork } from "@/lib/work/store";
 import { inStock } from "@/lib/work/paint-steps";
 import { fmtM2, Msg, selectCls, tdCls, thCls, useWorkScope } from "./common";
+import { WorkExcelTransferStack } from "./work-excel-transfer";
 
 const SLICES = [
   { key: "expired", label: "Expired", color: "var(--sge-crit)" },
@@ -50,6 +51,7 @@ export function WorkPaint() {
 
   return (
     <div className="space-y-4">
+      <WorkExcelTransferStack kinds={["paintBatches", "paintSteps"]} />
       <div className="grid gap-4 lg:grid-cols-[320px_1fr]">
         <Panel>
           <h3 className="font-heading text-sm font-bold">Stock by expiry</h3>

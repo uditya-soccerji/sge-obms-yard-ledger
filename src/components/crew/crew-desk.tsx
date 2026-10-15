@@ -11,6 +11,7 @@ import { useStore } from "@/lib/store";
 import type { CrewRequest, Labourer } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { useWork } from "@/lib/work/store";
+import { OpsExcelTransferStack } from "@/components/ops/ops-excel-transfer";
 
 const CREW_TAB = "/operations?p=crew";
 
@@ -152,6 +153,7 @@ export function CrewDesk() {
         title={`Crews · ${site?.code ?? ""}`}
         subtitle="Standing crews (docs §23, §24). The SIC changes crews; a supervisor asks and the SIC approves. Taking someone from another crew tells that supervisor, the SIC, Admin and HR. Every change is logged."
       />
+      <OpsExcelTransferStack kinds={["crewAssignments", "crewRequests"]} />
       {msg ? (
         <p className={cn("text-sm", msg.ok ? "text-[var(--sge-ok)]" : "text-[var(--sge-crit)]")}>{msg.text}</p>
       ) : null}

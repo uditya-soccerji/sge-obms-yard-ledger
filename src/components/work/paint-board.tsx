@@ -12,6 +12,7 @@ import { inStock, LIFECYCLE, LIFECYCLE_LABEL, recoRows, stepVariance } from "@/l
 import { useWork } from "@/lib/work/store";
 import type { PaintLifecycle, PaintStep } from "@/lib/work/types";
 import { Msg, selectCls, tdCls, thCls, useWorkScope } from "./common";
+import { WorkExcelTransferStack } from "./work-excel-transfer";
 
 /**
  * The Store's paint board (docs §6, merge plan Step 8) on Work batches: the
@@ -39,6 +40,7 @@ export function PaintBoard() {
 
   return (
     <div className="space-y-4">
+      <WorkExcelTransferStack kinds={["paintBatches", "paintSteps"]} />
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <KpiTile label="On order (PR / PO / RIL store)" value={String(batches.filter((b) => !inStock(b)).length)} />
         <KpiTile label="In SGE store" value={`${round3(byStage("sge_receive").reduce((t, b) => t + b.qtyL, 0))} L`} tone="ok" />

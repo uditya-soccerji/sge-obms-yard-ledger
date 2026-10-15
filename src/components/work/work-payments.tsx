@@ -10,6 +10,7 @@ import { useWork } from "@/lib/work/store";
 import type { JmsPayment } from "@/lib/work/types";
 import { cn } from "@/lib/utils";
 import { fmtM2, Msg, selectCls, tdCls, thCls, useWorkScope } from "./common";
+import { WorkExcelTransfer } from "./work-excel-transfer";
 
 const REASONS: { id: NonNullable<JmsPayment["reason"]>; label: string }[] = [
   { id: "deduction", label: "Deduction" },
@@ -43,6 +44,7 @@ export function WorkPayments() {
 
   return (
     <div className="space-y-4">
+      <WorkExcelTransfer kind="payments" />
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
         <KpiTile
           label="Approved by SIC"

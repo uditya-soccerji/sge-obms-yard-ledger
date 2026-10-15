@@ -25,6 +25,7 @@ import { entrySiteId } from "@/lib/site-scope";
 import type { EquipmentRequest, RequestReason } from "@/lib/types";
 import { OPEN_STATUSES, queueOrder, reasonLabel, REQUEST_REASONS } from "@/lib/requests";
 import { useWork } from "@/lib/work/store";
+import { OpsExcelTransfer } from "@/components/ops/ops-excel-transfer";
 
 const TONE: Record<
   EquipmentRequest["status"],
@@ -142,6 +143,8 @@ export default function RequestsDeskPage() {
         title="Equipment & spare requests"
         subtitle="Raise → store fulfils (in full or part) or rejects → if rejected, the SIC can override → you confirm it arrived. The SIC is told of every request."
       />
+
+      <OpsExcelTransfer kind="equipmentRequests" />
 
       <div className="grid gap-3 sm:grid-cols-3">
         <KpiTile label="Open / fulfilling" value={String(openCount)} tone="warn" />

@@ -17,6 +17,7 @@ import type { Job, Member, Stage } from "@/lib/work/types";
 import { STAGES } from "@/lib/work/types";
 import { cn } from "@/lib/utils";
 import { fmtM2, lineLabel, Msg, selectCls, StageChips, useWorkScope } from "./common";
+import { WorkExcelTransferStack } from "./work-excel-transfer";
 
 type Filter = "open" | "awaiting_sic" | "closed";
 
@@ -46,6 +47,7 @@ export function WorkJobs() {
 
   return (
     <div className="space-y-4">
+      <WorkExcelTransferStack kinds={["jobs", "dprEntries"]} />
       <div className="flex flex-wrap items-center gap-1">
         {(
           [

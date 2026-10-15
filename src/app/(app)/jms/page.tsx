@@ -22,6 +22,7 @@ import { useWork } from "@/lib/work/store";
 import { compareJms, linkCandidates, parseSubmissionItems, supervisorRatings } from "@/lib/work/jms-compare";
 import { JMS_FLOW } from "@/lib/work/logic";
 import type { SubmissionStatus } from "@/lib/work/types";
+import { WorkExcelTransfer } from "@/components/work/work-excel-transfer";
 
 const STATUSES: SubmissionStatus[] = [...JMS_FLOW.filter((s) => s !== "PAID"), "A1 REJECT"];
 const selectCls = "mt-1 h-9 w-full rounded-md border border-[var(--sge-line)] bg-[var(--sge-paper)] px-2 text-sm";
@@ -91,6 +92,8 @@ function JmsPage() {
         title="JMS — internal vs submitted to RIL"
         subtitle="Internal JMS = what SIC closed in Work. Submitted JMS = the pack sent to RIL, uploaded by Admin. They are compared, never merged; every difference is flagged."
       />
+
+      <WorkExcelTransfer kind="submissions" />
 
       <div className="grid gap-3 sm:grid-cols-5">
         <KpiTile label="Internal JMS" value={String(internal.length)} hint={formatINR(internal.reduce((t, j) => t + j.amount, 0))} />
