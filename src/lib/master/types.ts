@@ -6,6 +6,7 @@ export type MasterSheetId =
   | "labourers"
   | "contractors"
   | "trades"
+  | "wageBands"
   | "dprTypes"
   | "activityTemplates"
   | "units"
@@ -67,6 +68,11 @@ export const MASTER_SHEETS: {
   { id: "labourers", label: "Labourers", hint: "Register — contractor required" },
   { id: "contractors", label: "Contractors", hint: "Labour contractor firms" },
   { id: "trades", label: "Trades", hint: "Labour trades and sub-categories" },
+  {
+    id: "wageBands",
+    label: "Daily wages",
+    hint: "Default ₹/day by trade, skill and experience — labourer wage can still be overridden",
+  },
   { id: "dprTypes", label: "DPR types", hint: "What New DPR can pick" },
   {
     id: "activityTemplates",

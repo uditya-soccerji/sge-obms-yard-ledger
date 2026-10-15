@@ -31,6 +31,11 @@ export function useWorkScope() {
     const w = wages.get(id);
     return w && w > 0 ? w : DEFAULT_WAGE;
   };
+  /** Gate / attendance overrides for job labour cost (docs §12, §18) */
+  const labourPay = {
+    attendance: fullState.attendance,
+    acplMatches: fullState.acplMatches,
+  };
   /** Labourers whose wage isn't set (costed at the default wage) */
   const noWage = (id: string) => !(Number(wages.get(id)) > 0);
   const inSite = (siteId: string) =>
@@ -57,6 +62,7 @@ export function useWorkScope() {
     sites: state.sites,
     staff: state.staff,
     wageOf,
+    labourPay,
     noWage,
     /** The current month of a site (each site closes its own month) */
     monthOf: (siteId: string) => currentMonthOf(work, siteId),

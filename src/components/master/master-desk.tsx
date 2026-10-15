@@ -25,8 +25,11 @@ import { missingFields } from "@/lib/labourers";
 import { rilStatusProblem, SKILL_LEVELS } from "@/lib/labour-import";
 import { LabourImport } from "./labour-import";
 import { buildPlantDetails, parseRpTags, plantRp, sitePlantDetails } from "@/lib/sites";
-import type { CatalogItem, MaterialItem } from "@/lib/master/types";
-import type { Labourer, PlantDetail, RoleId, Site, UserAccount } from "@/lib/types";
+import type { CatalogItem, MasterCatalog, MaterialItem } from "@/lib/master/types";
+import type { ExperienceLevel, Labourer, PlantDetail, RoleId, Site, SkillLevel, UserAccount } from "@/lib/types";
+import { EXPERIENCE_LEVELS, experienceLabel, suggestedWage } from "@/lib/wages";
+import { ExcelTransfer } from "./excel-transfer";
+import { canExcelTransfer } from "@/lib/excel-io";
 import { entrySiteId } from "@/lib/site-scope";
 import { checkSeat, checkSites, MIN_PASSWORD } from "@/lib/users";
 import type { StaffMember } from "@/lib/types";
@@ -71,7 +74,7 @@ export function MasterDesk() {
         subtitle={
           allowed === "all"
             ? "Owner & Super Admin. Deactivate instead of delete. Site rows first; company-wide fills the rest. Dropdowns elsewhere read this store."
-            : "Admin: trades and the rate book. Other sheets are Owner / Super Admin."
+            : "Admin: trades, daily wages, and the rate book. Other sheets are Owner / Super Admin."
         }
       />
       <div className="flex flex-wrap gap-1 border-b border-[var(--sge-line)] pb-2">
@@ -153,22 +156,31 @@ function SheetBody({
   scope: ScopeFilter;
   showInactive: boolean;
 }) {
-  if (sheet === "sites") return <SitesSheet showInactive={showInactive} />;
-  if (sheet === "users") return <UsersSheet showInactive={showInactive} />;
-  if (sheet === "labourers")
-    return (
+  const body =
+    sheet === "sites" ? (
+      <SitesSheet showInactive={showInactive} />
+    ) : sheet === "users" ? (
+      <UsersSheet showInactive={showInactive} />
+    ) : sheet === "labourers" ? (
       <LabourSheet scope={scope} showInactive={showInactive} />
+    ) : sheet === "contractors" ? (
+      <ContractorsSheet scope={scope} showInactive={showInactive} />
+    ) : sheet === "trades" ? (
+      <TradesSheet scope={scope} showInactive={showInactive} />
+    ) : sheet === "wageBands" ? (
+      <WageBandsSheet showInactive={showInactive} />
+    ) : sheet === "rateBook" ? (
+      <RatesSheet scope={scope} showInactive={showInactive} />
+    ) : sheet === "materials" ? (
+      <MaterialsSheet scope={scope} showInactive={showInactive} />
+    ) : (
+      <CatalogSheet sheet={sheet} scope={scope} showInactive={showInactive} />
     );
-  if (sheet === "contractors")
-    return <ContractorsSheet scope={scope} showInactive={showInactive} />;
-  if (sheet === "trades")
-    return <TradesSheet scope={scope} showInactive={showInactive} />;
-  if (sheet === "rateBook")
-    return <RatesSheet scope={scope} showInactive={showInactive} />;
-  if (sheet === "materials")
-    return <MaterialsSheet scope={scope} showInactive={showInactive} />;
   return (
-    <CatalogSheet sheet={sheet} scope={scope} showInactive={showInactive} />
+    <>
+      <ExcelTransfer sheet={sheet} />
+      {body}
+    </>
   );
 }
 
@@ -995,6 +1007,9 @@ function LabourSheet({
     aadhaar: "",
     mobile: "",
     trade: trades[0]?.id ?? "",
+    tradeSubcategory: "",
+    skill: "" as "" | SkillLevel,
+    experience: "" as "" | ExperienceLevel,
     contractorId: "",
     siteId: activeSite,
     supervisorId: "",
@@ -1004,14 +1019,34 @@ function LabourSheet({
   const [formErr, setFormErr] = useState<string | null>(null);
   const set = (patch: Partial<ReturnType<typeof blank>>) => setForm((f) => (f ? { ...f, ...patch } : f));
 
+  function applyTableRate(next: Partial<ReturnType<typeof blank>>) {
+    if (!form) return;
+    const trade = next.trade ?? form.trade;
+    const skill = (next.skill !== undefined ? next.skill : form.skill) || undefined;
+    const experience = (next.experience !== undefined ? next.experience : form.experience) || undefined;
+    const sug = suggestedWage(state.wageBands, trade, skill as SkillLevel | undefined, experience as ExperienceLevel | undefined);
+    const clearSub =
+      next.trade !== undefined && next.trade !== form.trade
+        ? { tradeSubcategory: "" }
+        : {};
+    set({ ...next, ...clearSub, ...(sug != null ? { wageDaily: String(sug) } : {}) });
+  }
+
   function save() {
     if (!form) return;
+    const tradeDef = trades.find((t) => t.id === form.trade);
+    if (tradeDef && tradeDef.subcategories.length > 0 && !form.tradeSubcategory) {
+      return setFormErr("Pick a trade sub-type for this trade");
+    }
     const r = addLabourer({
       name: form.name,
       epNumber: form.epNumber,
       aadhaar: form.aadhaar.trim() || undefined,
       mobile: form.mobile.trim() || undefined,
       trade: form.trade,
+      tradeSubcategory: form.tradeSubcategory || undefined,
+      skill: form.skill || undefined,
+      experience: form.experience || undefined,
       gatePass: "",
       siteId: form.siteId,
       supervisorId: form.supervisorId,
@@ -1027,8 +1062,17 @@ function LabourSheet({
 
   const sel = "h-8 w-full rounded-sm border border-[var(--sge-line)] bg-[var(--sge-paper)] text-xs";
   // B10: fixed minimum widths; cells may shrink, the register scrolls sideways on small screens
-  const cols = "grid-cols-[minmax(10rem,1.3fr)_minmax(7rem,0.8fr)_minmax(6.5rem,0.6fr)_minmax(8rem,0.8fr)_minmax(8rem,0.9fr)_minmax(8.5rem,0.9fr)_3.5rem_minmax(7rem,0.7fr)_4.5rem_6.5rem] [&>*]:min-w-0";
+  const cols = "grid-cols-[minmax(10rem,1.3fr)_minmax(7rem,0.8fr)_minmax(6.5rem,0.6fr)_minmax(6.5rem,0.6fr)_minmax(8rem,0.8fr)_minmax(8rem,0.9fr)_minmax(8.5rem,0.9fr)_3.5rem_minmax(7rem,0.7fr)_4.5rem_6.5rem] [&>*]:min-w-0";
   const [importing, setImporting] = useState(false);
+
+  function setSkillOrExp(l: Labourer, patch: { skill?: Labourer["skill"]; experience?: Labourer["experience"] }) {
+    const next = { ...l, ...patch };
+    const oldSug = suggestedWage(state.wageBands, l.trade, l.skill, l.experience);
+    const sug = suggestedWage(state.wageBands, next.trade, next.skill, next.experience);
+    // Apply the table rate when wage was empty or still equal to the previous table rate
+    const apply = sug != null && (l.wageDaily === 0 || (oldSug != null && l.wageDaily === oldSug));
+    report(updateLabourer(l.id, { ...patch, ...(apply ? { wageDaily: sug } : {}) }));
+  }
 
   return (
     <Panel>
@@ -1045,9 +1089,11 @@ function LabourSheet({
         <Button size="sm" onClick={() => setForm(form ? null : blank())}>
           {form ? "Close form" : "Add labourer"}
         </Button>
-        <Button size="sm" variant="outline" onClick={() => setImporting(!importing)}>
-          {importing ? "Close upload" : "Upload CSV"}
-        </Button>
+        {canExcelTransfer(state.currentRole) ? (
+          <Button size="sm" variant="outline" onClick={() => setImporting(!importing)}>
+            {importing ? "Close CSV" : "Upload CSV (RIL)"}
+          </Button>
+        ) : null}
         <span className="text-xs text-[var(--sge-ink-3)]">{rows.length} rows</span>
       </div>
       {form ? (
@@ -1072,9 +1118,54 @@ function LabourSheet({
           </div>
           <div>
             <Label>Trade</Label>
-            <select className={cn(sel, "mt-1 h-9")} value={form.trade} onChange={(e) => set({ trade: e.target.value })}>
+            <select className={cn(sel, "mt-1 h-9")} value={form.trade} onChange={(e) => applyTableRate({ trade: e.target.value })}>
               {trades.map((t) => (
                 <option key={t.id} value={t.id}>{t.label}</option>
+              ))}
+            </select>
+          </div>
+          {(() => {
+            const subs = trades.find((t) => t.id === form.trade)?.subcategories ?? [];
+            if (!subs.length) return null;
+            return (
+              <div>
+                <Label>Trade type</Label>
+                <select
+                  className={cn(sel, "mt-1 h-9")}
+                  value={form.tradeSubcategory}
+                  onChange={(e) => set({ tradeSubcategory: e.target.value })}
+                >
+                  <option value="">Pick…</option>
+                  {subs.map((s) => (
+                    <option key={s.id} value={s.id}>{s.label}</option>
+                  ))}
+                </select>
+              </div>
+            );
+          })()}
+          <div>
+            <Label>Skill</Label>
+            <select
+              className={cn(sel, "mt-1 h-9")}
+              value={form.skill}
+              onChange={(e) => applyTableRate({ skill: (e.target.value || "") as "" | SkillLevel })}
+            >
+              <option value="">—</option>
+              {SKILL_LEVELS.map((x) => (
+                <option key={x.id} value={x.id}>{x.label}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <Label>Experience</Label>
+            <select
+              className={cn(sel, "mt-1 h-9")}
+              value={form.experience}
+              onChange={(e) => applyTableRate({ experience: (e.target.value || "") as "" | ExperienceLevel })}
+            >
+              <option value="">—</option>
+              {EXPERIENCE_LEVELS.map((x) => (
+                <option key={x.id} value={x.id}>{x.label}</option>
               ))}
             </select>
           </div>
@@ -1107,6 +1198,29 @@ function LabourSheet({
           <div>
             <Label>Daily wage ₹</Label>
             <Input className="mt-1" type="number" min={1} value={form.wageDaily} onChange={(e) => set({ wageDaily: e.target.value })} />
+            {(() => {
+              const sug = suggestedWage(
+                state.wageBands,
+                form.trade,
+                form.skill || undefined,
+                form.experience || undefined
+              );
+              if (sug == null) return <p className="mt-1 text-[10px] text-[var(--sge-ink-3)]">No table rate for this skill × experience — type the wage, or add a row under Daily wages.</p>;
+              const same = Number(form.wageDaily) === sug;
+              return (
+                <p className="mt-1 text-[10px] text-[var(--sge-ink-3)]">
+                  Table rate ₹{sug}
+                  {same ? " (applied)" : (
+                    <>
+                      {" · "}
+                      <button type="button" className="underline" onClick={() => set({ wageDaily: String(sug) })}>
+                        Use table rate
+                      </button>
+                    </>
+                  )}
+                </p>
+              );
+            })()}
           </div>
           <div className="flex items-center gap-2 sm:col-span-4">
             <Button size="sm" onClick={save}>Add to register</Button>
@@ -1116,11 +1230,12 @@ function LabourSheet({
       ) : null}
       {importing ? <LabourImport onClose={() => setImporting(false)} /> : null}
       <div className="overflow-x-auto">
-      <div className="min-w-[1180px]">
+      <div className="min-w-[1280px]">
       <div className={cn("grid gap-2 border-b border-[var(--sge-line)] px-2 py-1 text-[10px] font-semibold uppercase tracking-wider text-[var(--sge-ink-3)]", cols)}>
         <span>Name</span>
         <span>Trade</span>
         <span>Skill</span>
+        <span>Experience</span>
         <span>Contractor</span>
         <span>Supervisor</span>
         <span>EP</span>
@@ -1143,14 +1258,60 @@ function LabourSheet({
                 </span>
               ) : null}
             </div>
-            <select className={sel} value={l.trade} onChange={(e) => report(updateLabourer(l.id, { trade: e.target.value }))}>
-              {trades.map((t) => (
-                <option key={t.id} value={t.id}>{t.label}</option>
-              ))}
-            </select>
-            <select aria-label={`Skill for ${l.name}`} className={sel} value={l.skill ?? ""} onChange={(e) => report(updateLabourer(l.id, { skill: (e.target.value || undefined) as Labourer["skill"] }))}>
+            <div className="min-w-0 space-y-0.5">
+              <select
+                className={sel}
+                aria-label={`Trade for ${l.name}`}
+                value={l.trade}
+                onChange={(e) => {
+                  const trade = e.target.value;
+                  const oldSug = suggestedWage(state.wageBands, l.trade, l.skill, l.experience);
+                  const sug = suggestedWage(state.wageBands, trade, l.skill, l.experience);
+                  const apply = sug != null && (l.wageDaily === 0 || (oldSug != null && l.wageDaily === oldSug));
+                  report(updateLabourer(l.id, { trade, tradeSubcategory: undefined, ...(apply ? { wageDaily: sug! } : {}) }));
+                }}
+              >
+                {trades.map((t) => (
+                  <option key={t.id} value={t.id}>{t.label}</option>
+                ))}
+              </select>
+              {(() => {
+                const subs = trades.find((t) => t.id === l.trade)?.subcategories ?? [];
+                if (!subs.length) return null;
+                return (
+                  <select
+                    className={sel}
+                    aria-label={`Trade type for ${l.name}`}
+                    value={l.tradeSubcategory ?? ""}
+                    onChange={(e) => report(updateLabourer(l.id, { tradeSubcategory: e.target.value || undefined }))}
+                  >
+                    <option value="">Type…</option>
+                    {subs.map((s) => (
+                      <option key={s.id} value={s.id}>{s.label}</option>
+                    ))}
+                  </select>
+                );
+              })()}
+            </div>
+            <select
+              aria-label={`Skill for ${l.name}`}
+              className={sel}
+              value={l.skill ?? ""}
+              onChange={(e) => setSkillOrExp(l, { skill: (e.target.value || undefined) as Labourer["skill"] })}
+            >
               <option value="">—</option>
               {SKILL_LEVELS.map((x) => (
+                <option key={x.id} value={x.id}>{x.label}</option>
+              ))}
+            </select>
+            <select
+              aria-label={`Experience for ${l.name}`}
+              className={sel}
+              value={l.experience ?? ""}
+              onChange={(e) => setSkillOrExp(l, { experience: (e.target.value || undefined) as Labourer["experience"] })}
+            >
+              <option value="">—</option>
+              {EXPERIENCE_LEVELS.map((x) => (
                 <option key={x.id} value={x.id}>{x.label}</option>
               ))}
             </select>
@@ -1181,12 +1342,28 @@ function LabourSheet({
               )}
               {l.eic ? <span className="block truncate text-[var(--sge-ink-3)]">{l.eic}</span> : null}
             </span>
-            <BlurInput
-              type="number"
-              min={1}
-              value={String(l.wageDaily)}
-              onSave={(v) => report(updateLabourer(l.id, { wageDaily: Number(v) || 0 }))}
-            />
+            <div className="min-w-0">
+              <BlurInput
+                type="number"
+                min={1}
+                value={String(l.wageDaily)}
+                onSave={(v) => report(updateLabourer(l.id, { wageDaily: Number(v) || 0 }))}
+              />
+              {(() => {
+                const sug = suggestedWage(state.wageBands, l.trade, l.skill, l.experience);
+                if (sug == null || sug === l.wageDaily) return null;
+                return (
+                  <button
+                    type="button"
+                    className="block text-[10px] text-[var(--sge-brass-ink)] underline"
+                    title={`Table rate ₹${sug}`}
+                    onClick={() => report(updateLabourer(l.id, { wageDaily: sug }))}
+                  >
+                    Table ₹{sug}
+                  </button>
+                );
+              })()}
+            </div>
             <div className="flex">
               <Button size="sm" variant="ghost" onClick={() => report(updateLabourer(l.id, { active: !l.active }))}>
                 {l.active ? "Off" : "On"}
@@ -1300,14 +1477,36 @@ function TradesSheet({
   const { fullState: state, updateTrade, addTrade } = useStore();
   const report = useReport();
   const [newTrade, setNewTrade] = useState("");
+  const [subFor, setSubFor] = useState<string>("");
+  const [newSub, setNewSub] = useState("");
   const rows = state.tradeCatalogue.filter((t) => {
     if (!showInactive && !t.active) return false;
     return matchScope(t.siteId ?? null, entrySiteId(state), scope);
   });
+
+  function addSubcategory(tradeId: string, label: string) {
+    const trade = state.tradeCatalogue.find((t) => t.id === tradeId);
+    if (!trade) return report({ ok: false, error: "Trade not found" });
+    const name = label.trim();
+    if (!name) return report({ ok: false, error: "Sub-type name is required" });
+    if (trade.subcategories.some((s) => s.label.toLowerCase() === name.toLowerCase())) {
+      return report({ ok: false, error: "That sub-type already exists" });
+    }
+    const id = name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") || uid("sub");
+    report(
+      updateTrade(tradeId, {
+        subcategories: [...trade.subcategories, { id, label: name }],
+      })
+    );
+  }
+
   return (
     <Panel>
+      <p className="mb-3 text-xs text-[var(--sge-ink-3)]">
+        Trades appear on the labourer register and the daily wage table. Examples: Painter, Blaster, Spray Painter, Scaffolder. Optional sub-types (e.g. Driver → LMV / HMV) show when that trade is picked.
+      </p>
       <form
-        className="mb-3 flex items-center gap-2"
+        className="mb-3 flex flex-wrap items-end gap-2"
         onSubmit={(e) => {
           e.preventDefault();
           const r = addTrade({ label: newTrade, subcategories: [], active: true, siteId: null });
@@ -1315,28 +1514,69 @@ function TradesSheet({
           if (r.ok) setNewTrade("");
         }}
       >
-        <Input className="h-8 w-56" placeholder="New trade name" value={newTrade} onChange={(e) => setNewTrade(e.target.value)} />
+        <div>
+          <Label className="text-[10px] uppercase tracking-wider">New trade</Label>
+          <Input
+            className="mt-1 h-8 w-56"
+            placeholder="e.g. Spray Painter"
+            value={newTrade}
+            onChange={(e) => setNewTrade(e.target.value)}
+          />
+        </div>
         <Button size="sm" type="submit">
           Add trade
+        </Button>
+      </form>
+      <form
+        className="mb-4 flex flex-wrap items-end gap-2 rounded-sm border border-[var(--sge-line)] bg-[var(--sge-linen)] p-3"
+        onSubmit={(e) => {
+          e.preventDefault();
+          if (!subFor) return report({ ok: false, error: "Pick a trade first" });
+          addSubcategory(subFor, newSub);
+          setNewSub("");
+        }}
+      >
+        <div>
+          <Label className="text-[10px] uppercase tracking-wider">Add sub-type to</Label>
+          <select
+            className="mt-1 h-8 w-48 rounded-sm border border-[var(--sge-line)] bg-[var(--sge-paper)] text-xs"
+            value={subFor}
+            onChange={(e) => setSubFor(e.target.value)}
+          >
+            <option value="">Pick trade…</option>
+            {rows.filter((t) => t.active).map((t) => (
+              <option key={t.id} value={t.id}>{t.label}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <Label className="text-[10px] uppercase tracking-wider">Sub-type name</Label>
+          <Input className="mt-1 h-8 w-48" placeholder="e.g. LMV" value={newSub} onChange={(e) => setNewSub(e.target.value)} />
+        </div>
+        <Button size="sm" type="submit" variant="outline">
+          Add sub-type
         </Button>
       </form>
       <table className="w-full text-sm">
         <thead>
           <tr className="text-left text-[10px] uppercase tracking-wider text-[var(--sge-ink-3)]">
-            <th className="py-2">Label</th>
-            <th>Subs</th>
+            <th className="py-2">Trade</th>
+            <th>Sub-types</th>
             <th>Scope</th>
             <th />
           </tr>
         </thead>
         <tbody>
           {rows.map((t) => (
-            <tr key={t.id} className="border-t border-[var(--sge-line)]">
+            <tr key={t.id} className={cn("border-t border-[var(--sge-line)]", !t.active && "opacity-50")}>
               <td className="py-2">
                 <BlurInput value={t.label} onSave={(v) => report(updateTrade(t.id, { label: v }))} />
+                <div className="font-mono text-[10px] text-[var(--sge-ink-3)]">{t.id}</div>
               </td>
               <td className="text-xs">
-                {t.subcategories.map((s) => s.label).join(", ") || "—"}
+                {t.subcategories.length
+                  ? t.subcategories.map((s) => s.label).join(", ")
+                  : <span className="text-[var(--sge-ink-3)]">—</span>}
               </td>
               <td className="text-xs">{t.siteId ? "Site" : "Company"}</td>
               <td className="text-right">
@@ -1352,6 +1592,108 @@ function TradesSheet({
           ))}
         </tbody>
       </table>
+    </Panel>
+  );
+}
+
+function WageBandsSheet({ showInactive }: { showInactive: boolean }) {
+  const { fullState: state, upsertWageBand, setWageBandActive } = useStore();
+  const report = useReport();
+  const trades = state.tradeCatalogue.filter((t) => t.active);
+  const [tradeId, setTradeId] = useState(trades[0]?.id ?? "");
+  const [skill, setSkill] = useState<SkillLevel>("skilled");
+  const [experience, setExperience] = useState<ExperienceLevel>("experienced");
+  const [dailyWage, setDailyWage] = useState("");
+  const rows = state.wageBands
+    .filter((b) => showInactive || b.active)
+    .filter((b) => !tradeId || b.tradeId === tradeId)
+    .sort((a, b) => a.tradeId.localeCompare(b.tradeId) || a.skill.localeCompare(b.skill) || a.experience.localeCompare(b.experience));
+
+  return (
+    <Panel>
+      <p className="mb-3 text-xs text-[var(--sge-ink-3)]">
+        Default ₹ per day for a trade at a skill and experience level. The labourer register uses this when you pick skill and experience; you can still type a different wage on the person.
+      </p>
+      <form
+        className="mb-4 grid gap-2 rounded-sm border border-[var(--sge-line)] bg-[var(--sge-linen)] p-3 sm:grid-cols-5"
+        onSubmit={(e) => {
+          e.preventDefault();
+          const r = upsertWageBand({ tradeId, skill, experience, dailyWage: Number(dailyWage) });
+          report(r);
+          if (r.ok) setDailyWage("");
+        }}
+      >
+        <div>
+          <Label>Trade</Label>
+          <select className="mt-1 h-9 w-full rounded-sm border border-[var(--sge-line)] bg-[var(--sge-paper)] text-xs" value={tradeId} onChange={(e) => setTradeId(e.target.value)}>
+            {trades.map((t) => (
+              <option key={t.id} value={t.id}>{t.label}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <Label>Skill</Label>
+          <select className="mt-1 h-9 w-full rounded-sm border border-[var(--sge-line)] bg-[var(--sge-paper)] text-xs" value={skill} onChange={(e) => setSkill(e.target.value as SkillLevel)}>
+            {SKILL_LEVELS.map((x) => (
+              <option key={x.id} value={x.id}>{x.label}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <Label>Experience</Label>
+          <select className="mt-1 h-9 w-full rounded-sm border border-[var(--sge-line)] bg-[var(--sge-paper)] text-xs" value={experience} onChange={(e) => setExperience(e.target.value as ExperienceLevel)}>
+            {EXPERIENCE_LEVELS.map((x) => (
+              <option key={x.id} value={x.id}>{x.label} · {x.hint}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <Label>Daily wage ₹</Label>
+          <Input className="mt-1" type="number" min={1} value={dailyWage} onChange={(e) => setDailyWage(e.target.value)} />
+        </div>
+        <div className="flex items-end">
+          <Button size="sm" type="submit">Save rate</Button>
+        </div>
+      </form>
+      <div className="max-h-[480px] overflow-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="text-left text-[10px] uppercase tracking-wider text-[var(--sge-ink-3)]">
+              <th className="py-2">Trade</th>
+              <th>Skill</th>
+              <th>Experience</th>
+              <th className="text-right">₹ / day</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((b) => {
+              const trade = state.tradeCatalogue.find((t) => t.id === b.tradeId);
+              return (
+                <tr key={b.id} className={cn("border-t border-[var(--sge-line)]", !b.active && "opacity-50")}>
+                  <td className="py-1.5">{trade?.label ?? b.tradeId}</td>
+                  <td>{SKILL_LEVELS.find((s) => s.id === b.skill)?.label ?? b.skill}</td>
+                  <td title={EXPERIENCE_LEVELS.find((e) => e.id === b.experience)?.hint}>{experienceLabel(b.experience)}</td>
+                  <td className="text-right tabular-nums">
+                    <BlurInput
+                      type="number"
+                      min={1}
+                      className="ml-auto w-24 text-right"
+                      value={String(b.dailyWage)}
+                      onSave={(v) => report(upsertWageBand({ ...b, dailyWage: Number(v) || 0 }))}
+                    />
+                  </td>
+                  <td className="text-right">
+                    <Button size="sm" variant="ghost" onClick={() => report(setWageBandActive(b.id, !b.active))}>
+                      {b.active ? "Off" : "On"}
+                    </Button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
     </Panel>
   );
 }
@@ -1519,16 +1861,8 @@ function MaterialsSheet({
   );
 }
 
-const CATALOG_SHEETS: Exclude<
-  MasterSheetId,
-  | "sites"
-  | "users"
-  | "labourers"
-  | "contractors"
-  | "trades"
-  | "rateBook"
-  | "materials"
->[] = [
+type CatalogSheetKey = keyof Omit<MasterCatalog, "contractors" | "materials">;
+const CATALOG_SHEETS: CatalogSheetKey[] = [
   "dprTypes",
   "activityTemplates",
   "units",
@@ -1538,6 +1872,10 @@ const CATALOG_SHEETS: Exclude<
   "shiftTypes",
   "attendanceStatuses",
 ];
+
+function isCatalogSheet(sheet: MasterSheetId): sheet is CatalogSheetKey {
+  return (CATALOG_SHEETS as string[]).includes(sheet);
+}
 
 function CatalogSheet({
   sheet,
@@ -1550,10 +1888,8 @@ function CatalogSheet({
 }) {
   const { fullState: state, upsertCatalogItem, setCatalogActive } = useStore();
   const report = useReport();
-  if (!CATALOG_SHEETS.includes(sheet as (typeof CATALOG_SHEETS)[number])) {
-    return null;
-  }
-  const key = sheet as (typeof CATALOG_SHEETS)[number];
+  if (!isCatalogSheet(sheet)) return null;
+  const key: CatalogSheetKey = sheet;
   const rows = (state.masterCatalog[key] as CatalogItem[]).filter((r) => {
     if (!showInactive && !r.active) return false;
     return matchScope(r.siteId, entrySiteId(state), scope);

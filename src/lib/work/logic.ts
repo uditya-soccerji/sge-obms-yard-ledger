@@ -1,3 +1,5 @@
+import { dayWage, type DayMark, WORKING } from "../attendance";
+import type { AcplMatchRow, AttendanceRecord, AttendanceStatus } from "../types";
 import type {
   Expense,
   Jms,
@@ -489,22 +491,99 @@ export interface JobLabour {
   costByMonth: Record<string, number>;
 }
 
+/** Optional gate / attendance overrides for job costing (docs §12, §18). */
+export interface LabourPayContext {
+  attendance?: AttendanceRecord[];
+  acplMatches?: AcplMatchRow[];
+}
+
+const markKey = (labourerId: string, date: string) => `${labourerId}|${date}`;
+
+/** Prefer Admin's report marks for a day when both copies exist (docs §5b). */
+function dprMarkMap(w: WorkState): Map<string, DayMark> {
+  const out = new Map<string, DayMark>();
+  const adminKeys = new Set<string>();
+  for (const r of w.reports) {
+    if (r.enteredBy !== "admin") continue;
+    for (const m of r.labourMarks) {
+      const k = markKey(m.labourerId, r.date);
+      adminKeys.add(k);
+      const prev = out.get(k);
+      if (prev && WORKING.includes(prev.status) && !WORKING.includes(m.status)) continue;
+      out.set(k, { status: m.status, inTime: m.inTime ?? prev?.inTime, outTime: m.outTime ?? prev?.outTime });
+    }
+  }
+  for (const r of w.reports) {
+    if (r.enteredBy === "admin") continue;
+    for (const m of r.labourMarks) {
+      const k = markKey(m.labourerId, r.date);
+      if (adminKeys.has(k)) continue;
+      const prev = out.get(k);
+      if (prev && WORKING.includes(prev.status) && !WORKING.includes(m.status)) continue;
+      out.set(k, {
+        status: m.status,
+        inTime: prev?.inTime ?? m.inTime,
+        outTime: m.outTime ?? prev?.outTime,
+      });
+    }
+  }
+  return out;
+}
+
 /**
- * Labour per job from DPR crews: each labourer-day is split evenly across the
- * jobs they appear on that date (split day). Imported history adds its own
- * days/cost in the plan line's month.
+ * Mark used to cost one person-day: gate wins when Admin resolved ACPL as
+ * gate (docs §12); otherwise the DPR mark. No mark but on a crew → full day.
  */
-export function labourByJob(w: WorkState, wageOf: (labourerId: string) => number): Map<string, JobLabour> {
+export function payMarkFor(
+  labourerId: string,
+  date: string,
+  dprMarks: Map<string, DayMark>,
+  pay?: LabourPayContext
+): DayMark {
+  const k = markKey(labourerId, date);
+  const match = pay?.acplMatches?.find((m) => m.labourerId === labourerId && m.date === date && m.resolveStatus !== "open");
+  if (match?.resolveStatus === "resolved_acpl") {
+    if (match.acplInTime || match.acplOutTime) {
+      return { status: "present", inTime: match.acplInTime, outTime: match.acplOutTime };
+    }
+    return { status: "absent" };
+  }
+  if (match?.resolveStatus === "resolved_dpr") {
+    const dpr: DayMark = {
+      status: (match.dprStatus ?? dprMarks.get(k)?.status ?? "present") as AttendanceStatus,
+      inTime: match.dprInTime ?? dprMarks.get(k)?.inTime,
+      outTime: match.dprOutTime ?? dprMarks.get(k)?.outTime,
+    };
+    return dpr;
+  }
+  const att = pay?.attendance?.find((a) => a.labourerId === labourerId && a.date === date && a.reconciled);
+  if (att) {
+    return { status: att.status, inTime: att.inTime, outTime: att.outTime };
+  }
+  return dprMarks.get(k) ?? { status: "present", inTime: "08:00", outTime: "18:00" };
+}
+
+/**
+ * Labour per job from DPR crews (docs §18): attendance × daily wage (+ OT),
+ * split evenly across the jobs they appear on that date. Imported history
+ * adds its own days/cost in the plan line's month.
+ */
+export function labourByJob(
+  w: WorkState,
+  wageOf: (labourerId: string) => number,
+  pay?: LabourPayContext
+): Map<string, JobLabour> {
   const out = new Map<string, JobLabour>();
   const get = (id: string) => {
     let v = out.get(id);
     if (!v) out.set(id, (v = { days: 0, cost: 0, byMonth: {}, costByMonth: {} }));
     return v;
   };
+  const dprMarks = dprMarkMap(w);
   const slots = new Map<string, Set<string>>();
   for (const e of effectiveEntries(w.dprs)) {
     for (const lab of e.crew ?? []) {
-      const key = `${lab}|${e.date}`;
+      const key = markKey(lab, e.date);
       slots.set(key, (slots.get(key) ?? new Set()).add(e.jobId));
     }
   }
@@ -512,12 +591,14 @@ export function labourByJob(w: WorkState, wageOf: (labourerId: string) => number
     const [lab, date] = key.split("|");
     const share = 1 / jobs.size;
     const month = date.slice(0, 7);
+    const { cost, labourDays } = dayWage(wageOf(lab), payMarkFor(lab, date, dprMarks, pay));
     for (const jobId of jobs) {
       const v = get(jobId);
-      const c = wageOf(lab) * share;
-      v.days += share;
+      const c = Math.round(cost * share * 100) / 100;
+      const d = Math.round(labourDays * share * 1000) / 1000;
+      v.days += d;
       v.cost += c;
-      v.byMonth[month] = (v.byMonth[month] ?? 0) + share;
+      v.byMonth[month] = (v.byMonth[month] ?? 0) + d;
       v.costByMonth[month] = (v.costByMonth[month] ?? 0) + c;
     }
   }
@@ -592,8 +673,13 @@ const inMonth = (date: string | undefined, month: string) => month === "all" || 
  * Fixed costs of a site-month with no DPR labour-days can't be shared over
  * any job; they come back as "unallocated" rows so the totals still carry them.
  */
-export function pnlRows(w: WorkState, wageOf: (labourerId: string) => number, month = "all"): JobPnl[] {
-  const labour = labourByJob(w, wageOf);
+export function pnlRows(
+  w: WorkState,
+  wageOf: (labourerId: string) => number,
+  month = "all",
+  pay?: LabourPayContext
+): JobPnl[] {
+  const labour = labourByJob(w, wageOf, pay);
   const lineOf = new Map(w.planLines.map((l) => [l.id, l]));
   const siteDays = siteLabourDays(w, labour);
   const fixed = fixedBySiteMonth(w);
@@ -666,8 +752,8 @@ export function pnlRows(w: WorkState, wageOf: (labourerId: string) => number, mo
 }
 
 /** All-months P&L per job (kept for callers that want every month at once). */
-export function jobPnl(w: WorkState, wageOf: (labourerId: string) => number): JobPnl[] {
-  return pnlRows(w, wageOf, "all");
+export function jobPnl(w: WorkState, wageOf: (labourerId: string) => number, pay?: LabourPayContext): JobPnl[] {
+  return pnlRows(w, wageOf, "all", pay);
 }
 
 export interface PnlTotals {

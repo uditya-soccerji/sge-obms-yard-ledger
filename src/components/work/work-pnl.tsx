@@ -37,7 +37,7 @@ export function WorkPnl() {
 
   // Each figure lands in the month it happened (docs §18): cash = received that month,
   // earned = approved that month, costs = incurred that month
-  const rows = pnlRows(work, s.wageOf, month).filter((r) => s.inSite(r.siteId));
+  const rows = pnlRows(work, s.wageOf, month, s.labourPay).filter((r) => s.inSite(r.siteId));
   const profitOf = (t: { profit: number; earnedProfit: number }) => (basis === "cash" ? t.profit : t.earnedProfit);
   const incomeOf = (t: { income: number; earned: number }) => (basis === "cash" ? t.income : t.earned);
   // m² that matches the basis: paid m² for cash, approved m² for earned

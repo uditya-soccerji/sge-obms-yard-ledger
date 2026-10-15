@@ -292,6 +292,8 @@ export interface Labourer {
   active: boolean;
   /** Skill level (B09, owner 2026-10-13); RIL "CATEGORY" */
   skill?: SkillLevel;
+  /** Experience band for the wage table (docs §1); wageDaily may still be overridden */
+  experience?: ExperienceLevel;
   /** Old EP numbers, newest last; the current one is `epNumber` (docs §1) */
   epHistory?: { ep: string; until: string }[];
   /** RIL Engineer-in-Charge: reference contact at RIL, shown on the profile (owner 2026-10-14) */
@@ -315,6 +317,24 @@ export interface UploadStamp {
 }
 
 export type SkillLevel = "highly_skilled" | "skilled" | "semi_skilled" | "unskilled";
+
+/** Experience band used with skill on the daily wage table (docs §1). */
+export type ExperienceLevel = "junior" | "experienced" | "senior";
+
+/**
+ * One default daily wage: trade × skill × experience.
+ * Owner / Super Admin / Admin maintain the table; the labourer's wageDaily
+ * is what attendance and P&L actually use (may be overridden).
+ */
+export interface WageBand {
+  id: string;
+  tradeId: string;
+  skill: SkillLevel;
+  experience: ExperienceLevel;
+  dailyWage: number;
+  active: boolean;
+  note?: string;
+}
 
 export interface AttendanceRecord {
   id: string;
@@ -677,6 +697,8 @@ export interface AppState {
   rateLines: RateLine[];
   /** Labour trade catalogue (trade → optional subcategories). */
   tradeCatalogue: TradeDefinition[];
+  /** Default daily wages by trade × skill × experience (docs §1). */
+  wageBands: WageBand[];
   wageLedger: WageLedgerEntry[];
   financeAlerts: FinanceAlert[];
   auditLog: AuditEntry[];

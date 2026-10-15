@@ -43,7 +43,8 @@ npx eslint src
 npm run build
 ```
 Windows note: Node is at `C:\Program Files\nodejs`. If `npm` isn't found in a shell, add it to `PATH`.
-After pulling changes that touch seed data, click **Reset** (header, Owner / Super Admin only; it asks first and resets both the main and the Work data) — old browser data is kept otherwise. Storage keys: main `sge-obms-ops-v16`, Work `sge-work-v11` (older keys are cleared on load).
+After pulling changes that touch seed data, click **Reset** (header, Owner / Super Admin only; it asks first and resets both the main and the Work data) — old browser data is kept otherwise. Storage keys: main `sge-obms-ops-v17`, Work `sge-work-v11` (older keys are cleared on load).
+Owner / Super Admin: Master Data Excel download + upload with duplicate checks (`src/lib/excel-io.ts`, `src/lib/master-transfer.ts`).
 
 ## 5. Layout
 ```

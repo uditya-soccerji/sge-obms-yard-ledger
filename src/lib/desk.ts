@@ -133,7 +133,7 @@ export function canAccessMasterData(role: RoleId | null | undefined): boolean {
 
 export function masterSheetsFor(role: RoleId | null | undefined): "all" | MasterSheetId[] {
   if (role === "super_admin" || role === "owner") return "all";
-  if (role === "admin") return ["trades", "rateBook"];
+  if (role === "admin") return ["trades", "wageBands", "rateBook"];
   return [];
 }
 
