@@ -8,19 +8,9 @@ import { SKILL_LEVELS } from "./labour-import";
 import { EXPERIENCE_LEVELS } from "./wages";
 import { cell } from "./excel-io";
 import { normalizeEp } from "./ep";
+import type { TransferPreviewRow } from "./transfer-types";
 
-export type RowStatus = "new" | "update" | "duplicate" | "error";
-
-export interface TransferPreviewRow {
-  line: number;
-  status: RowStatus;
-  key: string;
-  summary: string;
-  detail?: string;
-  /** Payload ready for apply (shape depends on sheet) */
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  payload?: any;
-}
+export type { TransferPreviewRow, RowStatus } from "./transfer-types";
 
 export interface TransferSpec {
   id: MasterSheetId;

@@ -26,6 +26,7 @@ import { Input } from "@/components/ui/input";
 import { ATTENDANCE_OPTIONS, attendanceLabel, workedCount } from "@/lib/attendance";
 import { daysAgo } from "@/lib/today";
 import type { AttendanceStatus } from "@/lib/types";
+import { OpsExcelTransferStack } from "@/components/ops/ops-excel-transfer";
 
 function HrHomePage() {
   const { state, markAttendance } = useStore();
@@ -59,6 +60,8 @@ function HrHomePage() {
           </Link>
         }
       />
+
+      <OpsExcelTransferStack kinds={["attendance", "wageLedger"]} />
 
       {/* docs §24: RIL passes expiring within 10 days */}
       <PassExpiryPanel />

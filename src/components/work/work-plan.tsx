@@ -10,6 +10,7 @@ import { useWork } from "@/lib/work/store";
 import { isSitePlant } from "@/lib/sites";
 import { STAGES } from "@/lib/work/types";
 import { fmtM2, fmtPct, Msg, selectCls, tdCls, thCls, useWorkScope } from "./common";
+import { WorkExcelTransferStack } from "./work-excel-transfer";
 
 const FLAG = {
   ok: { tone: "ok", label: "Within band" },
@@ -58,6 +59,7 @@ export function WorkPlan() {
 
   return (
     <div className="space-y-4">
+      <WorkExcelTransferStack kinds={["planLines", "serviceItems"]} />
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="flex items-end gap-2">
           <div>

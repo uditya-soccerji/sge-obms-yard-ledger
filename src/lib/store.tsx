@@ -44,6 +44,9 @@ import { normalizeEp } from "./ep";
 import { checkLabourer, describeChanges } from "./labourers";
 import { daysAgo } from "./today";
 import { WORKING } from "./attendance";
+import { canExcelTransfer } from "./excel-io";
+import { opsTransferSpec, type OpsTransferId } from "./ops-transfer";
+import type { TransferPreviewRow } from "./transfer-types";
 import { checkSeat, checkSites, checkUserChange, MIN_PASSWORD } from "./users";
 import type {
   AcplMatchRow,
@@ -225,6 +228,11 @@ interface StoreApi {
   endImpersonation: () =>
     | { ok: true; home: string }
     | { ok: false; error: string };
+  /** Owner / Super Admin Excel import for an Operations sheet (after duplicate preview) */
+  importOpsExcel: (
+    kind: OpsTransferId,
+    rows: TransferPreviewRow[]
+  ) => { ok: boolean; error?: string; added?: number; updated?: number };
   createEquipmentRequest: (
     input: Omit<EquipmentRequest, "id" | "createdAt" | "updatedAt" | "status" | "createdBy"> & {
       status?: EquipmentRequestStatus;
@@ -2047,6 +2055,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     return { ok: true };
   }, []);
 
+  const importOpsExcel = useCallback((kind: OpsTransferId, rows: TransferPreviewRow[]) => {
+    const cur = stateRef.current;
+    if (!canExcelTransfer(cur.currentRole)) return { ok: false, error: "Only Owner / Super Admin can upload Excel" };
+    const spec = opsTransferSpec(kind);
+    if (!spec) return { ok: false, error: "Unknown sheet" };
+    return spec.apply(rows, { state: cur, setState });
+  }, []);
+
   const setEquipmentStatus = useCallback((id: string, status: "ok" | "due" | "fault", note?: string) => {
     const cur = stateRef.current;
     const eq = cur.equipment.find((e) => e.id === id);
@@ -2261,6 +2277,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       setUserPassword,
       startImpersonation,
       endImpersonation,
+      importOpsExcel,
       createEquipmentRequest,
       updateEquipmentRequest,
     }),
@@ -2320,6 +2337,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       setUserPassword,
       startImpersonation,
       endImpersonation,
+      importOpsExcel,
       createEquipmentRequest,
       updateEquipmentRequest,
     ]

@@ -22,6 +22,7 @@ import { estimateCost } from "@/lib/estimate";
 import { useStore } from "@/lib/store";
 import { entrySiteId } from "@/lib/site-scope";
 import type { RateCardKind } from "@/lib/types";
+import { OpsExcelTransfer } from "@/components/ops/ops-excel-transfer";
 
 function PdfButton({ href }: { href: string }) {
   // docs §24: the working and result, with the user's profile, saved as PDF
@@ -61,6 +62,8 @@ function CostEstimatePage() {
         subtitle="Pipeline, Structures, Tanks (₹/m²) and Scaffolding (₹/m³). When a matching PO rate exists for the active site, the rate book wins over legacy rate cards."
         action={<PdfButton href={`/print/calc?type=estimate&kind=${kind}&qty=${qty}`} />}
       />
+
+      <OpsExcelTransfer kind="rateCards" />
 
       <div className="grid gap-4 lg:grid-cols-2">
         <Panel className="space-y-4">

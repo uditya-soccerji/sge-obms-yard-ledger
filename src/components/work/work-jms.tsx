@@ -8,6 +8,7 @@ import type { JmsStatus } from "@/lib/work/types";
 import { cn } from "@/lib/utils";
 import { fmtM2, fmtPct, selectCls, tdCls, thCls, useWorkScope } from "./common";
 import { JmsAdminQueue } from "./jms-admin-queue";
+import { WorkExcelTransfer } from "./work-excel-transfer";
 
 
 export function WorkJms() {
@@ -26,6 +27,7 @@ export function WorkJms() {
 
   return (
     <div className="space-y-4">
+      <WorkExcelTransfer kind="jms" />
       {/* docs §24: SIC-confirmed JMS wait here for the Admin's JMS no. and amount */}
       <JmsAdminQueue />
       <div className="flex flex-wrap items-end gap-3">
@@ -133,9 +135,10 @@ export function WorkJms() {
 export function WorkOrders() {
   const s = useWorkScope();
   const wos = s.work.workOrders.filter((w) => s.inSite(w.siteId));
-  if (wos.length === 0) return <p className="text-sm text-[var(--sge-ink-3)]">No work order for this site yet.</p>;
   return (
     <div className="space-y-4">
+      <WorkExcelTransfer kind="workOrders" />
+      {wos.length === 0 ? <p className="text-sm text-[var(--sge-ink-3)]">No work order for this site yet.</p> : null}
       {wos.map((wo) => {
         const u = woUsage(wo.id, s.work)!;
         // The WO is judged on overall m² and ₹ cap; single items are listed separately

@@ -13,6 +13,7 @@ import { useWork } from "@/lib/work/store";
 import type { ExpenseKind, PaymentMode } from "@/lib/work/types";
 import { cn } from "@/lib/utils";
 import { fmtM2, Msg, selectCls, tdCls, thCls, useWorkScope } from "./common";
+import { WorkExcelTransfer } from "./work-excel-transfer";
 
 type View = "job" | "supervisor" | "service" | "site_month";
 type Basis = "cash" | "earned";
@@ -75,6 +76,7 @@ export function WorkPnl() {
 
   return (
     <div className="space-y-4">
+      <WorkExcelTransfer kind="expenses" />
       <div className="flex flex-wrap items-end gap-3">
         <div>
           <Label className="text-[11px] uppercase tracking-wide text-[var(--sge-ink-3)]">Month</Label>

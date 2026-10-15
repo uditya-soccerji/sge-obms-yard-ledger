@@ -16,6 +16,7 @@ import { useSiteReports } from "@/lib/work/use-reports";
 import { useEffect } from "react";
 import { entrySiteId } from "@/lib/site-scope";
 import { today as todayDate } from "@/lib/today";
+import { OpsExcelTransfer } from "@/components/ops/ops-excel-transfer";
 
 function SafetyHomePage() {
   const { state, toggleSafetyItem, signSafetyDay, openSafetyDay } = useStore();
@@ -75,6 +76,8 @@ function SafetyHomePage() {
           </div>
         }
       />
+
+      <OpsExcelTransfer kind="safetyDays" />
 
       <Panel>
         <h3 className="mb-2 font-heading text-sm font-bold">Safety DPR documents</h3>

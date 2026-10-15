@@ -21,12 +21,16 @@ import { dprCrew, validateDprForSubmit } from "../dpr-validate";
 import type { DprSubmitterType, ModuleId, PermissionAction } from "../types";
 import { STAGES } from "./types";
 import { passesNeedingAction, showDate } from "../gate-pass";
+import { workTransferSpec, type WorkTransferId } from "../work-transfer";
+import type { TransferPreviewRow } from "../transfer-types";
 
 type Result = { ok: true; id?: string } | { ok: false; error: string };
 
 interface WorkApi {
   work: WorkState;
   hydrated: boolean;
+  /** Owner / Super Admin Excel import for a Work sheet (after duplicate preview) */
+  importExcel: (kind: WorkTransferId, rows: TransferPreviewRow[]) => { ok: boolean; error?: string; added?: number; updated?: number };
   addPlanLine: (input: Omit<PlanLine, "id" | "carriedM2" | "month"> & { month?: string }) => Result;
   startJob: (input: { planLineId: string; location: string; stages: Stage[]; startDate: string; plannedM2?: number; plannedEnd?: string }) => Result;
   /** SIC approves the supervisor's job plan or sends it back (docs §24) */
@@ -994,9 +998,21 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
     setWork(createEmptyWork(today().slice(0, 7)));
   }, []);
 
+  const importExcel = useCallback<WorkApi["importExcel"]>((kind, rows) => {
+    if (!rights().isBoss) return { ok: false, error: "Only Owner / Super Admin can upload Excel" };
+    const spec = workTransferSpec(kind);
+    if (!spec) return { ok: false, error: "Unknown sheet" };
+    return spec.apply(rows, {
+      work: ref.current,
+      sites: sitesRef.current,
+      staff: staffRef.current,
+      setWork,
+    });
+  }, []);
+
   const api = useMemo<WorkApi>(
-    () => ({ work, hydrated, editExpense, receivePaint, advancePaintLifecycle, recoMonth, postMonth, setRilRef, uploadSubmission, linkSubmission, unlinkSubmission, addPlanLine, startJob, decideJobPlan, adminApproveJms, adminReturnJms, addDpr, removeEntry, saveReport, submitReport, reviewReport, unlockReport, telegramToReport, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork, notify: log }),
-    [work, hydrated, editExpense, receivePaint, advancePaintLifecycle, recoMonth, postMonth, setRilRef, uploadSubmission, linkSubmission, unlinkSubmission, addPlanLine, startJob, decideJobPlan, adminApproveJms, adminReturnJms, addDpr, removeEntry, saveReport, submitReport, reviewReport, unlockReport, telegramToReport, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork, log]
+    () => ({ work, hydrated, importExcel, editExpense, receivePaint, advancePaintLifecycle, recoMonth, postMonth, setRilRef, uploadSubmission, linkSubmission, unlinkSubmission, addPlanLine, startJob, decideJobPlan, adminApproveJms, adminReturnJms, addDpr, removeEntry, saveReport, submitReport, reviewReport, unlockReport, telegramToReport, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork, notify: log }),
+    [work, hydrated, importExcel, editExpense, receivePaint, advancePaintLifecycle, recoMonth, postMonth, setRilRef, uploadSubmission, linkSubmission, unlinkSubmission, addPlanLine, startJob, decideJobPlan, adminApproveJms, adminReturnJms, addDpr, removeEntry, saveReport, submitReport, reviewReport, unlockReport, telegramToReport, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork, log]
   );
   return <WorkContext.Provider value={api}>{children}</WorkContext.Provider>;
 }

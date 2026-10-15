@@ -29,6 +29,7 @@ import { useWork } from "@/lib/work/store";
 import { receivedOn, spendOn } from "@/lib/work/money";
 import { CostLedger } from "@/components/work/work-pnl";
 import type { WageLedgerEntry } from "@/lib/types";
+import { OpsExcelTransfer } from "@/components/ops/ops-excel-transfer";
 
 function FinancePage() {
   const {
@@ -86,6 +87,8 @@ function FinancePage() {
             : "JMS income expected vs received, wage / bonus / advance / OT ledger, alerts to SIC."
         }
       />
+
+      <OpsExcelTransfer kind="wageLedger" />
 
       {/* Accounting lives with the JMS data in Work: approved vs received + P&L */}
       <MoneyCard />
