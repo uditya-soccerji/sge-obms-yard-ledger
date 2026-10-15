@@ -68,8 +68,10 @@ import type {
   TelegramDraft,
   TradeDefinition,
   UserAccount,
+  WageBand,
   WageLedgerEntry,
 } from "./types";
+import { seedWageBands } from "./wages";
 
 interface StoreApi {
   /** What screens read: cut to the active site (see scopeState). */
@@ -162,10 +164,16 @@ interface StoreApi {
         | "aadhaar"
         | "mobile"
         | "skill"
+        | "experience"
         | "eic"
       >
     >
   ) => { ok: boolean; error?: string };
+  /** Add or change a trade × skill × experience daily wage (docs §1) */
+  upsertWageBand: (
+    input: Omit<WageBand, "id" | "active"> & { id?: string; active?: boolean }
+  ) => { ok: boolean; error?: string; id?: string };
+  setWageBandActive: (id: string, active: boolean) => { ok: boolean; error?: string };
   /** Bulk add from the CSV upload, with any new trades (B09) */
   importPay: (
     rows: { labourerId: string; month: string; lines: { kind: WageLedgerEntry["kind"]; amount: number; state: "new" | "changed" | "same"; existingId?: string }[] }[],
@@ -305,10 +313,26 @@ function migrateState(parsed: Partial<AppState>): AppState {
       parsed.rateLines && parsed.rateLines.length > 0
         ? parsed.rateLines
         : seed.rateLines,
-    tradeCatalogue:
-      parsed.tradeCatalogue && parsed.tradeCatalogue.length > 0
-        ? parsed.tradeCatalogue.map((t) => ({ ...t, siteId: t.siteId ?? null }))
-        : seed.tradeCatalogue,
+    tradeCatalogue: (() => {
+      const fromSave = (parsed.tradeCatalogue ?? []).map((t) => ({ ...t, siteId: t.siteId ?? null }));
+      if (!fromSave.length) return seed.tradeCatalogue;
+      // Keep saved trades; add any new seed trades (e.g. Spray Painter) the browser does not have yet
+      const have = new Set(fromSave.map((t) => t.id));
+      const extras = seed.tradeCatalogue.filter((t) => !have.has(t.id));
+      // Refresh labels for known ids when the seed renamed them (Blasting → Blaster)
+      const relabel = new Map(seed.tradeCatalogue.map((t) => [t.id, t.label]));
+      return [
+        ...fromSave.map((t) => (relabel.has(t.id) ? { ...t, label: relabel.get(t.id)! } : t)),
+        ...extras,
+      ];
+    })(),
+    wageBands: (() => {
+      const fromSave = parsed.wageBands ?? [];
+      const seeded = seed.wageBands?.length ? seed.wageBands : seedWageBands();
+      if (!fromSave.length) return seeded;
+      const have = new Set(fromSave.map((b) => b.id));
+      return [...fromSave, ...seeded.filter((b) => !have.has(b.id))];
+    })(),
     masterCatalog: parsed.masterCatalog?.dprTypes?.length
       ? {
           ...seedMasterCatalog(),
@@ -1186,6 +1210,65 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     []
   );
 
+  const upsertWageBand = useCallback(
+    (input: Omit<WageBand, "id" | "active"> & { id?: string; active?: boolean }) => {
+      const cur = stateRef.current;
+      if (!can(cur, "trades", "update") && !can(cur, "master", "update")) return DENIED;
+      const dailyWage = Number(input.dailyWage);
+      if (!(dailyWage > 0)) return { ok: false, error: "Daily wage must be above zero" };
+      if (!input.tradeId || !input.skill || !input.experience) {
+        return { ok: false, error: "Trade, skill and experience are required" };
+      }
+      const clash = cur.wageBands.find(
+        (b) =>
+          b.id !== input.id &&
+          b.tradeId === input.tradeId &&
+          b.skill === input.skill &&
+          b.experience === input.experience
+      );
+      if (clash) return { ok: false, error: "That trade × skill × experience already has a rate" };
+      const id = input.id ?? uid("wb");
+      const row: WageBand = {
+        id,
+        tradeId: input.tradeId,
+        skill: input.skill,
+        experience: input.experience,
+        dailyWage,
+        active: input.active ?? true,
+        note: input.note,
+      };
+      setState((s) => {
+        const has = s.wageBands.some((b) => b.id === id);
+        const wageBands = has ? s.wageBands.map((b) => (b.id === id ? row : b)) : [...s.wageBands, row];
+        const next = { ...s, wageBands };
+        return {
+          ...next,
+          auditLog: [
+            makeAudit(next, "trades", has ? "update" : "create", `Wage ${row.tradeId} · ${row.skill} · ${row.experience} → ₹${row.dailyWage}`),
+            ...s.auditLog,
+          ],
+        };
+      });
+      return { ok: true, id };
+    },
+    []
+  );
+
+  const setWageBandActive = useCallback((id: string, active: boolean) => {
+    const cur = stateRef.current;
+    if (!can(cur, "trades", "update") && !can(cur, "master", "update")) return DENIED;
+    const before = cur.wageBands.find((b) => b.id === id);
+    if (!before) return { ok: false, error: "Wage row not found" };
+    setState((s) => {
+      const next = { ...s, wageBands: s.wageBands.map((b) => (b.id === id ? { ...b, active } : b)) };
+      return {
+        ...next,
+        auditLog: [makeAudit(next, "trades", "update", `Wage ${before.tradeId} · ${before.skill} · ${before.experience} ${active ? "on" : "off"}`), ...s.auditLog],
+      };
+    });
+    return { ok: true };
+  }, []);
+
   const updateLabourer = useCallback(
     (
       id: string,
@@ -1205,6 +1288,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           | "aadhaar"
           | "mobile"
           | "skill"
+          | "experience"
           | "eic"
           | "epHistory"
         >
@@ -2150,6 +2234,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       upsertRateLine,
       updateTrade,
       addTrade,
+      upsertWageBand,
+      setWageBandActive,
       updateLabourer,
       addLabourer,
       importLabourers,
@@ -2207,6 +2293,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       upsertRateLine,
       updateTrade,
       addTrade,
+      upsertWageBand,
+      setWageBandActive,
       updateLabourer,
       addLabourer,
       importLabourers,

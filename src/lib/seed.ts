@@ -9,6 +9,7 @@ import { seedOtherSites } from "./seed-sites";
 import { SEED_RATE_LINES } from "./rate-book-seed";
 import type { AppState, AttendanceStatus, DprSafetyBody, TradeDefinition } from "./types";
 import type { DprReport } from "./work/types";
+import { seedWageBands } from "./wages";
 
 const SITE = "site-dta";
 const TODAY = "2026-10-05";
@@ -24,40 +25,20 @@ const ALL_SITE_IDS = [
   "site-gagva",
 ] as const;
 
+/** Labour trades shown on the register and wage table (docs §1). */
 export const SEED_TRADE_CATALOGUE: TradeDefinition[] = [
-  {
-    id: "painter",
-    label: "Painter",
-    subcategories: [
-      { id: "spray", label: "Spray painter" },
-      { id: "manual", label: "Manual painter" },
-    ],
-    active: true,
-  },
-  {
-    id: "blaster",
-    label: "Blasting",
-    subcategories: [],
-    active: true,
-  },
-  {
-    id: "foreman",
-    label: "Foreman",
-    subcategories: [],
-    active: true,
-  },
-  {
-    id: "helper",
-    label: "Helper",
-    subcategories: [],
-    active: true,
-  },
-  {
-    id: "compressor_operator",
-    label: "Compressor operator",
-    subcategories: [],
-    active: true,
-  },
+  { id: "painter", label: "Painter", subcategories: [], active: true },
+  { id: "spray_painter", label: "Spray Painter", subcategories: [], active: true },
+  { id: "manual_painter", label: "Manual Painter", subcategories: [], active: true },
+  { id: "blaster", label: "Blaster", subcategories: [], active: true },
+  { id: "scaffolder", label: "Scaffolder", subcategories: [], active: true },
+  { id: "scaffold_fitter", label: "Scaffold Fitter", subcategories: [], active: true },
+  { id: "rigger", label: "Rigger", subcategories: [], active: true },
+  { id: "helper", label: "Helper", subcategories: [], active: true },
+  { id: "fitter", label: "Fitter", subcategories: [], active: true },
+  { id: "welder", label: "Welder", subcategories: [], active: true },
+  { id: "foreman", label: "Foreman", subcategories: [], active: true },
+  { id: "compressor_operator", label: "Compressor Operator", subcategories: [], active: true },
   {
     id: "driver",
     label: "Driver",
@@ -67,36 +48,9 @@ export const SEED_TRADE_CATALOGUE: TradeDefinition[] = [
     ],
     active: true,
   },
-  {
-    id: "rigger",
-    label: "Rigger",
-    subcategories: [],
-    active: true,
-  },
-  {
-    id: "scaffolder",
-    label: "Scaffold fitter",
-    subcategories: [],
-    active: true,
-  },
-  {
-    id: "store_helper",
-    label: "Store helper",
-    subcategories: [],
-    active: true,
-  },
-  {
-    id: "safety_steward",
-    label: "Safety steward",
-    subcategories: [],
-    active: true,
-  },
-  {
-    id: "fitter",
-    label: "Fitter",
-    subcategories: [],
-    active: true,
-  },
+  { id: "rope_access", label: "Rope Access", subcategories: [], active: true },
+  { id: "store_helper", label: "Store Helper", subcategories: [], active: true },
+  { id: "safety_steward", label: "Safety Steward", subcategories: [], active: true },
 ];
 
 function seedSafetyBodyDraft(): DprSafetyBody {
@@ -1082,6 +1036,7 @@ export function createSeedState(): AppState {
       superseded: false,
     })),
     tradeCatalogue: SEED_TRADE_CATALOGUE.map((t) => ({ ...t, siteId: null })),
+    wageBands: seedWageBands(),
     masterCatalog: seedMasterCatalog(),
     wageLedger: [
       { id: "wg-1", labourerId: "lb-01", date: TODAY, kind: "advance", amount: 2000, note: "Festival advance", flaggedToSic: false },
@@ -1156,7 +1111,8 @@ export function createSeedState(): AppState {
 /** v9: per-site demo data — a new key so old browsers load the new seed. */
 /** v10: EP numbers in the PP + 10 digit format (docs §1) */
 /** v11: attendance statuses per docs §4, HR on all sites */
-export const STORAGE_KEY = "sge-obms-ops-v16";
+/** v17: wage bands by trade × skill × experience (docs §1) */
+export const STORAGE_KEY = "sge-obms-ops-v17";
 export { SAFETY_ITEMS };
 
 /**

@@ -15,7 +15,7 @@ export function MoneyCard() {
   const sum = paymentSummary(rows);
   // Biggest shortfalls first, then the longest unpaid
   const worst = worstPayments(rows, 4);
-  const pnl = rollUp(pnlRows(work, s.wageOf).filter((r) => s.inSite(r.siteId)), () => "all")[0];
+  const pnl = rollUp(pnlRows(work, s.wageOf, "all", s.labourPay).filter((r) => s.inSite(r.siteId)), () => "all")[0];
   // Cash basis per m² uses the m² that has been paid for
   const perM2 = pnl ? perUnit(pnl.profit, pnl.paidQty) : null;
 

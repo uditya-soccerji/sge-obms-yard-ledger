@@ -7,7 +7,10 @@ Answers from the module-by-module review. Not built yet; implemented together at
 - **EP history:** keep it. A new EP archives the old one with dates; the current EP shows everywhere.
 - **Gate pass:** not needed — remove the field.
 - **Aadhaar:** required, 12 digits, unique, stored digits only. It is the permanent ID. Visible only to Owner / Super Admin / HR.
-- **Daily wage:** a min–max range per trade, set in Master Data.
+- **Trades:** Master Data → Trades. Seed list includes Painter, Spray Painter, Manual Painter, Blaster, Scaffolder, Scaffold Fitter, Rigger, Helper, Fitter, Welder, Foreman, Compressor Operator, Driver (LMV/HMV sub-types), Rope Access, Store Helper, Safety Steward. Owner / Admin can add more trades and optional sub-types.
+- **Excel transfer (Owner / Super Admin only):** every Master Data sheet that holds typed input has **Download Excel**, **Blank template**, and **Upload Excel**. Upload shows new / update / duplicate / error before writing; duplicates (same natural key, e.g. EP, site code, trade×skill×experience) are not uploaded again. Passwords are never exported. Admin may edit screens but does not get Excel transfer.
+- **Daily wage:** Master Data → Daily wages holds a default ₹/day for each **trade × skill × experience**. The labourer's own `wageDaily` is what attendance and P&L use; it is filled from that table when skill/experience are set, and can still be overridden on the person.
+- **Experience (decided Repair 1 follow-up):** Junior (≈0–2 years), Experienced (≈2–5), Senior (≈5+). Required with skill to look up the table rate.
 - **Required fields:** mobile (10 digits, starts 6–9), trade sub-category (when the trade has them), contractor, supervisor.
 - **Delete:** Owner / Super Admin can delete; everyone else can only deactivate.
 - **Skill level (decided 2026-10-13):** Highly skilled, Skilled, Semi-skilled or Unskilled (RIL's "CATEGORY").
@@ -35,7 +38,8 @@ Answers from the module-by-module review. Not built yet; implemented together at
 - **Shift:** 08:00–18:00. Out-time must be after in-time. Hours past the shift become overtime automatically.
 - **Verification:** daily dumps from ACPL and eSSL (gate/biometric) are matched against the DPR attendance.
 - **Two supervisors, same day:** allowed as a split day (times must not overlap).
-- **Still open:** when OT starts counting, OT pay rate, half-day rule, ACPL/eSSL file format.
+- **Half day / OT for P&L (decided Repair 1):** half day with no times = 0.5 day; with times = hours inside the shift ÷ 8. OT after 18:00 as §17. See §18.
+- **Still open:** ACPL/eSSL file format (times source), eSSL company codes.
 
 ## 5. DPR
 - **Deadline:** next day by 10:00.
@@ -219,7 +223,7 @@ Read from `eSSL.xls` (Sep 2026, printed 10-Oct-2026). Two sheets = two eSSL "com
 ## 18. Accounting / P&L in Finance (decided 2026-10-11)
 Management accounting (costing + P&L), not statutory books — Tally stays for GST/filing.
 - **Income:** from JMS (qty × WO rate), counted **when payment is received** (cash basis). JMS confirmed but unpaid shown separately as "earned, not yet received". Needs a payment-received date on every JMS (today only 25 of 943 rows in the JMS book have one).
-- **Direct labour:** attendance × daily wage (+ OT), charged per job per day from the **DPR crew list**; a split day splits the cost.
+- **Direct labour:** attendance × daily wage (+ OT), charged per job per day from the **DPR crew list**; a split day splits the cost. Day fraction: absent/leave/off = 0; half day with no times = 0.5; present/OT with no times = 1; with in/out = hours inside 08:00–18:00 ÷ 8 (capped at 1). OT after 18:00 at daily wage ÷ 8 (docs §17). Admin's report marks win over the supervisor's (§5b). After an ACPL flag is resolved as gate, that punch (or absent if none) replaces the DPR mark for pay; SIC override keeps the DPR (docs §12). The monthly pay CSV is what the labourer sees; it does not enter P&L.
 - **Direct job costs:** expense entries tagged to a job / plant (abrasive, thinner bought by SGE, job-specific hire).
 - **Overheads / fixed costs** (salaries, compressor / bus / car rent, diesel, machinery, PPE): monthly per site, shared over jobs **by labour-days**.
 - **Results:** profit or loss per m² (by MPS / service item), per m³ (scaffolding), per labour-day, per supervisor, per job, per site, per month; All-sites total.
