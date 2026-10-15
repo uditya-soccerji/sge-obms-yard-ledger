@@ -304,3 +304,11 @@ The owner is reworking every role's access, starting at the labourer and moving 
 - **Calculators:** Supervisor, SIC, Admin, Store, Safety; a detailed PDF of the working with the user's profile (name, designation, staff ID, role, site, login, date). *(built in step 4)*
 - **Plan → job → JMS:** the supervisor plans a job (start date …) and submits; SIC approves; progress is tracked against the plan from daily DPRs. The supervisor ends the job (final shade + end date) → **SIC confirms** (then view only) → a JMS is generated from the DPRs between start and end → **Admin** enters the JMS number and amount and submits → Finance is updated. SIC and Admin can send it back if the DPR compilation is wrong (SIC before confirming, Admin after — the job reopens for the supervisor). Finance sees a JMS only after the Admin has submitted it. *(built in step 5)*
 - **SIC approvals:** the SIC can edit DPR quantities before approving; both values are kept in the audit log.
+
+## 25. Labourer register in the shared database (decided 2026-10-15)
+- The register moved from each browser to the shared database (`supabase/migrations/20261015_006_labourers.sql`, applied to `sge-obms`). Everyone signed in sees the same labourers; the app loads them at sign-in and every minute, and saves every change back. If a save fails, a red notice says so and the change is sent again.
+- **Who sees what:** every staff role reads the register (name, EP, trade, skill, site, crew, RIL pass); a labourer login reads only its own row. **Aadhaar and mobile:** Owner, Super Admin, HR only. **Daily wage:** Owner, Super Admin, HR, Admin, Finance.
+- **Who writes:** add — Owner, Super Admin, HR, Admin (uploads); edit — those and the SIC (crew changes); delete — Owner and Super Admin only (everyone else deactivates, §1).
+- The first sign-in after this change replaces the browser's own labourer list with the shared one, so labourers that were only in a browser have to be uploaded once (Master Data → Labourers → Upload CSV).
+- Still in each browser: DPRs, attendance, crews' requests, store requests, pay lines, Work.
+

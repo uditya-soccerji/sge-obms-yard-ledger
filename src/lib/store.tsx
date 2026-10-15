@@ -21,6 +21,7 @@ import { roleMeta } from "./roles";
 import { SAFETY_CHECKLIST_SEED } from "./safety-dpr";
 import { seedMasterCatalog } from "./master/seed-catalog";
 import { supabase } from "./supabase/client";
+import { partsOf, remoteLoadLabourers, remoteSaveLabourers, type LabourerParts } from "./supabase/labourers";
 import {
   remoteAudit,
   remoteCreateUser,
@@ -77,6 +78,8 @@ interface StoreApi {
   fullState: AppState;
   hydrated: boolean;
   currentAccount: UserAccount | null;
+  /** Shared labourer register (migration 006): last save problem, null when fine */
+  labourerSync: { loaded: boolean; error: string | null };
   login: (
     username: string,
     password: string
@@ -540,6 +543,68 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   // B2: a deactivated user (or an ended session) is signed out within a few minutes
   const signedIn = !!state.currentAccountId;
+
+  // ---- Labourer register in the shared database (owner, 2026-10-15) ----
+  // Loaded at sign-in and every minute; every change is saved back. Until the
+  // first load the local list is never pushed, so demo labourers stay out of it.
+  const labSynced = React.useRef<Map<string, LabourerParts> | null>(null);
+  const labBusy = React.useRef(false);
+  const labAgain = React.useRef(false);
+  const [labourerSync, setLabourerSync] = useState<{ loaded: boolean; error: string | null }>({ loaded: false, error: null });
+  const accountId = state.currentAccountId;
+
+  const pullLabourers = useCallback(async () => {
+    if (!supabase) return;
+    const rows = await remoteLoadLabourers();
+    if (!rows) return setLabourerSync((x) => ({ ...x, error: "Couldn't load labourers from the shared register" }));
+    // Keep local edits that haven't reached the server yet
+    const cur = stateRef.current.labourers;
+    const synced = labSynced.current;
+    const pending = synced ? cur.filter((l) => { const was = synced.get(l.id); const now = partsOf(l); return !was || was.main !== now.main || was.priv !== now.priv || was.pay !== now.pay; }) : [];
+    const pendingIds = new Set(pending.map((l) => l.id));
+    const merged = [...rows.filter((r) => !pendingIds.has(r.id)), ...pending];
+    labSynced.current = new Map(rows.map((l) => [l.id, partsOf(l)]));
+    setState((s) => ({ ...s, labourers: merged }));
+    setLabourerSync({ loaded: true, error: null });
+  }, []);
+
+  useEffect(() => {
+    labSynced.current = null;
+    setLabourerSync({ loaded: false, error: null });
+    if (!supabase || !accountId || !hydrated) return;
+    void pullLabourers();
+    const t = setInterval(() => { if (!labBusy.current) void pullLabourers(); }, 60 * 1000);
+    const onFocus = () => { if (!labBusy.current) void pullLabourers(); };
+    window.addEventListener("focus", onFocus);
+    return () => { clearInterval(t); window.removeEventListener("focus", onFocus); };
+  }, [accountId, hydrated, pullLabourers]);
+
+  const pushLabourers = useCallback(async () => {
+    const synced = labSynced.current;
+    if (!supabase || !synced) return;
+    if (labBusy.current) { labAgain.current = true; return; }
+    const cur = stateRef.current;
+    const ids = new Set(cur.labourers.map((l) => l.id));
+    const changed = cur.labourers
+      .map((l) => { const was = synced.get(l.id); const now = partsOf(l); return { labourer: l, now, main: !was || was.main !== now.main, priv: !was ? !!(l.aadhaar || l.mobile) : was.priv !== now.priv, pay: !was ? (l.wageDaily ?? 0) > 0 : was.pay !== now.pay }; })
+      .filter((c) => c.main || c.priv || c.pay);
+    const removed = [...synced.keys()].filter((id) => !ids.has(id));
+    if (!changed.length && !removed.length) return;
+    labBusy.current = true;
+    const roles = cur.users.find((u) => u.id === cur.currentAccountId)?.roles ?? [];
+    const res = await remoteSaveLabourers(roles, changed, removed);
+    labBusy.current = false;
+    if (res.ok) {
+      for (const c of changed) synced.set(c.labourer.id, c.now);
+      for (const id of removed) synced.delete(id);
+      setLabourerSync({ loaded: true, error: null });
+    } else setLabourerSync({ loaded: true, error: res.error ?? "Labourers didn't save" });
+    if (labAgain.current) { labAgain.current = false; void pushLabourers(); }
+  }, []);
+
+  useEffect(() => {
+    if (labourerSync.loaded) void pushLabourers();
+  }, [state.labourers, labourerSync.loaded, pushLabourers]);
   useEffect(() => {
     if (!supabase || !signedIn) return;
     const check = async () => {
@@ -2061,6 +2126,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       fullState: state,
       hydrated,
       currentAccount,
+      labourerSync,
       login,
       switchRole,
       logout,
@@ -2113,6 +2179,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       updateEquipmentRequest,
     }),
     [
+      labourerSync,
       state,
       scopedState,
       hydrated,
