@@ -268,6 +268,11 @@ export interface StaffMember {
   phone?: string;
   designation?: string;
   supervisorType?: SupervisorType;
+  /** HR's staff record (round 2, §27) */
+  employeeCode?: string;
+  joinedOn?: string;
+  /** false = left / deactivated; unset = active */
+  active?: boolean;
 }
 
 export interface Labourer {

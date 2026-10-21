@@ -1,5 +1,6 @@
 "use client";
 
+import { OwnerDailySummary } from "@/components/owner/daily-summary";
 import { guarded } from "@/components/shared/require-module";
 import { today as todayDate } from "@/lib/today";
 import Link from "next/link";
@@ -78,6 +79,9 @@ function OwnerHomePage() {
           </div>
         }
       />
+
+      {/* Round 2 (§27): one day on one panel */}
+      <OwnerDailySummary />
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <KpiTile label="Attendance today" value={`${present}/${totalActive}`} hint="Present + half day" tone="ok" />

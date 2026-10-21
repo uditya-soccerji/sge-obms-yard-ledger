@@ -205,6 +205,8 @@ interface StoreApi {
   upsertSite: (site: AppState["sites"][number]) => Promise<{ ok: boolean; error?: string }>;
   /** New staff record (to link a login to); returns its id, or "" if not allowed */
   addStaff: (input: Omit<StaffMember, "id">) => string;
+  /** HR's staff list (round 2, §27): edit, deactivate / activate */
+  updateStaff: (id: string, patch: Partial<Omit<StaffMember, "id">>) => { ok: boolean; error?: string };
   addLabourer: (row: Omit<Labourer, "id"> & { id?: string }) => { ok: boolean; error?: string; id?: string };
   /** Owner / Super Admin: delete a labourer with no history; otherwise deactivate */
   removeLabourer: (id: string) => { ok: boolean; error?: string };
@@ -456,7 +458,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         if (recovered && recovered.roles.length) {
           const role = recovered.roles[0];
           const opId = recovered.staffId ?? recovered.labourerId ?? null;
-          const siteId = landingSite(role, recovered.siteIds, fresh.currentSiteId);
+          const siteId = landingSite(role, recovered.siteIds, fresh.currentSiteId, recovered);
           const next: AppState = {
             ...fresh,
             currentAccountId: recovered.id,
@@ -483,7 +485,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     }
     const role = account.roles[0];
     const opId = account.staffId ?? account.labourerId ?? null;
-    const siteId = landingSite(role, account.siteIds, s.currentSiteId);
+    const siteId = landingSite(role, account.siteIds, s.currentSiteId, account);
     const next: AppState = {
       ...s,
       currentAccountId: account.id,
@@ -513,7 +515,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const master = await remoteLoadMaster();
       const role = me.roles[0];
       const s = stateRef.current;
-      const siteId = landingSite(role, me.siteIds, s.currentSiteId);
+      const siteId = landingSite(role, me.siteIds, s.currentSiteId, me);
       const next: AppState = {
         ...s,
         masterCatalog: master ?? s.masterCatalog,
@@ -543,7 +545,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         currentRole: role,
         // A role that can't see every site drops back to the entry site
         currentSiteId:
-          s.currentSiteId === ALL_SITES && !canSeeAllSites(role)
+          s.currentSiteId === ALL_SITES && !canSeeAllSites(role, account)
             ? entrySiteId(s)
             : s.currentSiteId,
       };
@@ -698,7 +700,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       }
       const role = target.roles[0];
       const opId = target.staffId ?? target.labourerId ?? null;
-      const siteId = landingSite(role, target.siteIds, s.currentSiteId);
+      const siteId = landingSite(role, target.siteIds, s.currentSiteId, target);
       const next: AppState = {
         ...s,
         impersonatorAccountId: actor.id,
@@ -1089,7 +1091,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       return { ok: false as const, error: "Site switch not allowed for this role" };
     }
     if (siteId === ALL_SITES) {
-      if (!canSeeAllSites(s.currentRole)) {
+      if (!canSeeAllSites(s.currentRole, account)) {
         return { ok: false as const, error: "All sites is for Owner / Super Admin" };
       }
       setState((prev) => ({
@@ -1703,7 +1705,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const addStaff = useCallback((input: Omit<StaffMember, "id">) => {
     const cur = stateRef.current;
-    if (!can(cur, "users", "create") && !can(cur, "master", "update")) return "";
+    // Round 2 (§27): HR keeps staff records too
+    if (!can(cur, "users", "create") && !can(cur, "master", "update") && !can(cur, "hr", "update")) return "";
     const id = uid("st");
     setState((s) => {
       const next = { ...s, staff: [...s.staff, { ...input, id }] };
@@ -1716,6 +1719,19 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       };
     });
     return id;
+  }, []);
+
+  const updateStaff = useCallback((id: string, patch: Partial<Omit<StaffMember, "id">>) => {
+    const cur = stateRef.current;
+    if (!can(cur, "users", "update") && !can(cur, "master", "update") && !can(cur, "hr", "update")) return DENIED;
+    const before = cur.staff.find((x) => x.id === id);
+    if (!before) return { ok: false, error: "Staff record not found" };
+    setState((s) => {
+      const next = { ...s, staff: s.staff.map((x) => (x.id === id ? { ...x, ...patch } : x)) };
+      const what = patch.active !== undefined && Object.keys(patch).length === 1 ? (patch.active ? "activated" : "deactivated") : "edited";
+      return { ...next, auditLog: [makeAudit(next, "users", "update", `Staff record ${before.name} ${what}`), ...s.auditLog] };
+    });
+    return { ok: true };
   }, []);
 
   /** docs §24: monthly pay upload — add new lines, change lines whose amount differs; Admin / HR */
@@ -2269,6 +2285,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       releaseCrew,
       decideCrew,
       addStaff,
+      updateStaff,
       addWageEntry,
       acknowledgeFinanceAlert,
       flagFinanceAlertToSic,
@@ -2329,6 +2346,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       releaseCrew,
       decideCrew,
       addStaff,
+      updateStaff,
       addWageEntry,
       acknowledgeFinanceAlert,
       flagFinanceAlertToSic,

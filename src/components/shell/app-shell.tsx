@@ -17,7 +17,7 @@ import { roleMeta, rolesForSwitcher } from "@/lib/roles";
 import { NotificationBell } from "@/components/work/notifications";
 import { canAccessWork, topNavFor } from "@/lib/desk";
 import { canUseTestTools } from "@/lib/permissions";
-import { ALL_SITES, canSeeAllSites, canSwitchSites, entrySiteId } from "@/lib/site-scope";
+import { ALL_SITES, canSeeAllSites, canSwitchSites, entrySiteId, isCentralStore } from "@/lib/site-scope";
 import { useStore } from "@/lib/store";
 import { useWork } from "@/lib/work/store";
 import type { RoleId } from "@/lib/types";
@@ -136,10 +136,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   const canSwitchSite = canSwitchSites(role);
   // Switched-off sites stay listed (read only there) so nobody is stuck on one (M5)
+  const central = role === "store" && isCentralStore(currentAccount);
   const switchableSites = state.sites.filter(
     (s) =>
       (s.enabled || s.id === state.currentSiteId || role === "super_admin" || role === "owner") &&
       (currentAccount?.roles.includes("super_admin") ||
+        central ||
         currentAccount?.siteIds.includes(s.id))
   );
 
@@ -162,7 +164,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const meta = roleMeta(role);
   const site = state.sites.find((s) => s.id === state.currentSiteId);
   const allSites = state.currentSiteId === ALL_SITES;
-  const showAllOption = canSeeAllSites(role) && switchableSites.length > 1;
+  const showAllOption = canSeeAllSites(role, currentAccount) && switchableSites.length > 1;
   const entrySite = state.sites.find((s) => s.id === entrySiteId(state));
 
   function exitViewAs() {

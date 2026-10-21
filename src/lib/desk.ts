@@ -14,6 +14,8 @@ export type OpsPanelId =
   | "hr"
   | "requests"
   | "labourers"
+  | "staff"
+  | "labour-pay"
   | "submissions"
   | "audit"
   | "admin"
@@ -98,11 +100,16 @@ const ROLE_PILLS: Record<RoleId, OpsPill[]> = {
     { id: "acpl", label: "ACPL", module: "acpl" },
     // Round 2: HR adds, edits, deactivates and re-activates labourers
     { id: "labourers", label: "Labourers", module: "labourer" },
+    // Round 2 (§27)
+    { id: "staff", label: "Staff", module: "hr" },
+    { id: "labour-pay", label: "Labour pay", module: "hr" },
   ],
   finance: [
     { id: "finance", label: "Finance", module: "finance" },
     { id: "jms", label: "JMS", module: "jms" },
     { id: "estimate", label: "Estimator", module: "calculators" },
+    // Round 2 (§27)
+    { id: "labour-pay", label: "Labour pay", module: "finance" },
   ],
   supervisor: [
     { id: "dpr", label: "DPR", module: "dpr" },
