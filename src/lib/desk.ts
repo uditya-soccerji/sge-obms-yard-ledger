@@ -51,6 +51,8 @@ const ROLE_PILLS: Record<RoleId, OpsPill[]> = {
   ],
   owner: [
     { id: "approvals", label: "Approvals", module: "approvals" },
+    // Round 2 (§27): every DPR, view + PDF
+    { id: "dpr", label: "DPR", module: "dpr" },
     { id: "crew", label: "Crews", module: "crew" },
     { id: "store", label: "Store / FIM", module: "store" },
     { id: "jms", label: "JMS", module: "jms" },
@@ -79,6 +81,8 @@ const ROLE_PILLS: Record<RoleId, OpsPill[]> = {
   ],
   admin: [
     { id: "admin", label: "Uploads", module: "admin" },
+    // Round 2 (§27): DPR quantities for the SIC
+    { id: "approvals", label: "Approvals", module: "approvals" },
     { id: "dpr", label: "DPR", module: "dpr" },
     { id: "acpl", label: "ACPL", module: "acpl" },
     { id: "jms", label: "JMS", module: "jms" },
@@ -138,7 +142,8 @@ export function canAccessMasterData(role: RoleId | null | undefined): boolean {
 
 export function masterSheetsFor(role: RoleId | null | undefined): "all" | MasterSheetId[] {
   if (role === "super_admin" || role === "owner") return "all";
-  if (role === "admin") return ["trades", "wageBands", "rateBook"];
+  // Round 2 (§27): Admin also manages Materials and Units
+  if (role === "admin") return ["trades", "wageBands", "rateBook", "materials", "units"];
   // Round 2: the store sees the materials list (view; editing stays with Owner / SA)
   if (role === "store") return ["materials"];
   return [];

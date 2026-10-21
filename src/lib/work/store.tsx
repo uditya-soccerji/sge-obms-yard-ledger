@@ -584,7 +584,9 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
     if (!r || r.status !== "submitted") return { ok: false, error: "This DPR isn't waiting for review" };
     if (decision === "sic_rejected" && !note.trim()) return { ok: false, error: "Give a reason so the supervisor can fix it" };
     const at = new Date().toISOString();
-    const done: DprReport = { ...r, status: decision, sicNote: note.trim() || undefined, sicReviewedBy: actor.current.name, sicReviewedAt: at, updatedAt: at };
+    // Round 2 (§27): Admin may review for the SIC at any time; both names stay in the log
+    const forSic = actor.current.role === "admin";
+    const done: DprReport = { ...r, status: decision, sicNote: note.trim() || undefined, sicReviewedBy: forSic ? `${actor.current.name} (Admin for SIC)` : actor.current.name, sicReviewedAt: at, updatedAt: at };
     setWork((s) => ({ ...s, reports: s.reports.map((x) => (x.id === id ? done : x)) }));
     // Attendance was recorded at submit (docs §23); the review accepts the work quantities
     log({
@@ -592,11 +594,12 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
       problem: decision === "sic_rejected",
       siteId: r.siteId,
       subjectStaffId: r.submitterId,
-      title: `DPR ${r.date} · ${r.plant} ${decision === "sic_approved" ? "approved" : "sent back"}`,
+      title: `DPR ${r.date} · ${r.plant} ${decision === "sic_approved" ? "approved" : "sent back"}${forSic ? " by Admin for SIC" : ""}`,
       detail: note.trim() || "Approved",
       tab: "jobs",
       refId: id,
     });
+    if (forSic) log({ kind: "dpr_for_sic", siteId: r.siteId, subjectStaffId: r.submitterId, title: `Admin ${decision === "sic_approved" ? "approved" : "sent back"} DPR ${r.date} · ${r.plant} for you`, detail: note.trim() || "No note", tab: `/dpr/${id}`, refId: id });
     return { ok: true };
   }, [log]);
 
@@ -645,7 +648,8 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const setJmsStatus = useCallback<WorkApi["setJmsStatus"]>((jmsId, status, note) => {
-    if (!rights().canConfirm) return NOT_ALLOWED;
+    // Round 2 (§27): after confirming, the SIC only views the JMS; Admin / Owner / SA move it
+    if (actor.current.role !== "admin" && !rights().isBoss) return NOT_ALLOWED;
     const w = ref.current;
     const j = w.jms.find((x) => x.id === jmsId);
     if (!j) return { ok: false, error: "JMS not found" };

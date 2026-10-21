@@ -52,7 +52,9 @@ export type EventKind =
   | "jms_admin_pending"
   | "jms_admin_approved"
   | "jms_returned"
-  | "pay_uploaded";
+  | "pay_uploaded"
+  // Admin reviewed a DPR for the SIC (§27)
+  | "dpr_for_sic";
 
 export interface WorkEvent {
   id: string;
@@ -134,6 +136,7 @@ export const KIND_LABEL: Record<EventKind, string> = {
   jms_admin_approved: "JMS approved by Admin",
   jms_returned: "JMS sent back",
   pay_uploaded: "Monthly pay uploaded",
+  dpr_for_sic: "DPR reviewed by Admin for SIC",
 };
 
 // Company-wide events (no site, e.g. the monthly pay upload) reach every viewer of the right role
@@ -227,6 +230,8 @@ export function isFor(e: WorkEvent, v: Viewer): boolean {
     // docs §24: Admin / HR upload the month's pay; Finance is told
     case "pay_uploaded":
       return v.role === "finance";
+    case "dpr_for_sic":
+      return v.role === "sic";
   }
 }
 

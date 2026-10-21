@@ -59,13 +59,11 @@ export function checkCrewRequest(
 }
 
 /**
- * Can the SIC approve this request now? A labourer still on another
- * supervisor's crew must be released by that supervisor first (docs §23).
+ * Can the SIC approve this request now? Round 2 (§27): the SIC decides even when the
+ * labourer is still on another crew — that supervisor is told, not asked.
  */
 export function approveBlock(r: CrewRequest, labourer: Labourer | undefined): string | null {
   if (!isOpenRequest(r)) return "This request is already decided";
   if (!labourer || !labourer.active) return "Labourer not found or inactive";
-  const stillOnOther = !!labourer.supervisorId && labourer.supervisorId !== r.toSupervisorId;
-  if (stillOnOther && r.status !== "released") return "Waiting for the current supervisor to release";
   return null;
 }

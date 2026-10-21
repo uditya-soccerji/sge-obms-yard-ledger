@@ -76,7 +76,7 @@ export function MasterDesk() {
             ? "Owner & Super Admin. Deactivate instead of delete. Site rows first; company-wide fills the rest. Dropdowns elsewhere read this store."
             : state.currentRole === "store"
               ? "Store: the materials list (view). Owner / Super Admin add or change materials."
-              : "Admin: trades, daily wages, and the rate book. Other sheets are Owner / Super Admin."
+              : "Admin: trades, daily wages, the rate book, materials and units. Other sheets are Owner / Super Admin."
         }
       />
       <div className="flex flex-wrap gap-1 border-b border-[var(--sge-line)] pb-2">

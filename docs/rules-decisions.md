@@ -331,4 +331,5 @@ The owner is reworking every role's access, starting at the labourer and moving 
 - **Owner:** a **DPR tab** (view all, PDFs), may **override a store rejection**, and a **daily summary** on the Owner home.
 - **SIC:** may approve a crew move **without the current supervisor releasing** (that supervisor is told) — replaces the release step of §23. **JMS and ACPL approve buttons removed** (SIC confirms the ended job only).
 - **Supervisor:** sees Safety observations tagged to him. **Labourer, Super Admin:** no change.
+- **Built 2026-10-21 (quick changes):** SIC loses JMS / ACPL approve (RIL JMS status moves are Admin / Owner / SA); the SIC approves crew moves without a release (that supervisor is told); Owner gets the DPR tab (view, PDFs) and may override store rejections; Admin gets Approvals (reviews for the SIC any time — the DPR shows "<name> (Admin for SIC)" and the SIC is alerted) and Materials + Units in Master Data (`supabase/migrations/20261021_007_admin_materials_units.sql`, applied to `sge-obms`).
 
