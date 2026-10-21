@@ -13,6 +13,7 @@ export type OpsPanelId =
   | "finance"
   | "hr"
   | "requests"
+  | "labourers"
   | "submissions"
   | "audit"
   | "admin"
@@ -58,6 +59,8 @@ const ROLE_PILLS: Record<RoleId, OpsPill[]> = {
     { id: "audit", label: "Audit", module: "audit" },
     { id: "estimate", label: "Estimator", module: "calculators" },
     { id: "telegram", label: "Telegram", module: "telegram" },
+    // Round 2 (owner, 2026-10-21)
+    { id: "requests", label: "Requests", module: "requests" },
   ],
   sic: [
     { id: "approvals", label: "Approvals", module: "approvals" },
@@ -83,10 +86,14 @@ const ROLE_PILLS: Record<RoleId, OpsPill[]> = {
     { id: "paint-calc", label: "Paint calc", module: "calculators" },
     { id: "area-calc", label: "Area", module: "calculators" },
     { id: "scaffold-calc", label: "Scaffold calc", module: "calculators" },
+    // Round 2 (owner, 2026-10-21)
+    { id: "requests", label: "Requests", module: "requests" },
   ],
   hr: [
     { id: "hr", label: "Attendance", module: "hr" },
     { id: "acpl", label: "ACPL", module: "acpl" },
+    // Round 2: HR adds, edits, deactivates and re-activates labourers
+    { id: "labourers", label: "Labourers", module: "labourer" },
   ],
   finance: [
     { id: "finance", label: "Finance", module: "finance" },
@@ -118,22 +125,22 @@ const ROLE_PILLS: Record<RoleId, OpsPill[]> = {
     { id: "safety", label: "Safety DPR", module: "safety" },
     { id: "dpr", label: "DPR desk", module: "dpr" },
     { id: "submissions", label: "My submissions", module: "submissions" },
-    { id: "estimate", label: "Estimator", module: "calculators" },
-    { id: "paint-calc", label: "Paint calc", module: "calculators" },
-    { id: "area-calc", label: "Area", module: "calculators" },
-    { id: "scaffold-calc", label: "Scaffold calc", module: "calculators" },
+    // Round 2 (owner, 2026-10-21)
+    { id: "requests", label: "Requests", module: "requests" },
   ],
   labourer: [],
 };
 
 /** Owner and Super Admin see every sheet; Admin keeps trades and the rate book (M3, rules §2). */
 export function canAccessMasterData(role: RoleId | null | undefined): boolean {
-  return role === "super_admin" || role === "owner" || role === "admin";
+  return role === "super_admin" || role === "owner" || role === "admin" || role === "store";
 }
 
 export function masterSheetsFor(role: RoleId | null | undefined): "all" | MasterSheetId[] {
   if (role === "super_admin" || role === "owner") return "all";
   if (role === "admin") return ["trades", "wageBands", "rateBook"];
+  // Round 2: the store sees the materials list (view; editing stays with Owner / SA)
+  if (role === "store") return ["materials"];
   return [];
 }
 

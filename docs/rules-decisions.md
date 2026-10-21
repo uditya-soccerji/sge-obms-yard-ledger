@@ -316,3 +316,9 @@ The owner is reworking every role's access, starting at the labourer and moving 
 - The first sign-in after this change replaces the browser's own labourer list with the shared one, so labourers that were only in a browser have to be uploaded once (Master Data → Labourers → Upload CSV).
 - Still in each browser: DPRs, attendance, crews' requests, store requests, pay lines, Work.
 
+## 26. Access plan, round 2 — first changes (decided 2026-10-21)
+- **Requests tab** for Safety, Admin and Owner too (Owner views; Safety and Admin raise and follow their requests).
+- **HR has a Labourers screen** (Operations → Labourers): add, edit, deactivate / activate, upload a CSV. Crews stay with the SIC (the supervisor picker is locked for HR); deleting stays with Owner / Super Admin.
+- **Store:** keeps the Estimator but sees **no rates or money** — only crew-days and paint litres (on screen and in the PDF). Sees the **Materials** list in Master Data (view only; Owner / SA change it), with the equipment and stock on Store / FIM and Paint stock in Work.
+- **Safety** gets only safety items: Safety DPR, DPR desk, My submissions, Requests. The calculators were removed (this reverses the round-1 choice for Safety).
+

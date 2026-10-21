@@ -40,6 +40,8 @@ function CostEstimatePage() {
   const [editId, setEditId] = useState<string | null>(null);
   const [editRate, setEditRate] = useState("");
   const activeSite = entrySiteId(state);
+  // Round 2 (owner, 2026-10-21): the store estimates quantities, never sees rates or money
+  const noRates = state.currentRole === "store";
   // Average daily wage of active labourers — a rough labour cost next to the billing value
   const active = state.labourers.filter((l) => l.active && l.wageDaily > 0);
   const avgWage = active.length ? active.reduce((s, l) => s + l.wageDaily, 0) / active.length : 0;
@@ -59,7 +61,7 @@ function CostEstimatePage() {
     <div className="sge-enter space-y-6">
       <SectionHeader
         title="Cost & manpower estimator"
-        subtitle="Pipeline, Structures, Tanks (₹/m²) and Scaffolding (₹/m³). When a matching PO rate exists for the active site, the rate book wins over legacy rate cards."
+        subtitle={noRates ? "Manpower (crew-days) and paint litres for Pipeline, Structures, Tanks (m²) and Scaffolding (m³)." : "Pipeline, Structures, Tanks (₹/m²) and Scaffolding (₹/m³). When a matching PO rate exists for the active site, the rate book wins over legacy rate cards."}
         action={<PdfButton href={`/print/calc?type=estimate&kind=${kind}&qty=${qty}`} />}
       />
 
@@ -99,6 +101,7 @@ function CostEstimatePage() {
         </Panel>
 
         <div className="grid gap-3 sm:grid-cols-2">
+          {noRates ? null : (
           <KpiTile
             label="Billing value (client rate)"
             value={result ? formatINR(result.costInr) : "—"}
@@ -109,11 +112,14 @@ function CostEstimatePage() {
                 : undefined
             }
           />
+          )}
+          {noRates ? null : (
           <KpiTile
             label="Labour cost (est.)"
             value={result ? formatINR(Math.round(result.manpowerDays * avgWage)) : "—"}
             hint={`${result ? result.manpowerDays : 0} crew-days × avg wage ₹${Math.round(avgWage)}`}
           />
+          )}
           <KpiTile
             label="Paint / material"
             value={
@@ -130,6 +136,7 @@ function CostEstimatePage() {
             hint="Crew-days estimate"
             tone="ok"
           />
+          {noRates ? null : (
           <KpiTile
             label="Unit rate"
             value={result ? `₹${result.rateInr}/${result.unit}` : "—"}
@@ -140,9 +147,11 @@ function CostEstimatePage() {
             }
             tone={result?.fromRateBook ? "ok" : undefined}
           />
+          )}
         </div>
       </div>
 
+      {noRates ? null : (
       <Panel>
         <h3 className="mb-3 font-heading text-sm font-bold uppercase tracking-wide text-[var(--sge-ink-3)]">
           Rate cards {state.currentRole === "admin" || state.currentRole === "owner" ? "(editable)" : ""}
@@ -202,6 +211,7 @@ function CostEstimatePage() {
           ))}
         </div>
       </Panel>
+      )}
     </div>
   );
 }
