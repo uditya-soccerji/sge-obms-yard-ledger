@@ -16,6 +16,8 @@ export type OpsPanelId =
   | "labourers"
   | "staff"
   | "labour-pay"
+  | "observations"
+  | "safety-view"
   | "submissions"
   | "audit"
   | "admin"
@@ -134,6 +136,9 @@ const ROLE_PILLS: Record<RoleId, OpsPill[]> = {
   ],
   safety: [
     { id: "safety", label: "Safety DPR", module: "safety" },
+    // Round 2 (§27)
+    { id: "observations", label: "Observations", module: "safety" },
+    { id: "safety-view", label: "Site view", module: "safety" },
     { id: "dpr", label: "DPR desk", module: "dpr" },
     { id: "submissions", label: "My submissions", module: "submissions" },
     // Round 2 (owner, 2026-10-21)

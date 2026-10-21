@@ -18,6 +18,8 @@ const PANELS: Record<OpsPanelId, ComponentType> = {
   labourers: dynamic(() => import("@/app/(app)/labourers/page"), { loading, ssr: false }),
   staff: dynamic(() => import("@/app/(app)/staff/page"), { loading, ssr: false }),
   "labour-pay": dynamic(() => import("@/app/(app)/labour-pay/page"), { loading, ssr: false }),
+  observations: dynamic(() => import("@/app/(app)/observations/page"), { loading, ssr: false }),
+  "safety-view": dynamic(() => import("@/app/(app)/safety-view/page"), { loading, ssr: false }),
   approvals: dynamic(() => import("@/app/(app)/approvals/sic/page"), {
     loading,
     ssr: false,

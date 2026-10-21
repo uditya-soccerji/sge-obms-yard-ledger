@@ -1,5 +1,6 @@
 "use client";
 
+import { ObservationList } from "@/components/safety/observations";
 import { guarded } from "@/components/shared/require-module";
 import { today as todayDate } from "@/lib/today";
 import Link from "next/link";
@@ -43,6 +44,9 @@ function SicHomePage() {
           </Link>
         }
       />
+
+      {/* Round 2 (§27): safety observations tagged to this sic / site */}
+      <ObservationList mode="sic" />
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <KpiTile label="DPR inbox" value={String(pending.length)} tone="accent" />

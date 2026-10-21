@@ -1,5 +1,6 @@
 "use client";
 
+import { ObservationList } from "@/components/safety/observations";
 import { PassExpiryPanel } from "@/components/hr/pass-expiry-panel";
 import { guarded } from "@/components/shared/require-module";
 import Link from "next/link";
@@ -75,6 +76,9 @@ function SupervisorHomePage() {
           </div>
         }
       />
+
+      {/* Round 2 (§27): safety observations tagged to this supervisor / site */}
+      <ObservationList mode="supervisor" />
 
       {/* docs §24: RIL passes expiring within 10 days */}
       <PassExpiryPanel supervisorId={supervisorId} />

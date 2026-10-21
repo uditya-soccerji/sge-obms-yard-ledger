@@ -260,6 +260,27 @@ export interface PlantDetail {
   locations: PlantLocation[];
 }
 
+/** A safety officer's observation, tagged to a supervisor (round 2, §27) */
+export interface SiteObservation {
+  id: string;
+  siteId: string;
+  plant?: string;
+  location: string;
+  text: string;
+  risk: "low" | "medium" | "high";
+  /** Unsafe condition: work stops until cleared — urgent to SIC, Owner, supervisor */
+  stopWork?: boolean;
+  supervisorId: string;
+  /** open → fixed (supervisor) → closed (Safety); Safety may reopen */
+  status: "open" | "fixed" | "closed";
+  raisedBy: string;
+  raisedAt: string;
+  fixNote?: string;
+  fixedAt?: string;
+  closedBy?: string;
+  closedAt?: string;
+}
+
 export interface StaffMember {
   id: string;
   name: string;
@@ -710,6 +731,8 @@ export interface AppState {
   equipmentRequests: EquipmentRequest[];
   /** Supervisor requests to take a labourer onto their crew (docs §23) */
   crewRequests: CrewRequest[];
+  /** Safety observations and stop-work calls (round 2, §27) */
+  safetyObservations: SiteObservation[];
   /** One master store — load once, resolve site-then-company in memory. */
   masterCatalog: MasterCatalog;
 }

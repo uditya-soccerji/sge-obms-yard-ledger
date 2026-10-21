@@ -50,6 +50,7 @@ import type { TransferPreviewRow } from "./transfer-types";
 import { checkSeat, checkSites, checkUserChange, MIN_PASSWORD } from "./users";
 import type {
   AcplMatchRow,
+  SiteObservation,
   CrewRequest,
   AcplPunchRow,
   AcplResolveStatus,
@@ -147,6 +148,9 @@ interface StoreApi {
   requestCrew: (labourerIds: string[], note?: string) => { ok: boolean; error?: string; created: CrewRequest[] };
   releaseCrew: (requestId: string) => { ok: boolean; error?: string };
   decideCrew: (requestId: string, approve: boolean, note: string) => { ok: boolean; error?: string };
+  /** Safety observations (round 2, §27) */
+  raiseObservation: (input: Omit<SiteObservation, "id" | "status" | "raisedBy" | "raisedAt">) => { ok: boolean; error?: string; id?: string };
+  moveObservation: (id: string, to: "fixed" | "closed" | "open", note?: string) => { ok: boolean; error?: string };
   /** Refuses a label that already exists (case-insensitive) */
   addTrade: (input: Omit<TradeDefinition, "id"> & { id?: string }) => { ok: boolean; error?: string; id?: string };
   updateLabourer: (
@@ -313,6 +317,7 @@ function migrateState(parsed: Partial<AppState>): AppState {
     auditLog: parsed.auditLog ?? seed.auditLog,
     equipmentRequests: parsed.equipmentRequests ?? seed.equipmentRequests,
     crewRequests: parsed.crewRequests ?? [],
+    safetyObservations: parsed.safetyObservations ?? [],
     attendance: (parsed.attendance ?? seed.attendance).map((a) =>
       (a.status as string) === "off" ? { ...a, status: "weekly_off" as const } : a
     ),
@@ -1446,6 +1451,51 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   /** SIC approves (labourer joins the crew) or rejects a request (docs §23). */
+  const raiseObservation = useCallback((input: Omit<SiteObservation, "id" | "status" | "raisedBy" | "raisedAt">) => {
+    const cur = stateRef.current;
+    if (!can(cur, "safety", "update")) return DENIED;
+    if (!input.text.trim()) return { ok: false, error: "Say what you saw" };
+    if (!input.location.trim()) return { ok: false, error: "Say where" };
+    const sup = cur.staff.find((x) => x.id === input.supervisorId && x.role === "supervisor");
+    if (!sup) return { ok: false, error: "Tag the supervisor responsible" };
+    const id = uid("obs");
+    const row: SiteObservation = { ...input, id, text: input.text.trim(), location: input.location.trim(), status: "open", raisedBy: cur.currentUserId ?? cur.currentAccountId ?? "safety", raisedAt: new Date().toISOString() };
+    setState((s) => {
+      const next = { ...s, safetyObservations: [row, ...s.safetyObservations] };
+      return { ...next, auditLog: [makeAudit(next, "safety", input.stopWork ? "stop_work" : "observation", `${input.stopWork ? "STOP WORK · " : ""}${input.risk} risk · ${row.location}: ${row.text} → ${sup.name}`, input.plant ?? null), ...s.auditLog] };
+    });
+    return { ok: true, id };
+  }, []);
+
+  /** Supervisor marks fixed; Safety closes or reopens (round 2, §27) */
+  const moveObservation = useCallback((id: string, to: "fixed" | "closed" | "open", note?: string) => {
+    const cur = stateRef.current;
+    const o = cur.safetyObservations.find((x) => x.id === id);
+    if (!o) return { ok: false, error: "Observation not found" };
+    const me = cur.currentUserId;
+    const safety = can(cur, "safety", "update");
+    if (to === "fixed") {
+      if (o.status !== "open") return { ok: false, error: "Only an open observation can be marked fixed" };
+      if (me !== o.supervisorId && !safety) return { ok: false, error: "The tagged supervisor marks it fixed" };
+      if (!note?.trim()) return { ok: false, error: "Say what was done" };
+    } else {
+      if (!safety) return { ok: false, error: "Only Safety closes or reopens an observation" };
+      if (to === "closed" && o.status === "closed") return { ok: false, error: "Already closed" };
+      if (to === "open" && o.status === "open") return { ok: false, error: "Already open" };
+    }
+    setState((s) => {
+      const now = new Date().toISOString();
+      const next = {
+        ...s,
+        safetyObservations: s.safetyObservations.map((x) =>
+          x.id !== id ? x : to === "fixed" ? { ...x, status: "fixed" as const, fixNote: note!.trim(), fixedAt: now } : to === "closed" ? { ...x, status: "closed" as const, closedBy: s.currentUserId ?? undefined, closedAt: now } : { ...x, status: "open" as const, closedAt: undefined, closedBy: undefined }
+        ),
+      };
+      return { ...next, auditLog: [makeAudit(next, "safety", `observation_${to}`, `${o.location}: ${o.text}${note?.trim() ? ` · ${note.trim()}` : ""}`, o.plant ?? null), ...s.auditLog] };
+    });
+    return { ok: true };
+  }, []);
+
   const decideCrew = useCallback((requestId: string, approve: boolean, note: string) => {
     const cur = stateRef.current;
     if (!can(cur, "crew", "approve")) return DENIED;
@@ -2284,6 +2334,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       requestCrew,
       releaseCrew,
       decideCrew,
+      raiseObservation,
+      moveObservation,
       addStaff,
       updateStaff,
       addWageEntry,
@@ -2345,6 +2397,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       requestCrew,
       releaseCrew,
       decideCrew,
+      raiseObservation,
+      moveObservation,
       addStaff,
       updateStaff,
       addWageEntry,
