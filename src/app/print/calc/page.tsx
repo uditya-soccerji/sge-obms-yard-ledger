@@ -93,7 +93,18 @@ function CalcPrint() {
     const avg = active.length ? Math.round(active.reduce((s, l) => s + l.wageDaily, 0) / active.length) : 0;
     title = "Cost & manpower estimate";
     inputs.push(["Scope type", kind], ["Quantity", `${fmt(qty)} ${kind === "scaffolding" ? "m³" : "m²"}`]);
-    if (r) {
+    // Round 2: the store's estimate shows quantities only — no rates or money
+    const noRates = state.currentRole === "store";
+    if (r && noRates) {
+      const unit = r.unit === "m3" ? "m³" : "m²";
+      steps.push(
+        { label: "Manpower", working: `${fmt(qty)} ${unit} × crew-days per ${unit}`, result: `${r.manpowerDays} crew-days` },
+        kind === "scaffolding"
+          ? { label: "Material", working: r.materialNote ?? "Scaffold hire", result: "—" }
+          : { label: "Paint", working: `${fmt(qty)} ${unit} × litres per ${unit}`, result: `${r.paintLitres} L` }
+      );
+      results.push(["Crew-days", String(r.manpowerDays)], ...(kind === "scaffolding" ? [] : [["Paint", `${r.paintLitres} L`] as [string, string]]));
+    } else if (r) {
       const unit = r.unit === "m3" ? "m³" : "m²";
       steps.push(
         { label: "Billing value (client rate)", working: `${fmt(qty)} ${unit} × ${inr(r.rateInr)}/${unit} (${r.fromRateBook ? "PO rate book" : "rate card"})`, result: inr(r.costInr) },

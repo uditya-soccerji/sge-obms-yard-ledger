@@ -99,7 +99,7 @@ export function WorkJms() {
                       ) : (
                         <div className="mt-0.5 text-[10px] text-[var(--sge-warn)]">not submitted to RIL yet</div>
                       )}
-                      {s.canConfirm && nextJmsStatuses(j.status, s.isBoss).length ? (
+                      {(s.isBoss || s.role === "admin") && nextJmsStatuses(j.status, s.isBoss).length ? (
                         // Only the next RIL stage (Owner / Super Admin may also step back one); PAID comes from Payments
                         <select
                           aria-label={`Move JMS ${j.jmsNo} to`}

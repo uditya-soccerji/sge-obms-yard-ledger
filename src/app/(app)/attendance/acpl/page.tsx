@@ -48,8 +48,8 @@ function AcplMatchPage() {
   const canHrResolve =
     role === "admin" || role === "hr" || role === "super_admin";
   const [reasons, setReasons] = useState<Record<string, string>>({});
-  const canSicOverride =
-    role === "sic" || role === "super_admin" || role === "owner";
+  // Round 2 (§27): the SIC no longer approves ACPL — Owner / Super Admin override
+  const canSicOverride = role === "super_admin" || role === "owner";
 
   const matches = state.acplMatches.filter((m) => m.date === date);
   const open = matches.filter((m) => m.resolveStatus === "open");

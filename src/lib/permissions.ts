@@ -56,7 +56,8 @@ const ROLE_MATRIX: Record<RoleId, Partial<Record<ModuleId, PermissionAction[]>>>
     audit: ["view", "export"],
     // Owner manages seats in Master Data (not the Super Admin role itself)
     users: ["view", "create", "update"],
-    requests: ["view"],
+    // Round 2 (§27): the Owner may override a store rejection
+    requests: ["view", "approve"],
     submissions: ["view"],
     trades: ["view"],
     rates: ["view"],
@@ -68,8 +69,10 @@ const ROLE_MATRIX: Record<RoleId, Partial<Record<ModuleId, PermissionAction[]>>>
     sic: ["view"],
     dpr: ["view", "approve"],
     approvals: ["view", "approve"],
-    acpl: ["view", "approve"],
-    jms: ["view", "approve"],
+    // Round 2 (§27): ACPL approve removed
+    acpl: ["view"],
+    // Round 2 (§27): the SIC confirms the ended job only; JMS approve removed
+    jms: ["view"],
     supervisor: ["view"],
     store: ["view"],
     safety: ["view"],
@@ -91,6 +94,10 @@ const ROLE_MATRIX: Record<RoleId, Partial<Record<ModuleId, PermissionAction[]>>>
     submissions: ["view", "create", "submit"],
     trades: ["view", "create", "update"],
     rates: ["view", "create", "update", "upload"],
+    // Round 2 (§27): Admin approves DPR quantities for the SIC, any time
+    approvals: ["view", "approve"],
+    // Round 2 (§27): Admin manages Materials and Units (sheets limited in desk.ts + RLS)
+    master: ["view", "update"],
   },
   hr: {
     hr: ["view", "create", "update"],

@@ -74,7 +74,9 @@ export function MasterDesk() {
         subtitle={
           allowed === "all"
             ? "Owner & Super Admin. Deactivate instead of delete. Site rows first; company-wide fills the rest. Dropdowns elsewhere read this store."
-            : "Admin: trades, daily wages, and the rate book. Other sheets are Owner / Super Admin."
+            : state.currentRole === "store"
+              ? "Store: the materials list (view). Owner / Super Admin add or change materials."
+              : "Admin: trades, daily wages, the rate book, materials and units. Other sheets are Owner / Super Admin."
         }
       />
       <div className="flex flex-wrap gap-1 border-b border-[var(--sge-line)] pb-2">
@@ -953,6 +955,26 @@ function UserRow({
   );
 }
 
+/** HR's Labourers screen (round 2): the Master Data register on its own, for the site in view */
+export function LabourRegister() {
+  const [showInactive, setShowInactive] = useState(true);
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h2 className="font-heading text-xl font-bold uppercase tracking-wide">Labourers</h2>
+          <p className="text-sm text-[var(--sge-ink-3)]">Add, edit, deactivate or re-activate labourers; upload a CSV for many at once. Crews are changed by the SIC.</p>
+        </div>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} />
+          Show inactive
+        </label>
+      </div>
+      <LabourSheet scope="all" showInactive={showInactive} />
+    </div>
+  );
+}
+
 function LabourSheet({
   scope,
   showInactive,
@@ -989,6 +1011,8 @@ function LabourSheet({
   // Aadhaar is private: Owner, Super Admin and HR only (docs §1)
   const seesAadhaar = ["owner", "super_admin", "hr"].includes(state.currentRole ?? "");
   const canDelete = state.currentRole === "owner" || state.currentRole === "super_admin";
+  // A supervisor change is a crew change: SIC / Owner / SA only (HR edits everything else)
+  const movesCrew = ["sic", "owner", "super_admin"].includes(state.currentRole ?? "");
   const supervisorsOn = (siteId: string) => state.staff.filter((x) => x.role === "supervisor" && x.siteId === siteId);
   const siteCode = (id: string) => state.sites.find((s) => s.id === id)?.code ?? id;
   const rows = useMemo(() => {
@@ -1089,7 +1113,8 @@ function LabourSheet({
         <Button size="sm" onClick={() => setForm(form ? null : blank())}>
           {form ? "Close form" : "Add labourer"}
         </Button>
-        {canExcelTransfer(state.currentRole) ? (
+        {/* Round 2: HR uploads labourers from its own Labourers screen too */}
+        {canExcelTransfer(state.currentRole) || state.currentRole === "hr" ? (
           <Button size="sm" variant="outline" onClick={() => setImporting(!importing)}>
             {importing ? "Close CSV" : "Upload CSV (RIL)"}
           </Button>
@@ -1320,7 +1345,7 @@ function LabourSheet({
                 <option key={c.id} value={c.id}>{c.name}</option>
               ))}
             </select>
-            <select aria-label={`Supervisor for ${l.name}`} className={sel} value={l.supervisorId} onChange={(e) => setSupervisor(l, e.target.value)}>
+            <select aria-label={`Supervisor for ${l.name}`} className={sel} disabled={!movesCrew} title={movesCrew ? undefined : "Crews are changed by the SIC (Operations → Crews)"} value={l.supervisorId} onChange={(e) => setSupervisor(l, e.target.value)}>
               <option value="">—</option>
               {supervisorsOn(l.siteId).map((x) => (
                 <option key={x.id} value={x.id}>{x.name}</option>
@@ -1366,7 +1391,7 @@ function LabourSheet({
             </div>
             <div className="flex">
               <Button size="sm" variant="ghost" onClick={() => report(updateLabourer(l.id, { active: !l.active }))}>
-                {l.active ? "Off" : "On"}
+                {l.active ? "Deactivate" : "Activate"}
               </Button>
               {canDelete ? (
                 <Button
@@ -1779,13 +1804,16 @@ function MaterialsSheet({
 }) {
   const { fullState: state, upsertMaterial, setCatalogActive } = useStore();
   const report = useReport();
+  // Round 2: the store reads the list; Owner / SA change it
+  const readOnly = state.currentRole === "store";
   const rows = state.masterCatalog.materials.filter((m) => {
     if (!showInactive && !m.active) return false;
     return matchScope(m.siteId, entrySiteId(state), scope);
   });
   return (
     <Panel>
-      <div className="mb-3">
+      <fieldset disabled={readOnly} className="contents">
+      <div className={readOnly ? "hidden" : "mb-3"}>
         <Button
           size="sm"
           onClick={async () =>
@@ -1857,6 +1885,7 @@ function MaterialsSheet({
           ))}
         </tbody>
       </table>
+      </fieldset>
     </Panel>
   );
 }
