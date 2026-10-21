@@ -382,7 +382,8 @@ export interface AttendanceRecord {
 
 export interface EquipmentItem {
   id: string;
-  type: "hopper" | "compressor" | "airless" | "harness";
+  /** Round 2 (§27) adds IFR body suit and rope access to the tagged items */
+  type: "hopper" | "compressor" | "airless" | "harness" | "ifr" | "rope_access";
   tag: string;
   status: "ok" | "due" | "fault";
   assignedTo?: string;
@@ -393,6 +394,57 @@ export interface EquipmentItem {
   siteId: string;
   /** Latest fault reported by a supervisor, cleared when the store marks it repaired (docs §7) */
   faultNote?: string;
+  /** Round 2 (§27): supervisor holding it (staff id); unset = in the store */
+  issuedTo?: string;
+  issuedOn?: string;
+  /** Value in ₹ (e.g. IFR body suit 5,000) */
+  value?: number;
+  /** Left the books after a confirmed scrap */
+  scrapped?: boolean;
+}
+
+/** Counted items (gloves, PPE kit, helmet) received in lots with an expiry (§27) */
+export interface KitLot {
+  id: string;
+  siteId: string;
+  item: "gloves" | "ppe_kit" | "helmet";
+  /** Still in the store */
+  qty: number;
+  receivedOn: string;
+  expiryDate?: string;
+  note?: string;
+}
+
+/** Counted items issued to a supervisor's crew, taken oldest expiry first (§27) */
+export interface KitIssue {
+  id: string;
+  siteId: string;
+  item: KitLot["item"];
+  qty: number;
+  supervisorId: string;
+  lots: { lotId: string; qty: number; expiryDate?: string }[];
+  issuedOn: string;
+  issuedBy: string;
+  /** How many have come back */
+  returned?: number;
+}
+
+/** A supervisor's return: store confirms; scrapped also needs the SIC (§27) */
+export interface EquipmentReturn {
+  id: string;
+  siteId: string;
+  /** Tagged item id, or a kit issue id */
+  equipmentId?: string;
+  kitIssueId?: string;
+  qty: number;
+  condition: "ok" | "damaged" | "expired" | "scrapped";
+  note: string;
+  by: string;
+  at: string;
+  status: "with_store" | "with_sic" | "done" | "rejected";
+  storeBy?: string;
+  sicBy?: string;
+  decidedNote?: string;
 }
 
 /** Legacy thin DPR line kept for paint-variance gist rollups */
@@ -733,6 +785,10 @@ export interface AppState {
   crewRequests: CrewRequest[];
   /** Safety observations and stop-work calls (round 2, §27) */
   safetyObservations: SiteObservation[];
+  /** Store equipment register (round 2, §27) */
+  kitLots: KitLot[];
+  kitIssues: KitIssue[];
+  equipmentReturns: EquipmentReturn[];
   /** One master store — load once, resolve site-then-company in memory. */
   masterCatalog: MasterCatalog;
 }

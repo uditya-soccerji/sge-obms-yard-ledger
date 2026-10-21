@@ -61,7 +61,11 @@ export type EventKind =
   | "observation_raised"
   | "observation_fixed"
   | "observation_closed"
-  | "stop_work";
+  | "stop_work"
+  // Equipment returns (§27)
+  | "return_raised"
+  | "return_scrap"
+  | "return_decided";
 
 export interface WorkEvent {
   id: string;
@@ -149,6 +153,9 @@ export const KIND_LABEL: Record<EventKind, string> = {
   observation_fixed: "Observation fixed",
   observation_closed: "Observation closed",
   stop_work: "STOP WORK",
+  return_raised: "Equipment returned",
+  return_scrap: "Scrap to confirm",
+  return_decided: "Return decided",
 };
 
 // Company-wide events (no site, e.g. the monthly pay upload) reach every viewer of the right role
@@ -254,6 +261,13 @@ export function isFor(e: WorkEvent, v: Viewer): boolean {
       return mine || v.role === "sic";
     case "observation_fixed":
       return v.role === "safety" || v.role === "sic";
+    // Returns (§27): the store confirms; a scrap goes on to the SIC; the supervisor hears the outcome
+    case "return_raised":
+      return v.role === "store";
+    case "return_scrap":
+      return v.role === "sic";
+    case "return_decided":
+      return mine;
   }
 }
 

@@ -20,6 +20,7 @@ import { withSupersession } from "./rate-book";
 import { roleMeta } from "./roles";
 import { SAFETY_CHECKLIST_SEED } from "./safety-dpr";
 import { seedMasterCatalog } from "./master/seed-catalog";
+import { inStore, pickLots } from "./equipment-register";
 import { supabase } from "./supabase/client";
 import { partsOf, remoteLoadLabourers, remoteSaveLabourers, type LabourerParts } from "./supabase/labourers";
 import {
@@ -51,6 +52,10 @@ import { checkSeat, checkSites, checkUserChange, MIN_PASSWORD } from "./users";
 import type {
   AcplMatchRow,
   SiteObservation,
+  EquipmentItem,
+  KitLot,
+  KitIssue,
+  EquipmentReturn,
   CrewRequest,
   AcplPunchRow,
   AcplResolveStatus,
@@ -151,6 +156,13 @@ interface StoreApi {
   /** Safety observations (round 2, §27) */
   raiseObservation: (input: Omit<SiteObservation, "id" | "status" | "raisedBy" | "raisedAt">) => { ok: boolean; error?: string; id?: string };
   moveObservation: (id: string, to: "fixed" | "closed" | "open", note?: string) => { ok: boolean; error?: string };
+  /** Store equipment register (round 2, §27) */
+  addTagged: (input: { type: EquipmentItem["type"]; tag: string; expiryDate?: string; value?: number }) => { ok: boolean; error?: string };
+  receiveKit: (input: { item: KitLot["item"]; qty: number; expiryDate?: string; note?: string }) => { ok: boolean; error?: string };
+  issueTagged: (equipmentId: string, supervisorId: string) => { ok: boolean; error?: string };
+  issueKit: (item: KitLot["item"], qty: number, supervisorId: string) => { ok: boolean; error?: string; lots?: KitIssue["lots"] };
+  returnEquipment: (input: { equipmentId?: string; kitIssueId?: string; qty: number; condition: EquipmentReturn["condition"]; note: string }) => { ok: boolean; error?: string; id?: string };
+  decideReturn: (id: string, approve: boolean, note: string) => { ok: boolean; error?: string; next?: EquipmentReturn["status"] };
   /** Refuses a label that already exists (case-insensitive) */
   addTrade: (input: Omit<TradeDefinition, "id"> & { id?: string }) => { ok: boolean; error?: string; id?: string };
   updateLabourer: (
@@ -318,6 +330,9 @@ function migrateState(parsed: Partial<AppState>): AppState {
     equipmentRequests: parsed.equipmentRequests ?? seed.equipmentRequests,
     crewRequests: parsed.crewRequests ?? [],
     safetyObservations: parsed.safetyObservations ?? [],
+    kitLots: parsed.kitLots ?? [],
+    kitIssues: parsed.kitIssues ?? [],
+    equipmentReturns: parsed.equipmentReturns ?? [],
     attendance: (parsed.attendance ?? seed.attendance).map((a) =>
       (a.status as string) === "off" ? { ...a, status: "weekly_off" as const } : a
     ),
@@ -1467,6 +1482,138 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     return { ok: true, id };
   }, []);
 
+  // ---- Store equipment register (round 2, §27) ----
+  const isStore = (s: AppState) => can(s, "store", "update");
+  const addTagged = useCallback((input: { type: EquipmentItem["type"]; tag: string; expiryDate?: string; value?: number }) => {
+    const cur = stateRef.current;
+    if (!isStore(cur)) return DENIED;
+    const tag = input.tag.trim().toUpperCase();
+    if (!tag) return { ok: false, error: "Give the tag / serial no." };
+    if (cur.equipment.some((e) => e.tag.toUpperCase() === tag)) return { ok: false, error: `Tag ${tag} is already in the register` };
+    const siteId = entrySiteId(cur);
+    setState((s) => {
+      const item: EquipmentItem = { id: uid("eq"), type: input.type, tag, status: "ok", lastCheck: todayDate(), expiryDate: input.expiryDate || undefined, checklist: [], siteId, value: input.value || undefined };
+      const next = { ...s, equipment: [...s.equipment, item] };
+      return { ...next, auditLog: [makeAudit(next, "store", "create", `Equipment ${tag} (${input.type}) added${input.expiryDate ? ` · expires ${input.expiryDate}` : ""}`), ...s.auditLog] };
+    });
+    return { ok: true };
+  }, []);
+
+  const receiveKit = useCallback((input: { item: KitLot["item"]; qty: number; expiryDate?: string; note?: string }) => {
+    const cur = stateRef.current;
+    if (!isStore(cur)) return DENIED;
+    if (!(input.qty > 0) || !Number.isInteger(input.qty)) return { ok: false, error: "Quantity must be a whole number above zero" };
+    const siteId = entrySiteId(cur);
+    setState((s) => {
+      const lot: KitLot = { id: uid("lot"), siteId, item: input.item, qty: input.qty, receivedOn: todayDate(), expiryDate: input.expiryDate || undefined, note: input.note?.trim() || undefined };
+      const next = { ...s, kitLots: [...s.kitLots, lot] };
+      return { ...next, auditLog: [makeAudit(next, "store", "receive", `${input.qty} × ${input.item} received${input.expiryDate ? ` · expires ${input.expiryDate}` : ""}`), ...s.auditLog] };
+    });
+    return { ok: true };
+  }, []);
+
+  const issueTagged = useCallback((equipmentId: string, supervisorId: string) => {
+    const cur = stateRef.current;
+    if (!isStore(cur)) return DENIED;
+    const e = cur.equipment.find((x) => x.id === equipmentId);
+    if (!e || e.scrapped) return { ok: false, error: "Item not found" };
+    if (e.issuedTo) return { ok: false, error: `${e.tag} is already with ${cur.staff.find((s) => s.id === e.issuedTo)?.name ?? "a supervisor"}` };
+    if (e.expiryDate && e.expiryDate < todayDate()) return { ok: false, error: `${e.tag} has expired — it can't be issued` };
+    if (e.status === "fault") return { ok: false, error: `${e.tag} is marked faulty` };
+    const sup = cur.staff.find((s) => s.id === supervisorId && s.role === "supervisor");
+    if (!sup) return { ok: false, error: "Pick the supervisor" };
+    setState((s) => {
+      const next = { ...s, equipment: s.equipment.map((x) => (x.id === equipmentId ? { ...x, issuedTo: supervisorId, issuedOn: todayDate() } : x)) };
+      return { ...next, auditLog: [makeAudit(next, "store", "issue", `${e.tag} issued to ${sup.name}`), ...s.auditLog] };
+    });
+    return { ok: true };
+  }, []);
+
+  const issueKit = useCallback((item: KitLot["item"], qty: number, supervisorId: string) => {
+    const cur = stateRef.current;
+    if (!isStore(cur)) return { ...DENIED };
+    if (!(qty > 0) || !Number.isInteger(qty)) return { ok: false, error: "Quantity must be a whole number above zero" };
+    const sup = cur.staff.find((s) => s.id === supervisorId && s.role === "supervisor");
+    if (!sup) return { ok: false, error: "Pick the supervisor" };
+    const siteId = entrySiteId(cur);
+    const lots = pickLots(cur.kitLots, siteId, item, qty, todayDate());
+    if (!lots) return { ok: false, error: `Only ${inStore(cur.kitLots, siteId, item, todayDate())} in the store (unexpired)` };
+    const take = new Map(lots.map((l) => [l.lotId, l.qty]));
+    setState((s) => {
+      const issue: KitIssue = { id: uid("ki"), siteId, item, qty, supervisorId, lots, issuedOn: todayDate(), issuedBy: s.currentUserId ?? "store" };
+      const next = { ...s, kitLots: s.kitLots.map((l) => (take.has(l.id) ? { ...l, qty: l.qty - take.get(l.id)! } : l)), kitIssues: [issue, ...s.kitIssues] };
+      return { ...next, auditLog: [makeAudit(next, "store", "issue", `${qty} × ${item} issued to ${sup.name} (oldest expiry first)`), ...s.auditLog] };
+    });
+    return { ok: true, lots };
+  }, []);
+
+  const returnEquipment = useCallback((input: { equipmentId?: string; kitIssueId?: string; qty: number; condition: EquipmentReturn["condition"]; note: string }) => {
+    const cur = stateRef.current;
+    const me = cur.currentUserId ?? "";
+    const isMine = (supId?: string) => supId === me || isStore(cur);
+    let siteId = entrySiteId(cur);
+    if (input.equipmentId) {
+      const e = cur.equipment.find((x) => x.id === input.equipmentId);
+      if (!e?.issuedTo) return { ok: false, error: "This item isn't issued" };
+      if (!isMine(e.issuedTo)) return { ok: false, error: "Only the supervisor holding it returns it" };
+      if (cur.equipmentReturns.some((r) => r.equipmentId === e.id && (r.status === "with_store" || r.status === "with_sic"))) return { ok: false, error: "A return for this item is already waiting" };
+      siteId = e.siteId;
+    } else if (input.kitIssueId) {
+      const k = cur.kitIssues.find((x) => x.id === input.kitIssueId);
+      if (!k) return { ok: false, error: "Issue not found" };
+      if (!isMine(k.supervisorId)) return { ok: false, error: "Only the supervisor it was issued to returns it" };
+      const pending = cur.equipmentReturns.filter((r) => r.kitIssueId === k.id && (r.status === "with_store" || r.status === "with_sic")).reduce((t, r) => t + r.qty, 0);
+      if (!(input.qty > 0) || input.qty > k.qty - (k.returned ?? 0) - pending) return { ok: false, error: `Return between 1 and ${k.qty - (k.returned ?? 0) - pending}` };
+      siteId = k.siteId;
+    } else return { ok: false, error: "Pick what is being returned" };
+    if (input.condition !== "ok" && !input.note.trim()) return { ok: false, error: "Say what's wrong with it" };
+    const id = uid("ret");
+    setState((s) => {
+      const r: EquipmentReturn = { id, siteId, equipmentId: input.equipmentId, kitIssueId: input.kitIssueId, qty: input.equipmentId ? 1 : input.qty, condition: input.condition, note: input.note.trim(), by: me, at: new Date().toISOString(), status: "with_store" };
+      const next = { ...s, equipmentReturns: [r, ...s.equipmentReturns] };
+      return { ...next, auditLog: [makeAudit(next, "store", "return", `Return (${input.condition}) raised${input.note.trim() ? ` · ${input.note.trim()}` : ""}`), ...s.auditLog] };
+    });
+    return { ok: true, id };
+  }, []);
+
+  /** Store confirms (scrapped → SIC next); the SIC confirms a scrap; either may reject with a note */
+  const decideReturn = useCallback((id: string, approve: boolean, note: string) => {
+    const cur = stateRef.current;
+    const r = cur.equipmentReturns.find((x) => x.id === id);
+    if (!r) return { ok: false, error: "Return not found" };
+    const store = isStore(cur);
+    const sic = cur.currentRole === "sic" || cur.currentRole === "owner" || cur.currentRole === "super_admin";
+    if (r.status === "with_store" && !store) return { ok: false, error: "The store confirms returns" };
+    if (r.status === "with_sic" && !sic) return { ok: false, error: "The SIC confirms a scrap" };
+    if (r.status !== "with_store" && r.status !== "with_sic") return { ok: false, error: "Already decided" };
+    if (!approve && !note.trim()) return { ok: false, error: "Say why it's rejected" };
+    const nextStatus: EquipmentReturn["status"] = !approve ? "rejected" : r.status === "with_store" && r.condition === "scrapped" ? "with_sic" : "done";
+    const by = cur.currentUserId ?? "";
+    setState((s) => {
+      let equipment = s.equipment;
+      let kitIssues = s.kitIssues;
+      let kitLots = s.kitLots;
+      if (nextStatus === "done") {
+        if (r.equipmentId) {
+          // Back to the store (damaged → faulty, expired stays out of issue by date); scrapped leaves the books
+          equipment = equipment.map((e) => (e.id !== r.equipmentId ? e : { ...e, issuedTo: undefined, issuedOn: undefined, ...(r.condition === "damaged" ? { status: "fault" as const, faultNote: r.note } : {}), ...(r.condition === "scrapped" ? { scrapped: true } : {}) }));
+        }
+        if (r.kitIssueId) {
+          const k = kitIssues.find((x) => x.id === r.kitIssueId);
+          kitIssues = kitIssues.map((x) => (x.id === r.kitIssueId ? { ...x, returned: (x.returned ?? 0) + r.qty } : x));
+          // Good ones go back into a lot with the original expiry
+          if (k && r.condition === "ok") kitLots = [...kitLots, { id: uid("lot"), siteId: k.siteId, item: k.item, qty: r.qty, receivedOn: todayDate(), expiryDate: k.lots[0]?.expiryDate, note: "returned" }];
+        }
+      }
+      const equipmentReturns = s.equipmentReturns.map((x) =>
+        x.id !== id ? x : { ...x, status: nextStatus, decidedNote: note.trim() || x.decidedNote, ...(r.status === "with_store" ? { storeBy: by } : { sicBy: by }) }
+      );
+      const next = { ...s, equipment, kitIssues, kitLots, equipmentReturns };
+      return { ...next, auditLog: [makeAudit(next, "store", "return_decided", `Return ${r.condition} → ${nextStatus}${note.trim() ? ` · ${note.trim()}` : ""}`), ...s.auditLog] };
+    });
+    return { ok: true, next: nextStatus };
+  }, []);
+
   /** Supervisor marks fixed; Safety closes or reopens (round 2, §27) */
   const moveObservation = useCallback((id: string, to: "fixed" | "closed" | "open", note?: string) => {
     const cur = stateRef.current;
@@ -2336,6 +2483,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       decideCrew,
       raiseObservation,
       moveObservation,
+      addTagged,
+      receiveKit,
+      issueTagged,
+      issueKit,
+      returnEquipment,
+      decideReturn,
       addStaff,
       updateStaff,
       addWageEntry,
@@ -2399,6 +2552,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       decideCrew,
       raiseObservation,
       moveObservation,
+      addTagged,
+      receiveKit,
+      issueTagged,
+      issueKit,
+      returnEquipment,
+      decideReturn,
       addStaff,
       updateStaff,
       addWageEntry,

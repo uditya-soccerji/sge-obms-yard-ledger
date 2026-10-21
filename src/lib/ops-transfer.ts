@@ -252,7 +252,7 @@ const SPECS: OpsSheetSpec[] = [
         const tag = cell(row, "tag");
         const site = siteByCode(state, cell(row, "siteCode", "site"));
         const type = cell(row, "type") as EquipmentItem["type"];
-        if (!tag || !site || !["hopper", "compressor", "airless", "harness"].includes(type)) {
+        if (!tag || !site || !["hopper", "compressor", "airless", "harness", "ifr", "rope_access"].includes(type)) {
           return { line: i + 2, status: "error", key: tag || `r${i}`, summary: "tag, type, siteCode required" };
         }
         let checklist: EquipmentItem["checklist"] = [];

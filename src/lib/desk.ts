@@ -18,6 +18,8 @@ export type OpsPanelId =
   | "labour-pay"
   | "observations"
   | "safety-view"
+  | "equipment"
+  | "my-equipment"
   | "submissions"
   | "audit"
   | "admin"
@@ -116,6 +118,8 @@ const ROLE_PILLS: Record<RoleId, OpsPill[]> = {
   supervisor: [
     { id: "dpr", label: "DPR", module: "dpr" },
     { id: "crew", label: "My crew", module: "crew" },
+    // Round 2 (§27)
+    { id: "my-equipment", label: "My equipment", module: "supervisor" },
     { id: "store", label: "Store", module: "store" },
     { id: "submissions", label: "My submissions", module: "submissions" },
     { id: "requests", label: "Requests", module: "requests" },
@@ -126,6 +130,8 @@ const ROLE_PILLS: Record<RoleId, OpsPill[]> = {
   ],
   store: [
     { id: "store", label: "Store / FIM", module: "store" },
+    // Round 2 (§27)
+    { id: "equipment", label: "Equipment", module: "store" },
     { id: "dpr", label: "DPR", module: "dpr" },
     { id: "requests", label: "Requests", module: "requests" },
     { id: "submissions", label: "My submissions", module: "submissions" },

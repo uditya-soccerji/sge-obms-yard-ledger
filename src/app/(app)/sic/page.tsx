@@ -1,5 +1,6 @@
 "use client";
 
+import { ReturnsQueue } from "@/components/store/equipment-register";
 import { ObservationList } from "@/components/safety/observations";
 import { guarded } from "@/components/shared/require-module";
 import { today as todayDate } from "@/lib/today";
@@ -47,6 +48,8 @@ function SicHomePage() {
 
       {/* Round 2 (§27): safety observations tagged to this sic / site */}
       <ObservationList mode="sic" />
+      {/* Round 2 (§27): scrapped equipment confirmed by the store, for the SIC */}
+      <ReturnsQueue stage="with_sic" />
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <KpiTile label="DPR inbox" value={String(pending.length)} tone="accent" />
