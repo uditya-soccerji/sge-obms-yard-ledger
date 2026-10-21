@@ -14,6 +14,15 @@ export type OpsPanelId =
   | "hr"
   | "requests"
   | "labourers"
+  | "staff"
+  | "labour-pay"
+  | "observations"
+  | "safety-view"
+  | "equipment"
+  | "my-equipment"
+  | "vendor-bills"
+  | "advances"
+  | "leave"
   | "submissions"
   | "audit"
   | "admin"
@@ -98,15 +107,25 @@ const ROLE_PILLS: Record<RoleId, OpsPill[]> = {
     { id: "acpl", label: "ACPL", module: "acpl" },
     // Round 2: HR adds, edits, deactivates and re-activates labourers
     { id: "labourers", label: "Labourers", module: "labourer" },
+    // Round 2 (§27)
+    { id: "staff", label: "Staff", module: "hr" },
+    { id: "labour-pay", label: "Labour pay", module: "hr" },
+    { id: "leave", label: "Leave", module: "hr" },
   ],
   finance: [
     { id: "finance", label: "Finance", module: "finance" },
     { id: "jms", label: "JMS", module: "jms" },
     { id: "estimate", label: "Estimator", module: "calculators" },
+    // Round 2 (§27)
+    { id: "labour-pay", label: "Labour pay", module: "finance" },
+    { id: "vendor-bills", label: "Vendor bills", module: "finance" },
+    { id: "advances", label: "Advances", module: "finance" },
   ],
   supervisor: [
     { id: "dpr", label: "DPR", module: "dpr" },
     { id: "crew", label: "My crew", module: "crew" },
+    // Round 2 (§27)
+    { id: "my-equipment", label: "My equipment", module: "supervisor" },
     { id: "store", label: "Store", module: "store" },
     { id: "submissions", label: "My submissions", module: "submissions" },
     { id: "requests", label: "Requests", module: "requests" },
@@ -117,6 +136,8 @@ const ROLE_PILLS: Record<RoleId, OpsPill[]> = {
   ],
   store: [
     { id: "store", label: "Store / FIM", module: "store" },
+    // Round 2 (§27)
+    { id: "equipment", label: "Equipment", module: "store" },
     { id: "dpr", label: "DPR", module: "dpr" },
     { id: "requests", label: "Requests", module: "requests" },
     { id: "submissions", label: "My submissions", module: "submissions" },
@@ -127,6 +148,9 @@ const ROLE_PILLS: Record<RoleId, OpsPill[]> = {
   ],
   safety: [
     { id: "safety", label: "Safety DPR", module: "safety" },
+    // Round 2 (§27)
+    { id: "observations", label: "Observations", module: "safety" },
+    { id: "safety-view", label: "Site view", module: "safety" },
     { id: "dpr", label: "DPR desk", module: "dpr" },
     { id: "submissions", label: "My submissions", module: "submissions" },
     // Round 2 (owner, 2026-10-21)

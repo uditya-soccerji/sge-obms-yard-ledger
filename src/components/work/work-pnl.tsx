@@ -14,6 +14,7 @@ import type { ExpenseKind, PaymentMode } from "@/lib/work/types";
 import { cn } from "@/lib/utils";
 import { fmtM2, Msg, selectCls, tdCls, thCls, useWorkScope } from "./common";
 import { WorkExcelTransfer } from "./work-excel-transfer";
+import { downloadXlsxWithHeaders } from "@/lib/excel-io";
 
 type View = "job" | "supervisor" | "service" | "site_month";
 type Basis = "cash" | "earned";
@@ -102,6 +103,26 @@ export function WorkPnl() {
             </button>
           ))}
         </div>
+        {/* Round 2 (§27): monthly site P&L to Excel */}
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={() => {
+            const all = rollUp(pnlRows(work, s.wageOf, "all", s.labourPay).filter((r) => s.inSite(r.siteId)), (r) => `${r.siteId}|${r.month}`).sort((a, b) => a.key.localeCompare(b.key));
+            const headers = ["Site", "Month", "Qty m² (JMS)", "Income received", "Earned (SIC approved)", "Labour", "Labour-days", "Direct costs", "Overhead", "Profit (cash)", "Profit (earned)"];
+            downloadXlsxWithHeaders(
+              `site-pnl-${today()}`,
+              "Site P&L",
+              headers,
+              all.map((g) => {
+                const [site, m] = g.key.split("|");
+                return { Site: s.siteCode(site), Month: monthLabel(m), "Qty m² (JMS)": Math.round(g.qty * 1000) / 1000, "Income received": Math.round(g.income), "Earned (SIC approved)": Math.round(g.earned), Labour: Math.round(g.labour), "Labour-days": Math.round(g.labourDays * 10) / 10, "Direct costs": Math.round(g.direct), Overhead: Math.round(g.overhead), "Profit (cash)": Math.round(g.profit), "Profit (earned)": Math.round(g.earnedProfit) };
+              })
+            );
+          }}
+        >
+          Export site P&amp;L (Excel)
+        </Button>
         <p className="max-w-md text-[11px] text-[var(--sge-ink-3)]">
           Each figure sits in the month it happened: cash income when received, earned when SIC approved, costs when incurred. Labour = DPR crew × daily wage (split days shared). Fixed costs are shared over jobs by labour-days; a month with no crew shows them as unallocated overhead.
         </p>

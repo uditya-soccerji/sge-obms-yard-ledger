@@ -54,7 +54,18 @@ export type EventKind =
   | "jms_returned"
   | "pay_uploaded"
   // Admin reviewed a DPR for the SIC (§27)
-  | "dpr_for_sic";
+  | "dpr_for_sic"
+  // HR changed a submitted DPR's attendance mark (§27)
+  | "attendance_corrected"
+  // Safety (§27)
+  | "observation_raised"
+  | "observation_fixed"
+  | "observation_closed"
+  | "stop_work"
+  // Equipment returns (§27)
+  | "return_raised"
+  | "return_scrap"
+  | "return_decided";
 
 export interface WorkEvent {
   id: string;
@@ -90,7 +101,7 @@ export interface Viewer {
 }
 
 /** Events that need someone to act, or tell the submitter the outcome: instant. */
-export const INSTANT: EventKind[] = ["job_closed", "jms_confirmed", "job_sent_back", "dpr_submitted", "dpr_approved", "dpr_sent_back", "crew_requested", "crew_released", "crew_decided", "pass_expiring", "request_rejected", "request_overridden", "dpr_issue", "job_plan", "job_plan_decided", "jms_admin_pending", "jms_admin_approved", "jms_returned"];
+export const INSTANT: EventKind[] = ["job_closed", "jms_confirmed", "job_sent_back", "dpr_submitted", "dpr_approved", "dpr_sent_back", "crew_requested", "crew_released", "crew_decided", "pass_expiring", "request_rejected", "request_overridden", "dpr_issue", "job_plan", "job_plan_decided", "jms_admin_pending", "jms_admin_approved", "jms_returned", "observation_raised", "stop_work"];
 
 export const KIND_LABEL: Record<EventKind, string> = {
   dpr_added: "DPR entry",
@@ -137,6 +148,14 @@ export const KIND_LABEL: Record<EventKind, string> = {
   jms_returned: "JMS sent back",
   pay_uploaded: "Monthly pay uploaded",
   dpr_for_sic: "DPR reviewed by Admin for SIC",
+  attendance_corrected: "Attendance corrected by HR",
+  observation_raised: "Safety observation",
+  observation_fixed: "Observation fixed",
+  observation_closed: "Observation closed",
+  stop_work: "STOP WORK",
+  return_raised: "Equipment returned",
+  return_scrap: "Scrap to confirm",
+  return_decided: "Return decided",
 };
 
 // Company-wide events (no site, e.g. the monthly pay upload) reach every viewer of the right role
@@ -232,6 +251,23 @@ export function isFor(e: WorkEvent, v: Viewer): boolean {
       return v.role === "finance";
     case "dpr_for_sic":
       return v.role === "sic";
+    case "attendance_corrected":
+      return mine || v.role === "sic";
+    // Safety (§27): the tagged supervisor and the SIC hear of an observation; Safety hears it's fixed;
+    // stop work is urgent for the SIC, Owner (boss sees all) and the supervisor
+    case "observation_raised":
+    case "observation_closed":
+    case "stop_work":
+      return mine || v.role === "sic";
+    case "observation_fixed":
+      return v.role === "safety" || v.role === "sic";
+    // Returns (§27): the store confirms; a scrap goes on to the SIC; the supervisor hears the outcome
+    case "return_raised":
+      return v.role === "store";
+    case "return_scrap":
+      return v.role === "sic";
+    case "return_decided":
+      return mine;
   }
 }
 

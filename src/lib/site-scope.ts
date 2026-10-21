@@ -1,10 +1,16 @@
-import type { AppState, RoleId } from "./types";
+import type { AppState, RoleId, UserAccount } from "./types";
 
 /** `currentSiteId` value meaning "every site" — Owner / Super Admin only. */
 export const ALL_SITES = "all";
 
-export function canSeeAllSites(role: RoleId | null | undefined): boolean {
-  return role === "owner" || role === "super_admin";
+/** Round 2 (§27): a store login ticked "Central store" works across every site */
+export const CENTRAL_STORE = { module: "store", action: "admin", allow: true } as const;
+export function isCentralStore(account: Pick<UserAccount, "roles" | "permissionOverrides"> | null | undefined): boolean {
+  return !!account?.roles.includes("store") && account.permissionOverrides.some((o) => o.module === "store" && o.action === "admin" && o.allow);
+}
+
+export function canSeeAllSites(role: RoleId | null | undefined, account?: Pick<UserAccount, "roles" | "permissionOverrides"> | null): boolean {
+  return role === "owner" || role === "super_admin" || (role === "store" && isCentralStore(account));
 }
 
 /**
@@ -12,7 +18,7 @@ export function canSeeAllSites(role: RoleId | null | undefined): boolean {
  * cover all sites; SIC one or more; Owner / Super Admin everything).
  */
 export function canSwitchSites(role: RoleId | null | undefined): boolean {
-  return role === "super_admin" || role === "owner" || role === "sic" || role === "admin" || role === "finance" || role === "hr";
+  return role === "super_admin" || role === "owner" || role === "sic" || role === "admin" || role === "finance" || role === "hr" || role === "store";
 }
 
 export function isAllSites(s: Pick<AppState, "currentSiteId">): boolean {
@@ -84,6 +90,6 @@ export function scopeState(s: AppState): AppState {
  * Where a user lands after signing in or being viewed as (B4): Owner / Super
  * Admin open on All sites, everyone else on their first site.
  */
-export function landingSite(role: RoleId, siteIds: string[], fallback: string): string {
-  return canSeeAllSites(role) ? ALL_SITES : siteIds[0] ?? fallback;
+export function landingSite(role: RoleId, siteIds: string[], fallback: string, account?: Pick<UserAccount, "roles" | "permissionOverrides"> | null): string {
+  return canSeeAllSites(role, account) ? ALL_SITES : siteIds[0] ?? fallback;
 }

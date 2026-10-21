@@ -1,5 +1,6 @@
 "use client";
 
+import { CENTRAL_STORE, isCentralStore } from "@/lib/site-scope";
 import React, { createContext, useContext, useMemo, useState } from "react";
 import { BlurInput } from "@/components/shared/blur-input";
 import { normalizeEp } from "@/lib/ep";
@@ -720,6 +721,13 @@ function UsersSheet({ showInactive }: { showInactive: boolean }) {
                 const r = startImpersonation(u.id);
                 if (r.ok) router.push(r.home);
               }}
+              onCentral={(on) => {
+                // Round 2 (§27): a central store login works across every site
+                const rest = u.permissionOverrides.filter((o) => !(o.module === "store" && o.action === "admin"));
+                void updateUser(u.id, { permissionOverrides: on ? [...rest, { ...CENTRAL_STORE }] : rest, ...(on ? { siteIds: state.sites.map((x) => x.id) } : {}) }).then((r) => {
+                  setMsg(r.ok ? { ok: true, text: `@${u.username} ${on ? "is now a central store (all sites)" : "is a site store again"}` } : { ok: false, text: r.error ?? "Failed" });
+                });
+              }}
               onLink={(staffId) => {
                 void updateUser(u.id, { staffId }).then((r) => {
                   if (!r.ok) setMsg({ ok: false, text: r.error ?? "Failed" });
@@ -795,6 +803,7 @@ function UserRow({
   onSites,
   onViewAs,
   onLink,
+  onCentral,
 }: {
   user: UserAccount;
   isSa: boolean;
@@ -807,6 +816,7 @@ function UserRow({
   onSites: (ids: string[]) => string | null;
   onViewAs: () => void;
   onLink: (staffId: string) => void;
+  onCentral: (on: boolean) => void;
 }) {
   const { fullState: state } = useStore();
   const linked = user.staffId
@@ -857,6 +867,18 @@ function UserRow({
       </td>
       <td className="py-2 text-xs">
         {user.roles.join(", ")}
+        {user.roles.includes("store") ? (
+          <label className="mt-1 flex items-center gap-1.5 text-[11px] text-[var(--sge-ink-2)]">
+            <input
+              type="checkbox"
+              aria-label={`@${user.username} central store`}
+              disabled={!canEdit}
+              checked={isCentralStore(user)}
+              onChange={(e) => onCentral(e.target.checked)}
+            />
+            Central store (all sites)
+          </label>
+        ) : null}
       </td>
       <td className="py-2 text-xs">
         {editing ? (

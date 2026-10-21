@@ -20,6 +20,7 @@ import { withSupersession } from "./rate-book";
 import { roleMeta } from "./roles";
 import { SAFETY_CHECKLIST_SEED } from "./safety-dpr";
 import { seedMasterCatalog } from "./master/seed-catalog";
+import { inStore, pickLots } from "./equipment-register";
 import { supabase } from "./supabase/client";
 import { partsOf, remoteLoadLabourers, remoteSaveLabourers, type LabourerParts } from "./supabase/labourers";
 import {
@@ -50,6 +51,14 @@ import type { TransferPreviewRow } from "./transfer-types";
 import { checkSeat, checkSites, checkUserChange, MIN_PASSWORD } from "./users";
 import type {
   AcplMatchRow,
+  SiteObservation,
+  EquipmentItem,
+  KitLot,
+  KitIssue,
+  EquipmentReturn,
+  VendorBill,
+  AdvanceGiven,
+  LeaveEntry,
   CrewRequest,
   AcplPunchRow,
   AcplResolveStatus,
@@ -147,6 +156,23 @@ interface StoreApi {
   requestCrew: (labourerIds: string[], note?: string) => { ok: boolean; error?: string; created: CrewRequest[] };
   releaseCrew: (requestId: string) => { ok: boolean; error?: string };
   decideCrew: (requestId: string, approve: boolean, note: string) => { ok: boolean; error?: string };
+  /** Safety observations (round 2, §27) */
+  raiseObservation: (input: Omit<SiteObservation, "id" | "status" | "raisedBy" | "raisedAt">) => { ok: boolean; error?: string; id?: string };
+  moveObservation: (id: string, to: "fixed" | "closed" | "open", note?: string) => { ok: boolean; error?: string };
+  /** Store equipment register (round 2, §27) */
+  addTagged: (input: { type: EquipmentItem["type"]; tag: string; expiryDate?: string; value?: number }) => { ok: boolean; error?: string };
+  receiveKit: (input: { item: KitLot["item"]; qty: number; expiryDate?: string; note?: string }) => { ok: boolean; error?: string };
+  issueTagged: (equipmentId: string, supervisorId: string) => { ok: boolean; error?: string };
+  issueKit: (item: KitLot["item"], qty: number, supervisorId: string) => { ok: boolean; error?: string; lots?: KitIssue["lots"] };
+  returnEquipment: (input: { equipmentId?: string; kitIssueId?: string; qty: number; condition: EquipmentReturn["condition"]; note: string }) => { ok: boolean; error?: string; id?: string };
+  decideReturn: (id: string, approve: boolean, note: string) => { ok: boolean; error?: string; next?: EquipmentReturn["status"] };
+  /** Finance (round 2, §27) */
+  addVendorBill: (input: Omit<VendorBill, "id" | "status" | "enteredBy" | "siteId">) => { ok: boolean; error?: string };
+  payVendorBill: (id: string, paidOn: string, paidMode: string) => { ok: boolean; error?: string };
+  giveAdvance: (input: { labourerId: string; date: string; amount: number; note?: string }) => { ok: boolean; error?: string };
+  /** HR leave register (round 2, §27) */
+  addLeave: (input: Omit<LeaveEntry, "id" | "status" | "enteredBy" | "enteredAt">) => { ok: boolean; error?: string };
+  decideLeave: (id: string, approve: boolean, note: string) => { ok: boolean; error?: string };
   /** Refuses a label that already exists (case-insensitive) */
   addTrade: (input: Omit<TradeDefinition, "id"> & { id?: string }) => { ok: boolean; error?: string; id?: string };
   updateLabourer: (
@@ -205,6 +231,8 @@ interface StoreApi {
   upsertSite: (site: AppState["sites"][number]) => Promise<{ ok: boolean; error?: string }>;
   /** New staff record (to link a login to); returns its id, or "" if not allowed */
   addStaff: (input: Omit<StaffMember, "id">) => string;
+  /** HR's staff list (round 2, §27): edit, deactivate / activate */
+  updateStaff: (id: string, patch: Partial<Omit<StaffMember, "id">>) => { ok: boolean; error?: string };
   addLabourer: (row: Omit<Labourer, "id"> & { id?: string }) => { ok: boolean; error?: string; id?: string };
   /** Owner / Super Admin: delete a labourer with no history; otherwise deactivate */
   removeLabourer: (id: string) => { ok: boolean; error?: string };
@@ -311,6 +339,13 @@ function migrateState(parsed: Partial<AppState>): AppState {
     auditLog: parsed.auditLog ?? seed.auditLog,
     equipmentRequests: parsed.equipmentRequests ?? seed.equipmentRequests,
     crewRequests: parsed.crewRequests ?? [],
+    safetyObservations: parsed.safetyObservations ?? [],
+    kitLots: parsed.kitLots ?? [],
+    kitIssues: parsed.kitIssues ?? [],
+    equipmentReturns: parsed.equipmentReturns ?? [],
+    vendorBills: parsed.vendorBills ?? [],
+    advances: parsed.advances ?? [],
+    leaves: parsed.leaves ?? [],
     attendance: (parsed.attendance ?? seed.attendance).map((a) =>
       (a.status as string) === "off" ? { ...a, status: "weekly_off" as const } : a
     ),
@@ -456,7 +491,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         if (recovered && recovered.roles.length) {
           const role = recovered.roles[0];
           const opId = recovered.staffId ?? recovered.labourerId ?? null;
-          const siteId = landingSite(role, recovered.siteIds, fresh.currentSiteId);
+          const siteId = landingSite(role, recovered.siteIds, fresh.currentSiteId, recovered);
           const next: AppState = {
             ...fresh,
             currentAccountId: recovered.id,
@@ -483,7 +518,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     }
     const role = account.roles[0];
     const opId = account.staffId ?? account.labourerId ?? null;
-    const siteId = landingSite(role, account.siteIds, s.currentSiteId);
+    const siteId = landingSite(role, account.siteIds, s.currentSiteId, account);
     const next: AppState = {
       ...s,
       currentAccountId: account.id,
@@ -513,7 +548,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const master = await remoteLoadMaster();
       const role = me.roles[0];
       const s = stateRef.current;
-      const siteId = landingSite(role, me.siteIds, s.currentSiteId);
+      const siteId = landingSite(role, me.siteIds, s.currentSiteId, me);
       const next: AppState = {
         ...s,
         masterCatalog: master ?? s.masterCatalog,
@@ -543,7 +578,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         currentRole: role,
         // A role that can't see every site drops back to the entry site
         currentSiteId:
-          s.currentSiteId === ALL_SITES && !canSeeAllSites(role)
+          s.currentSiteId === ALL_SITES && !canSeeAllSites(role, account)
             ? entrySiteId(s)
             : s.currentSiteId,
       };
@@ -698,7 +733,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       }
       const role = target.roles[0];
       const opId = target.staffId ?? target.labourerId ?? null;
-      const siteId = landingSite(role, target.siteIds, s.currentSiteId);
+      const siteId = landingSite(role, target.siteIds, s.currentSiteId, target);
       const next: AppState = {
         ...s,
         impersonatorAccountId: actor.id,
@@ -1089,7 +1124,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       return { ok: false as const, error: "Site switch not allowed for this role" };
     }
     if (siteId === ALL_SITES) {
-      if (!canSeeAllSites(s.currentRole)) {
+      if (!canSeeAllSites(s.currentRole, account)) {
         return { ok: false as const, error: "All sites is for Owner / Super Admin" };
       }
       setState((prev) => ({
@@ -1444,6 +1479,263 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   /** SIC approves (labourer joins the crew) or rejects a request (docs §23). */
+  const raiseObservation = useCallback((input: Omit<SiteObservation, "id" | "status" | "raisedBy" | "raisedAt">) => {
+    const cur = stateRef.current;
+    if (!can(cur, "safety", "update")) return DENIED;
+    if (!input.text.trim()) return { ok: false, error: "Say what you saw" };
+    if (!input.location.trim()) return { ok: false, error: "Say where" };
+    const sup = cur.staff.find((x) => x.id === input.supervisorId && x.role === "supervisor");
+    if (!sup) return { ok: false, error: "Tag the supervisor responsible" };
+    const id = uid("obs");
+    const row: SiteObservation = { ...input, id, text: input.text.trim(), location: input.location.trim(), status: "open", raisedBy: cur.currentUserId ?? cur.currentAccountId ?? "safety", raisedAt: new Date().toISOString() };
+    setState((s) => {
+      const next = { ...s, safetyObservations: [row, ...s.safetyObservations] };
+      return { ...next, auditLog: [makeAudit(next, "safety", input.stopWork ? "stop_work" : "observation", `${input.stopWork ? "STOP WORK · " : ""}${input.risk} risk · ${row.location}: ${row.text} → ${sup.name}`, input.plant ?? null), ...s.auditLog] };
+    });
+    return { ok: true, id };
+  }, []);
+
+  // ---- Store equipment register (round 2, §27) ----
+  const isStore = (s: AppState) => can(s, "store", "update");
+  const addTagged = useCallback((input: { type: EquipmentItem["type"]; tag: string; expiryDate?: string; value?: number }) => {
+    const cur = stateRef.current;
+    if (!isStore(cur)) return DENIED;
+    const tag = input.tag.trim().toUpperCase();
+    if (!tag) return { ok: false, error: "Give the tag / serial no." };
+    if (cur.equipment.some((e) => e.tag.toUpperCase() === tag)) return { ok: false, error: `Tag ${tag} is already in the register` };
+    const siteId = entrySiteId(cur);
+    setState((s) => {
+      const item: EquipmentItem = { id: uid("eq"), type: input.type, tag, status: "ok", lastCheck: todayDate(), expiryDate: input.expiryDate || undefined, checklist: [], siteId, value: input.value || undefined };
+      const next = { ...s, equipment: [...s.equipment, item] };
+      return { ...next, auditLog: [makeAudit(next, "store", "create", `Equipment ${tag} (${input.type}) added${input.expiryDate ? ` · expires ${input.expiryDate}` : ""}`), ...s.auditLog] };
+    });
+    return { ok: true };
+  }, []);
+
+  const receiveKit = useCallback((input: { item: KitLot["item"]; qty: number; expiryDate?: string; note?: string }) => {
+    const cur = stateRef.current;
+    if (!isStore(cur)) return DENIED;
+    if (!(input.qty > 0) || !Number.isInteger(input.qty)) return { ok: false, error: "Quantity must be a whole number above zero" };
+    const siteId = entrySiteId(cur);
+    setState((s) => {
+      const lot: KitLot = { id: uid("lot"), siteId, item: input.item, qty: input.qty, receivedOn: todayDate(), expiryDate: input.expiryDate || undefined, note: input.note?.trim() || undefined };
+      const next = { ...s, kitLots: [...s.kitLots, lot] };
+      return { ...next, auditLog: [makeAudit(next, "store", "receive", `${input.qty} × ${input.item} received${input.expiryDate ? ` · expires ${input.expiryDate}` : ""}`), ...s.auditLog] };
+    });
+    return { ok: true };
+  }, []);
+
+  const issueTagged = useCallback((equipmentId: string, supervisorId: string) => {
+    const cur = stateRef.current;
+    if (!isStore(cur)) return DENIED;
+    const e = cur.equipment.find((x) => x.id === equipmentId);
+    if (!e || e.scrapped) return { ok: false, error: "Item not found" };
+    if (e.issuedTo) return { ok: false, error: `${e.tag} is already with ${cur.staff.find((s) => s.id === e.issuedTo)?.name ?? "a supervisor"}` };
+    if (e.expiryDate && e.expiryDate < todayDate()) return { ok: false, error: `${e.tag} has expired — it can't be issued` };
+    if (e.status === "fault") return { ok: false, error: `${e.tag} is marked faulty` };
+    const sup = cur.staff.find((s) => s.id === supervisorId && s.role === "supervisor");
+    if (!sup) return { ok: false, error: "Pick the supervisor" };
+    setState((s) => {
+      const next = { ...s, equipment: s.equipment.map((x) => (x.id === equipmentId ? { ...x, issuedTo: supervisorId, issuedOn: todayDate() } : x)) };
+      return { ...next, auditLog: [makeAudit(next, "store", "issue", `${e.tag} issued to ${sup.name}`), ...s.auditLog] };
+    });
+    return { ok: true };
+  }, []);
+
+  const issueKit = useCallback((item: KitLot["item"], qty: number, supervisorId: string) => {
+    const cur = stateRef.current;
+    if (!isStore(cur)) return { ...DENIED };
+    if (!(qty > 0) || !Number.isInteger(qty)) return { ok: false, error: "Quantity must be a whole number above zero" };
+    const sup = cur.staff.find((s) => s.id === supervisorId && s.role === "supervisor");
+    if (!sup) return { ok: false, error: "Pick the supervisor" };
+    const siteId = entrySiteId(cur);
+    const lots = pickLots(cur.kitLots, siteId, item, qty, todayDate());
+    if (!lots) return { ok: false, error: `Only ${inStore(cur.kitLots, siteId, item, todayDate())} in the store (unexpired)` };
+    const take = new Map(lots.map((l) => [l.lotId, l.qty]));
+    setState((s) => {
+      const issue: KitIssue = { id: uid("ki"), siteId, item, qty, supervisorId, lots, issuedOn: todayDate(), issuedBy: s.currentUserId ?? "store" };
+      const next = { ...s, kitLots: s.kitLots.map((l) => (take.has(l.id) ? { ...l, qty: l.qty - take.get(l.id)! } : l)), kitIssues: [issue, ...s.kitIssues] };
+      return { ...next, auditLog: [makeAudit(next, "store", "issue", `${qty} × ${item} issued to ${sup.name} (oldest expiry first)`), ...s.auditLog] };
+    });
+    return { ok: true, lots };
+  }, []);
+
+  const returnEquipment = useCallback((input: { equipmentId?: string; kitIssueId?: string; qty: number; condition: EquipmentReturn["condition"]; note: string }) => {
+    const cur = stateRef.current;
+    const me = cur.currentUserId ?? "";
+    const isMine = (supId?: string) => supId === me || isStore(cur);
+    let siteId = entrySiteId(cur);
+    if (input.equipmentId) {
+      const e = cur.equipment.find((x) => x.id === input.equipmentId);
+      if (!e?.issuedTo) return { ok: false, error: "This item isn't issued" };
+      if (!isMine(e.issuedTo)) return { ok: false, error: "Only the supervisor holding it returns it" };
+      if (cur.equipmentReturns.some((r) => r.equipmentId === e.id && (r.status === "with_store" || r.status === "with_sic"))) return { ok: false, error: "A return for this item is already waiting" };
+      siteId = e.siteId;
+    } else if (input.kitIssueId) {
+      const k = cur.kitIssues.find((x) => x.id === input.kitIssueId);
+      if (!k) return { ok: false, error: "Issue not found" };
+      if (!isMine(k.supervisorId)) return { ok: false, error: "Only the supervisor it was issued to returns it" };
+      const pending = cur.equipmentReturns.filter((r) => r.kitIssueId === k.id && (r.status === "with_store" || r.status === "with_sic")).reduce((t, r) => t + r.qty, 0);
+      if (!(input.qty > 0) || input.qty > k.qty - (k.returned ?? 0) - pending) return { ok: false, error: `Return between 1 and ${k.qty - (k.returned ?? 0) - pending}` };
+      siteId = k.siteId;
+    } else return { ok: false, error: "Pick what is being returned" };
+    if (input.condition !== "ok" && !input.note.trim()) return { ok: false, error: "Say what's wrong with it" };
+    const id = uid("ret");
+    setState((s) => {
+      const r: EquipmentReturn = { id, siteId, equipmentId: input.equipmentId, kitIssueId: input.kitIssueId, qty: input.equipmentId ? 1 : input.qty, condition: input.condition, note: input.note.trim(), by: me, at: new Date().toISOString(), status: "with_store" };
+      const next = { ...s, equipmentReturns: [r, ...s.equipmentReturns] };
+      return { ...next, auditLog: [makeAudit(next, "store", "return", `Return (${input.condition}) raised${input.note.trim() ? ` · ${input.note.trim()}` : ""}`), ...s.auditLog] };
+    });
+    return { ok: true, id };
+  }, []);
+
+  /** Store confirms (scrapped → SIC next); the SIC confirms a scrap; either may reject with a note */
+  const decideReturn = useCallback((id: string, approve: boolean, note: string) => {
+    const cur = stateRef.current;
+    const r = cur.equipmentReturns.find((x) => x.id === id);
+    if (!r) return { ok: false, error: "Return not found" };
+    const store = isStore(cur);
+    const sic = cur.currentRole === "sic" || cur.currentRole === "owner" || cur.currentRole === "super_admin";
+    if (r.status === "with_store" && !store) return { ok: false, error: "The store confirms returns" };
+    if (r.status === "with_sic" && !sic) return { ok: false, error: "The SIC confirms a scrap" };
+    if (r.status !== "with_store" && r.status !== "with_sic") return { ok: false, error: "Already decided" };
+    if (!approve && !note.trim()) return { ok: false, error: "Say why it's rejected" };
+    const nextStatus: EquipmentReturn["status"] = !approve ? "rejected" : r.status === "with_store" && r.condition === "scrapped" ? "with_sic" : "done";
+    const by = cur.currentUserId ?? "";
+    setState((s) => {
+      let equipment = s.equipment;
+      let kitIssues = s.kitIssues;
+      let kitLots = s.kitLots;
+      if (nextStatus === "done") {
+        if (r.equipmentId) {
+          // Back to the store (damaged → faulty, expired stays out of issue by date); scrapped leaves the books
+          equipment = equipment.map((e) => (e.id !== r.equipmentId ? e : { ...e, issuedTo: undefined, issuedOn: undefined, ...(r.condition === "damaged" ? { status: "fault" as const, faultNote: r.note } : {}), ...(r.condition === "scrapped" ? { scrapped: true } : {}) }));
+        }
+        if (r.kitIssueId) {
+          const k = kitIssues.find((x) => x.id === r.kitIssueId);
+          kitIssues = kitIssues.map((x) => (x.id === r.kitIssueId ? { ...x, returned: (x.returned ?? 0) + r.qty } : x));
+          // Good ones go back into a lot with the original expiry
+          if (k && r.condition === "ok") kitLots = [...kitLots, { id: uid("lot"), siteId: k.siteId, item: k.item, qty: r.qty, receivedOn: todayDate(), expiryDate: k.lots[0]?.expiryDate, note: "returned" }];
+        }
+      }
+      const equipmentReturns = s.equipmentReturns.map((x) =>
+        x.id !== id ? x : { ...x, status: nextStatus, decidedNote: note.trim() || x.decidedNote, ...(r.status === "with_store" ? { storeBy: by } : { sicBy: by }) }
+      );
+      const next = { ...s, equipment, kitIssues, kitLots, equipmentReturns };
+      return { ...next, auditLog: [makeAudit(next, "store", "return_decided", `Return ${r.condition} → ${nextStatus}${note.trim() ? ` · ${note.trim()}` : ""}`), ...s.auditLog] };
+    });
+    return { ok: true, next: nextStatus };
+  }, []);
+
+  // ---- Finance: vendor bills and advances (round 2, §27) ----
+  const addVendorBill = useCallback((input: Omit<VendorBill, "id" | "status" | "enteredBy" | "siteId">) => {
+    const cur = stateRef.current;
+    if (!can(cur, "finance", "create")) return DENIED;
+    const vendor = input.vendor.trim();
+    const billNo = input.billNo.trim();
+    if (!vendor || !billNo) return { ok: false, error: "Vendor and bill no. are needed" };
+    if (!(input.amount > 0)) return { ok: false, error: "Amount must be above zero" };
+    if (!input.billDate || input.billDate > todayDate()) return { ok: false, error: "Pick the bill date (not in the future)" };
+    // The same vendor's bill no. once only (every entry checks for duplicates, §24)
+    const dup = cur.vendorBills.find((b) => b.vendor.toLowerCase() === vendor.toLowerCase() && b.billNo.toLowerCase() === billNo.toLowerCase());
+    if (dup) return { ok: false, error: `${vendor} bill ${billNo} is already entered (${dup.billDate})` };
+    setState((s) => {
+      const bill: VendorBill = { ...input, vendor, billNo, id: uid("vb"), siteId: entrySiteId(s), status: "unpaid", enteredBy: s.currentUserId ?? "finance", note: input.note?.trim() || undefined };
+      const next = { ...s, vendorBills: [bill, ...s.vendorBills] };
+      return { ...next, auditLog: [makeAudit(next, "finance", "create", `Vendor bill ${vendor} ${billNo} ₹${input.amount}`), ...s.auditLog] };
+    });
+    return { ok: true };
+  }, []);
+
+  const payVendorBill = useCallback((id: string, paidOn: string, paidMode: string) => {
+    const cur = stateRef.current;
+    if (!can(cur, "finance", "update")) return DENIED;
+    const b = cur.vendorBills.find((x) => x.id === id);
+    if (!b) return { ok: false, error: "Bill not found" };
+    if (b.status === "paid") return { ok: false, error: "Already paid" };
+    if (!paidOn || paidOn > todayDate()) return { ok: false, error: "Pick the date paid (not in the future)" };
+    setState((s) => {
+      const next = { ...s, vendorBills: s.vendorBills.map((x) => (x.id === id ? { ...x, status: "paid" as const, paidOn, paidMode } : x)) };
+      return { ...next, auditLog: [makeAudit(next, "finance", "update", `Vendor bill ${b.vendor} ${b.billNo} paid ${paidOn} (${paidMode})`), ...s.auditLog] };
+    });
+    return { ok: true };
+  }, []);
+
+  const giveAdvance = useCallback((input: { labourerId: string; date: string; amount: number; note?: string }) => {
+    const cur = stateRef.current;
+    if (!can(cur, "finance", "create")) return DENIED;
+    const l = cur.labourers.find((x) => x.id === input.labourerId);
+    if (!l) return { ok: false, error: "Pick the labourer" };
+    if (!(input.amount > 0)) return { ok: false, error: "Amount must be above zero" };
+    if (!input.date || input.date > todayDate()) return { ok: false, error: "Pick the date (not in the future)" };
+    setState((s) => {
+      const a: AdvanceGiven = { id: uid("adv"), labourerId: l.id, date: input.date, amount: input.amount, note: input.note?.trim() || undefined, givenBy: s.currentUserId ?? "finance" };
+      const next = { ...s, advances: [a, ...s.advances] };
+      return { ...next, auditLog: [makeAudit(next, "finance", "advance", `Advance ₹${input.amount} to ${l.name} (${l.epNumber})`), ...s.auditLog] };
+    });
+    return { ok: true };
+  }, []);
+
+  // ---- HR leave register (round 2, §27) ----
+  const addLeave = useCallback((input: Omit<LeaveEntry, "id" | "status" | "enteredBy" | "enteredAt">) => {
+    const cur = stateRef.current;
+    if (!can(cur, "hr", "update")) return DENIED;
+    const l = cur.labourers.find((x) => x.id === input.labourerId);
+    if (!l) return { ok: false, error: "Pick the labourer" };
+    if (!input.from || !input.to || input.to < input.from) return { ok: false, error: "Pick the dates (to ≥ from)" };
+    if (!input.reason.trim()) return { ok: false, error: "Give the reason" };
+    const clash = cur.leaves.find((x) => x.labourerId === l.id && x.status !== "rejected" && x.from <= input.to && input.from <= x.to);
+    if (clash) return { ok: false, error: `${l.name} already has leave ${clash.from} → ${clash.to}` };
+    setState((s) => {
+      const e: LeaveEntry = { ...input, reason: input.reason.trim(), id: uid("lv"), status: "requested", enteredBy: s.currentUserId ?? "hr", enteredAt: new Date().toISOString() };
+      const next = { ...s, leaves: [e, ...s.leaves] };
+      return { ...next, auditLog: [makeAudit(next, "hr", "leave", `Leave ${input.kind} for ${l.name} ${input.from} → ${input.to}`), ...s.auditLog] };
+    });
+    return { ok: true };
+  }, []);
+
+  const decideLeave = useCallback((id: string, approve: boolean, note: string) => {
+    const cur = stateRef.current;
+    if (!can(cur, "hr", "update")) return DENIED;
+    const e = cur.leaves.find((x) => x.id === id);
+    if (!e || e.status !== "requested") return { ok: false, error: "This leave isn't waiting" };
+    if (!approve && !note.trim()) return { ok: false, error: "Say why it's rejected" };
+    setState((s) => {
+      const next = { ...s, leaves: s.leaves.map((x) => (x.id === id ? { ...x, status: approve ? ("approved" as const) : ("rejected" as const), decidedBy: s.currentUserId ?? undefined, decidedNote: note.trim() || undefined } : x)) };
+      return { ...next, auditLog: [makeAudit(next, "hr", approve ? "approve" : "reject", `Leave ${e.from} → ${e.to}${note.trim() ? ` · ${note.trim()}` : ""}`), ...s.auditLog] };
+    });
+    return { ok: true };
+  }, []);
+
+  /** Supervisor marks fixed; Safety closes or reopens (round 2, §27) */
+  const moveObservation = useCallback((id: string, to: "fixed" | "closed" | "open", note?: string) => {
+    const cur = stateRef.current;
+    const o = cur.safetyObservations.find((x) => x.id === id);
+    if (!o) return { ok: false, error: "Observation not found" };
+    const me = cur.currentUserId;
+    const safety = can(cur, "safety", "update");
+    if (to === "fixed") {
+      if (o.status !== "open") return { ok: false, error: "Only an open observation can be marked fixed" };
+      if (me !== o.supervisorId && !safety) return { ok: false, error: "The tagged supervisor marks it fixed" };
+      if (!note?.trim()) return { ok: false, error: "Say what was done" };
+    } else {
+      if (!safety) return { ok: false, error: "Only Safety closes or reopens an observation" };
+      if (to === "closed" && o.status === "closed") return { ok: false, error: "Already closed" };
+      if (to === "open" && o.status === "open") return { ok: false, error: "Already open" };
+    }
+    setState((s) => {
+      const now = new Date().toISOString();
+      const next = {
+        ...s,
+        safetyObservations: s.safetyObservations.map((x) =>
+          x.id !== id ? x : to === "fixed" ? { ...x, status: "fixed" as const, fixNote: note!.trim(), fixedAt: now } : to === "closed" ? { ...x, status: "closed" as const, closedBy: s.currentUserId ?? undefined, closedAt: now } : { ...x, status: "open" as const, closedAt: undefined, closedBy: undefined }
+        ),
+      };
+      return { ...next, auditLog: [makeAudit(next, "safety", `observation_${to}`, `${o.location}: ${o.text}${note?.trim() ? ` · ${note.trim()}` : ""}`, o.plant ?? null), ...s.auditLog] };
+    });
+    return { ok: true };
+  }, []);
+
   const decideCrew = useCallback((requestId: string, approve: boolean, note: string) => {
     const cur = stateRef.current;
     if (!can(cur, "crew", "approve")) return DENIED;
@@ -1703,7 +1995,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const addStaff = useCallback((input: Omit<StaffMember, "id">) => {
     const cur = stateRef.current;
-    if (!can(cur, "users", "create") && !can(cur, "master", "update")) return "";
+    // Round 2 (§27): HR keeps staff records too
+    if (!can(cur, "users", "create") && !can(cur, "master", "update") && !can(cur, "hr", "update")) return "";
     const id = uid("st");
     setState((s) => {
       const next = { ...s, staff: [...s.staff, { ...input, id }] };
@@ -1716,6 +2009,19 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       };
     });
     return id;
+  }, []);
+
+  const updateStaff = useCallback((id: string, patch: Partial<Omit<StaffMember, "id">>) => {
+    const cur = stateRef.current;
+    if (!can(cur, "users", "update") && !can(cur, "master", "update") && !can(cur, "hr", "update")) return DENIED;
+    const before = cur.staff.find((x) => x.id === id);
+    if (!before) return { ok: false, error: "Staff record not found" };
+    setState((s) => {
+      const next = { ...s, staff: s.staff.map((x) => (x.id === id ? { ...x, ...patch } : x)) };
+      const what = patch.active !== undefined && Object.keys(patch).length === 1 ? (patch.active ? "activated" : "deactivated") : "edited";
+      return { ...next, auditLog: [makeAudit(next, "users", "update", `Staff record ${before.name} ${what}`), ...s.auditLog] };
+    });
+    return { ok: true };
   }, []);
 
   /** docs §24: monthly pay upload — add new lines, change lines whose amount differs; Admin / HR */
@@ -2268,7 +2574,21 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       requestCrew,
       releaseCrew,
       decideCrew,
+      raiseObservation,
+      moveObservation,
+      addTagged,
+      receiveKit,
+      issueTagged,
+      issueKit,
+      returnEquipment,
+      decideReturn,
+      addVendorBill,
+      payVendorBill,
+      giveAdvance,
+      addLeave,
+      decideLeave,
       addStaff,
+      updateStaff,
       addWageEntry,
       acknowledgeFinanceAlert,
       flagFinanceAlertToSic,
@@ -2328,7 +2648,21 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       requestCrew,
       releaseCrew,
       decideCrew,
+      raiseObservation,
+      moveObservation,
+      addTagged,
+      receiveKit,
+      issueTagged,
+      issueKit,
+      returnEquipment,
+      decideReturn,
+      addVendorBill,
+      payVendorBill,
+      giveAdvance,
+      addLeave,
+      decideLeave,
       addStaff,
+      updateStaff,
       addWageEntry,
       acknowledgeFinanceAlert,
       flagFinanceAlertToSic,

@@ -1045,6 +1045,13 @@ export function createSeedState(): AppState {
     ],
     financeAlerts: [],
     crewRequests: [],
+    safetyObservations: [],
+    kitLots: [],
+    kitIssues: [],
+    equipmentReturns: [],
+    vendorBills: [],
+    advances: [],
+    leaves: [],
     equipmentRequests: [
       {
         id: "er-1",

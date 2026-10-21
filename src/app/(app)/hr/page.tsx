@@ -1,5 +1,6 @@
 "use client";
 
+import { useWork } from "@/lib/work/store";
 import { PayUploadPanel } from "@/components/hr/pay-upload";
 import { PassExpiryPanel } from "@/components/hr/pass-expiry-panel";
 import { guarded } from "@/components/shared/require-module";
@@ -30,6 +31,7 @@ import { OpsExcelTransferStack } from "@/components/ops/ops-excel-transfer";
 
 function HrHomePage() {
   const { state, markAttendance } = useStore();
+  const { notify } = useWork();
   const today = todayDate();
   const [msg, setMsg] = useState<string | null>(null);
   // HR marks today or yesterday (docs §4); correcting a DPR mark needs a note
@@ -44,9 +46,15 @@ function HrHomePage() {
   const fromDpr = state.attendance.filter((a) => a.sourceDprId).length;
 
   function setStatus(labourerId: string, status: AttendanceStatus) {
-    const name = state.labourers.find((l) => l.id === labourerId)?.name;
+    const lab = state.labourers.find((l) => l.id === labourerId);
+    const name = lab?.name;
+    const before = state.attendance.find((a) => a.labourerId === labourerId && a.date === day);
     const r = markAttendance(labourerId, status, note, day);
     setMsg(r.ok ? `Marked ${name} as ${attendanceLabel(status)} for ${day}` : r.error ?? "Not saved");
+    // Round 2 (§27): a correction of a submitted DPR's mark tells the supervisor and the SIC
+    if (r.ok && before?.sourceDprId && before.status !== status) {
+      notify({ kind: "attendance_corrected", problem: true, siteId: lab?.siteId ?? before.siteId, subjectStaffId: lab?.supervisorId || undefined, title: `HR corrected ${name}'s attendance ${day}`, detail: `${attendanceLabel(before.status)} → ${attendanceLabel(status)} · ${note.trim()}`, tab: "/home", refId: before.id });
+    }
   }
 
   return (

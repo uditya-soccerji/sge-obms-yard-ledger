@@ -260,6 +260,27 @@ export interface PlantDetail {
   locations: PlantLocation[];
 }
 
+/** A safety officer's observation, tagged to a supervisor (round 2, §27) */
+export interface SiteObservation {
+  id: string;
+  siteId: string;
+  plant?: string;
+  location: string;
+  text: string;
+  risk: "low" | "medium" | "high";
+  /** Unsafe condition: work stops until cleared — urgent to SIC, Owner, supervisor */
+  stopWork?: boolean;
+  supervisorId: string;
+  /** open → fixed (supervisor) → closed (Safety); Safety may reopen */
+  status: "open" | "fixed" | "closed";
+  raisedBy: string;
+  raisedAt: string;
+  fixNote?: string;
+  fixedAt?: string;
+  closedBy?: string;
+  closedAt?: string;
+}
+
 export interface StaffMember {
   id: string;
   name: string;
@@ -268,6 +289,11 @@ export interface StaffMember {
   phone?: string;
   designation?: string;
   supervisorType?: SupervisorType;
+  /** HR's staff record (round 2, §27) */
+  employeeCode?: string;
+  joinedOn?: string;
+  /** false = left / deactivated; unset = active */
+  active?: boolean;
 }
 
 export interface Labourer {
@@ -356,7 +382,8 @@ export interface AttendanceRecord {
 
 export interface EquipmentItem {
   id: string;
-  type: "hopper" | "compressor" | "airless" | "harness";
+  /** Round 2 (§27) adds IFR body suit and rope access to the tagged items */
+  type: "hopper" | "compressor" | "airless" | "harness" | "ifr" | "rope_access";
   tag: string;
   status: "ok" | "due" | "fault";
   assignedTo?: string;
@@ -367,6 +394,99 @@ export interface EquipmentItem {
   siteId: string;
   /** Latest fault reported by a supervisor, cleared when the store marks it repaired (docs §7) */
   faultNote?: string;
+  /** Round 2 (§27): supervisor holding it (staff id); unset = in the store */
+  issuedTo?: string;
+  issuedOn?: string;
+  /** Value in ₹ (e.g. IFR body suit 5,000) */
+  value?: number;
+  /** Left the books after a confirmed scrap */
+  scrapped?: boolean;
+}
+
+/** A supplier's bill to pay — paint, scaffold hire, transport… (round 2, §27) */
+export interface VendorBill {
+  id: string;
+  siteId: string;
+  vendor: string;
+  billNo: string;
+  billDate: string;
+  category: "paint" | "scaffold_hire" | "transport" | "consumables" | "other";
+  amount: number;
+  dueDate?: string;
+  note?: string;
+  status: "unpaid" | "paid";
+  paidOn?: string;
+  paidMode?: string;
+  enteredBy: string;
+}
+
+/** Cash advance given to a labourer; recovered through the monthly pay upload's Advance line (§27) */
+export interface AdvanceGiven {
+  id: string;
+  labourerId: string;
+  date: string;
+  amount: number;
+  note?: string;
+  givenBy: string;
+}
+
+/** A labourer's leave (round 2, §27) — HR records and approves */
+export interface LeaveEntry {
+  id: string;
+  labourerId: string;
+  from: string;
+  to: string;
+  kind: "casual" | "sick" | "unpaid" | "other";
+  reason: string;
+  status: "requested" | "approved" | "rejected";
+  enteredBy: string;
+  enteredAt: string;
+  decidedBy?: string;
+  decidedNote?: string;
+}
+
+/** Counted items (gloves, PPE kit, helmet) received in lots with an expiry (§27) */
+export interface KitLot {
+  id: string;
+  siteId: string;
+  item: "gloves" | "ppe_kit" | "helmet";
+  /** Still in the store */
+  qty: number;
+  receivedOn: string;
+  expiryDate?: string;
+  note?: string;
+}
+
+/** Counted items issued to a supervisor's crew, taken oldest expiry first (§27) */
+export interface KitIssue {
+  id: string;
+  siteId: string;
+  item: KitLot["item"];
+  qty: number;
+  supervisorId: string;
+  lots: { lotId: string; qty: number; expiryDate?: string }[];
+  issuedOn: string;
+  issuedBy: string;
+  /** How many have come back */
+  returned?: number;
+}
+
+/** A supervisor's return: store confirms; scrapped also needs the SIC (§27) */
+export interface EquipmentReturn {
+  id: string;
+  siteId: string;
+  /** Tagged item id, or a kit issue id */
+  equipmentId?: string;
+  kitIssueId?: string;
+  qty: number;
+  condition: "ok" | "damaged" | "expired" | "scrapped";
+  note: string;
+  by: string;
+  at: string;
+  status: "with_store" | "with_sic" | "done" | "rejected";
+  storeBy?: string;
+  sicBy?: string;
+  decidedNote?: string;
 }
 
 /** Legacy thin DPR line kept for paint-variance gist rollups */
@@ -705,6 +825,17 @@ export interface AppState {
   equipmentRequests: EquipmentRequest[];
   /** Supervisor requests to take a labourer onto their crew (docs §23) */
   crewRequests: CrewRequest[];
+  /** Safety observations and stop-work calls (round 2, §27) */
+  safetyObservations: SiteObservation[];
+  /** Store equipment register (round 2, §27) */
+  kitLots: KitLot[];
+  kitIssues: KitIssue[];
+  equipmentReturns: EquipmentReturn[];
+  /** Finance (round 2, §27) */
+  vendorBills: VendorBill[];
+  advances: AdvanceGiven[];
+  /** HR (round 2, §27) */
+  leaves: LeaveEntry[];
   /** One master store — load once, resolve site-then-company in memory. */
   masterCatalog: MasterCatalog;
 }
