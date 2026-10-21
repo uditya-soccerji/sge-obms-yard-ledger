@@ -322,3 +322,13 @@ The owner is reworking every role's access, starting at the labourer and moving 
 - **Store:** keeps the Estimator but sees **no rates or money** — only crew-days and paint litres (on screen and in the PDF). Sees the **Materials** list in Master Data (view only; Owner / SA change it), with the equipment and stock on Store / FIM and Paint stock in Work.
 - **Safety** gets only safety items: Safety DPR, DPR desk, My submissions, Requests. The calculators were removed (this reverses the round-1 choice for Safety).
 
+## 27. Access plan, round 2 — answers role by role (decided 2026-10-21, to build)
+- **Store:** one store manager per site **plus a Central Store Manager** (same screens, all sites). **Equipment register** from the owner's list (Compressor, Hopper, Airless machine, Harness, PPE kit, IFR body suit ₹5,000, Helmet, Gloves, Rope access): gloves and PPE counted by quantity, tagged items one by one, issued to a supervisor's crew, oldest expiry first. The store **keeps its DPR**. Returns (damaged / scrapped / expired) are **confirmed by the store; scrapped also needs the SIC**.
+- **Safety:** **observations** — Safety writes it, sets the risk **Low / Medium / High**, tags the supervisor; status **Open / Closed**; the supervisor and SIC are notified and see it on their home (assumed: the supervisor marks it fixed, Safety closes it). Safety sees **permits and TBT on all DPRs**, **PPE / harness expiry** and **crew lists**. **Stop work** alert → SIC, Owner and the supervisor (urgent, logged).
+- **HR:** corrects attendance after submit **with a reason** (old mark kept; supervisor and SIC told). HR keeps **staff records**; Owner / SA create logins. Adds a **monthly pay view** (Excel export), a **leave register** and a **staff list**.
+- **Admin:** approves DPR quantities **for the SIC at any time** (SIC told; logged "Admin for SIC"). Manages **Materials and Units** in Master Data too. Monthly uploads (duplicate-checked): **RIL JMS detail book** and **paint reco (942)**.
+- **Finance:** **labour pay view** + Excel export. Can't change a JMS amount — records RIL's payment only. Adds **supplier / vendor bills**, an **advances register** and a **monthly site P&L export**.
+- **Owner:** a **DPR tab** (view all, PDFs), may **override a store rejection**, and a **daily summary** on the Owner home.
+- **SIC:** may approve a crew move **without the current supervisor releasing** (that supervisor is told) — replaces the release step of §23. **JMS and ACPL approve buttons removed** (SIC confirms the ended job only).
+- **Supervisor:** sees Safety observations tagged to him. **Labourer, Super Admin:** no change.
+
