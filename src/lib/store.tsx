@@ -56,6 +56,9 @@ import type {
   KitLot,
   KitIssue,
   EquipmentReturn,
+  VendorBill,
+  AdvanceGiven,
+  LeaveEntry,
   CrewRequest,
   AcplPunchRow,
   AcplResolveStatus,
@@ -163,6 +166,13 @@ interface StoreApi {
   issueKit: (item: KitLot["item"], qty: number, supervisorId: string) => { ok: boolean; error?: string; lots?: KitIssue["lots"] };
   returnEquipment: (input: { equipmentId?: string; kitIssueId?: string; qty: number; condition: EquipmentReturn["condition"]; note: string }) => { ok: boolean; error?: string; id?: string };
   decideReturn: (id: string, approve: boolean, note: string) => { ok: boolean; error?: string; next?: EquipmentReturn["status"] };
+  /** Finance (round 2, §27) */
+  addVendorBill: (input: Omit<VendorBill, "id" | "status" | "enteredBy" | "siteId">) => { ok: boolean; error?: string };
+  payVendorBill: (id: string, paidOn: string, paidMode: string) => { ok: boolean; error?: string };
+  giveAdvance: (input: { labourerId: string; date: string; amount: number; note?: string }) => { ok: boolean; error?: string };
+  /** HR leave register (round 2, §27) */
+  addLeave: (input: Omit<LeaveEntry, "id" | "status" | "enteredBy" | "enteredAt">) => { ok: boolean; error?: string };
+  decideLeave: (id: string, approve: boolean, note: string) => { ok: boolean; error?: string };
   /** Refuses a label that already exists (case-insensitive) */
   addTrade: (input: Omit<TradeDefinition, "id"> & { id?: string }) => { ok: boolean; error?: string; id?: string };
   updateLabourer: (
@@ -333,6 +343,9 @@ function migrateState(parsed: Partial<AppState>): AppState {
     kitLots: parsed.kitLots ?? [],
     kitIssues: parsed.kitIssues ?? [],
     equipmentReturns: parsed.equipmentReturns ?? [],
+    vendorBills: parsed.vendorBills ?? [],
+    advances: parsed.advances ?? [],
+    leaves: parsed.leaves ?? [],
     attendance: (parsed.attendance ?? seed.attendance).map((a) =>
       (a.status as string) === "off" ? { ...a, status: "weekly_off" as const } : a
     ),
@@ -1614,6 +1627,86 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     return { ok: true, next: nextStatus };
   }, []);
 
+  // ---- Finance: vendor bills and advances (round 2, §27) ----
+  const addVendorBill = useCallback((input: Omit<VendorBill, "id" | "status" | "enteredBy" | "siteId">) => {
+    const cur = stateRef.current;
+    if (!can(cur, "finance", "create")) return DENIED;
+    const vendor = input.vendor.trim();
+    const billNo = input.billNo.trim();
+    if (!vendor || !billNo) return { ok: false, error: "Vendor and bill no. are needed" };
+    if (!(input.amount > 0)) return { ok: false, error: "Amount must be above zero" };
+    if (!input.billDate || input.billDate > todayDate()) return { ok: false, error: "Pick the bill date (not in the future)" };
+    // The same vendor's bill no. once only (every entry checks for duplicates, §24)
+    const dup = cur.vendorBills.find((b) => b.vendor.toLowerCase() === vendor.toLowerCase() && b.billNo.toLowerCase() === billNo.toLowerCase());
+    if (dup) return { ok: false, error: `${vendor} bill ${billNo} is already entered (${dup.billDate})` };
+    setState((s) => {
+      const bill: VendorBill = { ...input, vendor, billNo, id: uid("vb"), siteId: entrySiteId(s), status: "unpaid", enteredBy: s.currentUserId ?? "finance", note: input.note?.trim() || undefined };
+      const next = { ...s, vendorBills: [bill, ...s.vendorBills] };
+      return { ...next, auditLog: [makeAudit(next, "finance", "create", `Vendor bill ${vendor} ${billNo} ₹${input.amount}`), ...s.auditLog] };
+    });
+    return { ok: true };
+  }, []);
+
+  const payVendorBill = useCallback((id: string, paidOn: string, paidMode: string) => {
+    const cur = stateRef.current;
+    if (!can(cur, "finance", "update")) return DENIED;
+    const b = cur.vendorBills.find((x) => x.id === id);
+    if (!b) return { ok: false, error: "Bill not found" };
+    if (b.status === "paid") return { ok: false, error: "Already paid" };
+    if (!paidOn || paidOn > todayDate()) return { ok: false, error: "Pick the date paid (not in the future)" };
+    setState((s) => {
+      const next = { ...s, vendorBills: s.vendorBills.map((x) => (x.id === id ? { ...x, status: "paid" as const, paidOn, paidMode } : x)) };
+      return { ...next, auditLog: [makeAudit(next, "finance", "update", `Vendor bill ${b.vendor} ${b.billNo} paid ${paidOn} (${paidMode})`), ...s.auditLog] };
+    });
+    return { ok: true };
+  }, []);
+
+  const giveAdvance = useCallback((input: { labourerId: string; date: string; amount: number; note?: string }) => {
+    const cur = stateRef.current;
+    if (!can(cur, "finance", "create")) return DENIED;
+    const l = cur.labourers.find((x) => x.id === input.labourerId);
+    if (!l) return { ok: false, error: "Pick the labourer" };
+    if (!(input.amount > 0)) return { ok: false, error: "Amount must be above zero" };
+    if (!input.date || input.date > todayDate()) return { ok: false, error: "Pick the date (not in the future)" };
+    setState((s) => {
+      const a: AdvanceGiven = { id: uid("adv"), labourerId: l.id, date: input.date, amount: input.amount, note: input.note?.trim() || undefined, givenBy: s.currentUserId ?? "finance" };
+      const next = { ...s, advances: [a, ...s.advances] };
+      return { ...next, auditLog: [makeAudit(next, "finance", "advance", `Advance ₹${input.amount} to ${l.name} (${l.epNumber})`), ...s.auditLog] };
+    });
+    return { ok: true };
+  }, []);
+
+  // ---- HR leave register (round 2, §27) ----
+  const addLeave = useCallback((input: Omit<LeaveEntry, "id" | "status" | "enteredBy" | "enteredAt">) => {
+    const cur = stateRef.current;
+    if (!can(cur, "hr", "update")) return DENIED;
+    const l = cur.labourers.find((x) => x.id === input.labourerId);
+    if (!l) return { ok: false, error: "Pick the labourer" };
+    if (!input.from || !input.to || input.to < input.from) return { ok: false, error: "Pick the dates (to ≥ from)" };
+    if (!input.reason.trim()) return { ok: false, error: "Give the reason" };
+    const clash = cur.leaves.find((x) => x.labourerId === l.id && x.status !== "rejected" && x.from <= input.to && input.from <= x.to);
+    if (clash) return { ok: false, error: `${l.name} already has leave ${clash.from} → ${clash.to}` };
+    setState((s) => {
+      const e: LeaveEntry = { ...input, reason: input.reason.trim(), id: uid("lv"), status: "requested", enteredBy: s.currentUserId ?? "hr", enteredAt: new Date().toISOString() };
+      const next = { ...s, leaves: [e, ...s.leaves] };
+      return { ...next, auditLog: [makeAudit(next, "hr", "leave", `Leave ${input.kind} for ${l.name} ${input.from} → ${input.to}`), ...s.auditLog] };
+    });
+    return { ok: true };
+  }, []);
+
+  const decideLeave = useCallback((id: string, approve: boolean, note: string) => {
+    const cur = stateRef.current;
+    if (!can(cur, "hr", "update")) return DENIED;
+    const e = cur.leaves.find((x) => x.id === id);
+    if (!e || e.status !== "requested") return { ok: false, error: "This leave isn't waiting" };
+    if (!approve && !note.trim()) return { ok: false, error: "Say why it's rejected" };
+    setState((s) => {
+      const next = { ...s, leaves: s.leaves.map((x) => (x.id === id ? { ...x, status: approve ? ("approved" as const) : ("rejected" as const), decidedBy: s.currentUserId ?? undefined, decidedNote: note.trim() || undefined } : x)) };
+      return { ...next, auditLog: [makeAudit(next, "hr", approve ? "approve" : "reject", `Leave ${e.from} → ${e.to}${note.trim() ? ` · ${note.trim()}` : ""}`), ...s.auditLog] };
+    });
+    return { ok: true };
+  }, []);
+
   /** Supervisor marks fixed; Safety closes or reopens (round 2, §27) */
   const moveObservation = useCallback((id: string, to: "fixed" | "closed" | "open", note?: string) => {
     const cur = stateRef.current;
@@ -2489,6 +2582,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       issueKit,
       returnEquipment,
       decideReturn,
+      addVendorBill,
+      payVendorBill,
+      giveAdvance,
+      addLeave,
+      decideLeave,
       addStaff,
       updateStaff,
       addWageEntry,
@@ -2558,6 +2656,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       issueKit,
       returnEquipment,
       decideReturn,
+      addVendorBill,
+      payVendorBill,
+      giveAdvance,
+      addLeave,
+      decideLeave,
       addStaff,
       updateStaff,
       addWageEntry,

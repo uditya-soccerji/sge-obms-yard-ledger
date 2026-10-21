@@ -20,6 +20,9 @@ export type OpsPanelId =
   | "safety-view"
   | "equipment"
   | "my-equipment"
+  | "vendor-bills"
+  | "advances"
+  | "leave"
   | "submissions"
   | "audit"
   | "admin"
@@ -107,6 +110,7 @@ const ROLE_PILLS: Record<RoleId, OpsPill[]> = {
     // Round 2 (§27)
     { id: "staff", label: "Staff", module: "hr" },
     { id: "labour-pay", label: "Labour pay", module: "hr" },
+    { id: "leave", label: "Leave", module: "hr" },
   ],
   finance: [
     { id: "finance", label: "Finance", module: "finance" },
@@ -114,6 +118,8 @@ const ROLE_PILLS: Record<RoleId, OpsPill[]> = {
     { id: "estimate", label: "Estimator", module: "calculators" },
     // Round 2 (§27)
     { id: "labour-pay", label: "Labour pay", module: "finance" },
+    { id: "vendor-bills", label: "Vendor bills", module: "finance" },
+    { id: "advances", label: "Advances", module: "finance" },
   ],
   supervisor: [
     { id: "dpr", label: "DPR", module: "dpr" },

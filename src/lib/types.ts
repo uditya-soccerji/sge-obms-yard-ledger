@@ -403,6 +403,48 @@ export interface EquipmentItem {
   scrapped?: boolean;
 }
 
+/** A supplier's bill to pay — paint, scaffold hire, transport… (round 2, §27) */
+export interface VendorBill {
+  id: string;
+  siteId: string;
+  vendor: string;
+  billNo: string;
+  billDate: string;
+  category: "paint" | "scaffold_hire" | "transport" | "consumables" | "other";
+  amount: number;
+  dueDate?: string;
+  note?: string;
+  status: "unpaid" | "paid";
+  paidOn?: string;
+  paidMode?: string;
+  enteredBy: string;
+}
+
+/** Cash advance given to a labourer; recovered through the monthly pay upload's Advance line (§27) */
+export interface AdvanceGiven {
+  id: string;
+  labourerId: string;
+  date: string;
+  amount: number;
+  note?: string;
+  givenBy: string;
+}
+
+/** A labourer's leave (round 2, §27) — HR records and approves */
+export interface LeaveEntry {
+  id: string;
+  labourerId: string;
+  from: string;
+  to: string;
+  kind: "casual" | "sick" | "unpaid" | "other";
+  reason: string;
+  status: "requested" | "approved" | "rejected";
+  enteredBy: string;
+  enteredAt: string;
+  decidedBy?: string;
+  decidedNote?: string;
+}
+
 /** Counted items (gloves, PPE kit, helmet) received in lots with an expiry (§27) */
 export interface KitLot {
   id: string;
@@ -789,6 +831,11 @@ export interface AppState {
   kitLots: KitLot[];
   kitIssues: KitIssue[];
   equipmentReturns: EquipmentReturn[];
+  /** Finance (round 2, §27) */
+  vendorBills: VendorBill[];
+  advances: AdvanceGiven[];
+  /** HR (round 2, §27) */
+  leaves: LeaveEntry[];
   /** One master store — load once, resolve site-then-company in memory. */
   masterCatalog: MasterCatalog;
 }
