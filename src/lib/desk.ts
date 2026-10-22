@@ -178,10 +178,21 @@ export function opsPillsFor(
   role: RoleId | null | undefined
 ): OpsPill[] {
   if (!account || !role) return [];
+  // Owner rule (2026-10-21): Owner and Super Admin see every tab any role has — new tabs included
+  if (role === "owner" || role === "super_admin") return ALL_PILLS;
   return (ROLE_PILLS[role] ?? []).filter((p) =>
     canViewModule(account, role, p.module)
   );
 }
+
+/** Every tab of every role, once each (the Super Admin's order first, then whatever other roles add) */
+const PREFER_LABEL: Partial<Record<OpsPanelId, string>> = { crew: "Crews", store: "Store / FIM", safety: "Safety", dpr: "DPR", hr: "HR / Attendance", submissions: "My submissions" };
+const ALL_PILLS: OpsPill[] = (() => {
+  const seen = new Map<OpsPanelId, OpsPill>();
+  const order: RoleId[] = ["super_admin", "owner", "sic", "admin", "hr", "finance", "store", "safety", "supervisor", "labourer"];
+  for (const r of order) for (const p of ROLE_PILLS[r] ?? []) if (!seen.has(p.id)) seen.set(p.id, { ...p, label: PREFER_LABEL[p.id] ?? p.label });
+  return [...seen.values()];
+})();
 
 export type TopNavId = "home" | "work" | "operations" | "master";
 

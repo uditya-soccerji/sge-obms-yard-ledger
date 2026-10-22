@@ -100,6 +100,7 @@ function LabourerHomePage() {
   const canEditTrade =
     state.currentRole === "hr" ||
     state.currentRole === "admin" ||
+    state.currentRole === "owner" ||
     state.currentRole === "super_admin";
 
   if (!labourer) {

@@ -338,3 +338,7 @@ The owner is reworking every role's access, starting at the labourer and moving 
 - **Built 2026-10-21 (HR leave, Finance):** HR → **Leave**: record a labourer's leave (from / to, casual / sick / unpaid / other, reason; overlapping leave refused), approve or reject (reason needed), "on leave today" list. Finance → **Vendor bills**: vendor, bill no., date, category, amount, due date; the same vendor's bill no. once only; overdue flagged; mark paid (date, mode); Excel export. Finance → **Advances**: record cash advances by EP; recovered = the Advance lines of the monthly pay upload; balance per labourer; Excel export. Work → P&L: **Export site P&L (Excel)** — every site × month with income, earned, labour, direct, overhead, profit. Vendor bills don't flow into P&L yet (Work expenses do).
 - **Still to build:** Admin's monthly **RIL JMS detail book** and **paint reco (942)** uploads — waiting for a sample of each file.
 
+## 28. Owner and Super Admin have everything (decided 2026-10-21)
+- The Owner and Super Admin have **every tab and every right**. Anything added later is theirs automatically: `effectivePermission` returns true for both roles, and their Operations strip is every tab any role has (`ALL_PILLS` in `lib/desk.ts`). Don't add a feature without checking it isn't gated by a role-name list that leaves them out.
+- Still Super Admin only: **View as** (acting as another login) — to confirm with the owner.
+
