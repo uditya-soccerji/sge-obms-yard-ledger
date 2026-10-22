@@ -2375,8 +2375,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     if (!eq) return { ok: false, error: "Equipment not found" };
     const role = cur.currentRole;
     // docs §7: a supervisor flags a fault; the store repairs and changes the status back
-    if (status === "fault" && role !== "supervisor" && role !== "store" && role !== "super_admin") return { ok: false, error: "Supervisors (or the store) report faults" };
-    if (status !== "fault" && role !== "store" && role !== "super_admin") return { ok: false, error: "Only the store marks kit repaired" };
+    if (status === "fault" && role !== "supervisor" && role !== "store" && role !== "super_admin" && role !== "owner") return { ok: false, error: "Supervisors (or the store) report faults" };
+    if (status !== "fault" && role !== "store" && role !== "super_admin" && role !== "owner") return { ok: false, error: "Only the store marks kit repaired" };
     if (status === "fault" && !note?.trim()) return { ok: false, error: "Say what's wrong with it" };
     setState((s) => {
       const equipment = s.equipment.map((e) => (e.id === id ? { ...e, status, faultNote: status === "fault" ? note!.trim() : undefined, lastCheck: todayDate() } : e));

@@ -158,13 +158,13 @@ export function effectivePermission(
   if (!account || !activeRole) return false;
   if (!account.roles.includes(activeRole)) return false;
 
+  // Owner rule (2026-10-21): Owner and Super Admin have every right — anything added later included
+  if (activeRole === "owner" || activeRole === "super_admin") return true;
+
   const override = account.permissionOverrides.find(
     (o) => o.module === module && o.action === action
   );
   if (override) return override.allow;
-
-  // Super admin active role always wins for users/admin
-  if (activeRole === "super_admin") return roleHas("super_admin", module, action);
 
   return roleHas(activeRole, module, action);
 }

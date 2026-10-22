@@ -174,7 +174,8 @@ function CostEstimatePage() {
                 </div>
               </div>
               {(state.currentRole === "admin" ||
-                state.currentRole === "owner") &&
+                state.currentRole === "owner" ||
+                state.currentRole === "super_admin") &&
               c.editable ? (
                 editId === c.id ? (
                   <div className="flex gap-2">
