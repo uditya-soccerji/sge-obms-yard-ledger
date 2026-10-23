@@ -183,8 +183,29 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
     setHydrated(true);
   }, [log]);
 
+  // 2026-10-24: alerts and work saved in another tab show here at once (not written back — no ping-pong)
+  const fromOtherTab = React.useRef(false);
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== WORK_STORAGE_KEY || !e.newValue) return;
+      try {
+        const saved = JSON.parse(e.newValue) as WorkState;
+        fromOtherTab.current = true;
+        setWork({ ...saved, reports: saved.reports ?? [], submissions: saved.submissions ?? [], paintSteps: saved.paintSteps ?? [] });
+      } catch {
+        /* unreadable copy — keep ours */
+      }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
+
   useEffect(() => {
     if (!hydrated) return;
+    if (fromOtherTab.current) {
+      fromOtherTab.current = false;
+      return;
+    }
     try {
       localStorage.setItem(WORK_STORAGE_KEY, JSON.stringify(work));
     } catch {

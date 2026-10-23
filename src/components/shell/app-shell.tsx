@@ -36,6 +36,8 @@ function DeskNav({
 }) {
   const pathname = usePathname();
   const items = topNavFor(account, role);
+  // Requests waiting for Owner / SA, counted on the Master Data tab (2026-10-24)
+  const waitingMaster = useStore().fullState.wageChangeRequests.filter((r) => r.status === "pending").length;
 
   return (
     <nav
@@ -75,6 +77,15 @@ function DeskNav({
             )}
           >
             {item.label}
+            {item.id === "master" && waitingMaster ? (
+              <span
+                aria-label={`${waitingMaster} waiting`}
+                title={`${waitingMaster} request${waitingMaster === 1 ? "" : "s"} waiting for Owner / Super Admin`}
+                className="ml-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--sge-brass)] px-1 align-middle text-[10px] font-bold leading-none tracking-normal text-white"
+              >
+                {waitingMaster}
+              </span>
+            ) : null}
           </Link>
         );
       })}

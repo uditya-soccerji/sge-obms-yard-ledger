@@ -411,6 +411,20 @@ function migrateState(parsed: Partial<AppState>): AppState {
   };
 }
 
+/** Who is signed in and which site — kept per browser tab (2026-10-24) */
+const TAB_SESSION_KEY = "sge-obms-tab-session";
+function tabSession(s: AppState): Partial<AppState> {
+  return {
+    currentRole: s.currentRole,
+    currentUserId: s.currentUserId,
+    currentAccountId: s.currentAccountId,
+    impersonatorAccountId: s.impersonatorAccountId,
+    impersonatorSnapshot: s.impersonatorSnapshot,
+    currentSiteId: s.currentSiteId,
+    entrySiteId: s.entrySiteId,
+  };
+}
+
 export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<AppState>(createSeedState);
   const [hydrated, setHydrated] = useState(false);
@@ -422,7 +436,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw) as Partial<AppState>;
-        setState(migrateState(parsed));
+        // This tab's own sign-in survives a reload even if another tab signed in as someone else
+        const mine = sessionStorage.getItem(TAB_SESSION_KEY);
+        setState({ ...migrateState(parsed), ...(mine ? (JSON.parse(mine) as Partial<AppState>) : {}) });
       }
     } catch {
       // Keep seed, but never let it overwrite saved data we failed to read: keep a copy
@@ -436,9 +452,39 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     setHydrated(true);
   }, []);
 
+  // 2026-10-24: a change saved in another tab (e.g. Admin's wage request) shows here at once.
+  // Who is signed in and which site stay this tab's own; the incoming copy isn't written back (no ping-pong).
+  const fromOtherTab = React.useRef(false);
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== STORAGE_KEY || !e.newValue) return;
+      try {
+        const incoming = migrateState(JSON.parse(e.newValue) as Partial<AppState>);
+        fromOtherTab.current = true;
+        setState((s) => ({ ...incoming, ...tabSession(s) }));
+      } catch {
+        /* unreadable copy — keep ours */
+      }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
+
   useEffect(() => {
     if (!hydrated) return;
+    if (fromOtherTab.current) {
+      fromOtherTab.current = false;
+      return;
+    }
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  }, [state, hydrated]);
+  useEffect(() => {
+    if (!hydrated) return;
+    try {
+      sessionStorage.setItem(TAB_SESSION_KEY, JSON.stringify(tabSession(state)));
+    } catch {
+      /* blocked */
+    }
   }, [state, hydrated]);
 
   // Merge plan Step 10: data under older keys is never read again — clear it out
