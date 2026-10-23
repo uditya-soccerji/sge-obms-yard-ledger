@@ -349,3 +349,22 @@ The owner is reworking every role's access, starting at the labourer and moving 
 - **2026-10-24:** the requests list sits behind a **"Wage change requests"** button with the waiting count; it opens 50 per page (Previous / Next), waiting first, each with date and time asked / decided. The **form on an existing trade × skill × experience edits that rate** (a request for the Admin) instead of stopping with "already has a rate".
 - **2026-10-24:** the **Master Data** tab in the top bar shows the waiting count. Open tabs in the same browser now update each other at once (requests, counts, bell), and each tab keeps its own sign-in. **Across different phones/PCs this still needs the shared database** — Daily wages and its requests are saved on the device until they move there.
 - **2026-10-24:** the Owner / Super Admin bell opens with **Problems only ticked**; unticking is remembered for that login. The Admin gets a **green "N new" count** for approved / rejected requests they haven't seen (also on Daily wages and Master Data). The bell alert opens Daily wages with the requests list open, and the new decisions are **highlighted** (green approved, red rejected, NEW tag).
+- **2026-10-24 — own actions:** what you did yourself never counts as unread on your bell.
+- **2026-10-24 — same flow on Trades, Rate book / PO, Materials, Units:** the Admin's edits there are requests too (Undo 60 s, then Owner / SA alerted with the count; approve replays the edit, reject needs a reason; the Admin gets "N new", highlight, bell → list). Counts on each sheet button and on Master Data.
+- **2026-10-24 — counts on every role's tabs** (icons on every tab; the number = what waits for *that* role, same site filter as the page; Owner / SA see every role's queue added up):
+
+| Tab | Counts | Role |
+|---|---|---|
+| Approvals | DPRs submitted | SIC, Admin |
+| DPR | my DPR sent back | the submitter |
+| Crews | asks to release a labourer from my crew / released, waiting approval | giving supervisor / SIC |
+| Requests | open, accepted or being filled / store rejected / filled, confirm receipt | Store / SIC / the asker |
+| Equipment | returns with the store | Store |
+| Leave | leave asked for | HR |
+| Observations | fixed, to close (Owner / SA: open too) | Safety |
+| Finance | alerts not acknowledged | Finance |
+| Vendor bills | unpaid, due today or overdue | Finance |
+| JMS | waiting for the Admin's RIL no. and amount | Admin |
+| Work (top) | JMS to confirm / job ready to close | SIC / supervisor |
+| Master Data (top) | change requests waiting (+ Admin: new decisions) | Owner / SA, Admin |
+
