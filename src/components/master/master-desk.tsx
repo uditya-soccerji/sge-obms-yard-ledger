@@ -1,8 +1,10 @@
 "use client";
 
-import { Building2, BookOpen, CalendarCheck, Check, ClipboardList, Clock, HardHat, Hourglass, IndianRupee, Layers, ListChecks, MapPin, PaintBucket, Power, ReceiptIndianRupee, Ruler, Save, Send, ShieldCheck, Users, Wrench, X, type LucideIcon } from "lucide-react";
+import { realToday } from "@/lib/today";
+import { WAGE_UNDO_MS } from "@/lib/wage-requests";
+import { Building2, BookOpen, CalendarCheck, Check, ClipboardList, Clock, HardHat, Hourglass, IndianRupee, Layers, ListChecks, MapPin, PaintBucket, Power, ReceiptIndianRupee, Ruler, Save, Send, ShieldCheck, Undo2, Users, Wrench, X, type LucideIcon } from "lucide-react";
 import { CENTRAL_STORE, isCentralStore } from "@/lib/site-scope";
-import React, { createContext, useContext, useMemo, useState } from "react";
+import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { BlurInput } from "@/components/shared/blur-input";
 import { normalizeEp } from "@/lib/ep";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -1681,7 +1683,7 @@ function TradesSheet({
 }
 
 function WageBandsSheet({ showInactive }: { showInactive: boolean }) {
-  const { fullState: state, upsertWageBand, setWageBandActive, decideWageChange } = useStore();
+  const { fullState: state, upsertWageBand, setWageBandActive, decideWageChange, withdrawWageChange } = useStore();
   const report = useReport();
   const { notify } = useWork();
   // Owner rule (2026-10-24): the Admin's changes are requests; Owner / SA approve before a rate changes
@@ -1702,8 +1704,8 @@ function WageBandsSheet({ showInactive }: { showInactive: boolean }) {
   /** Save, or — for the Admin — send the change for approval */
   function send(r: { ok: boolean; error?: string; requested?: boolean; id?: string }, what: string) {
     if (r.ok && r.requested) {
-      notify({ kind: "wage_change_requested", problem: true, siteId: "", subjectStaffId: state.currentUserId ?? undefined, title: `Wage change to approve: ${what}`, detail: `Asked by ${state.users.find((u) => u.id === state.currentAccountId)?.name ?? "Admin"}`, tab: "/master-data?sheet=wageBands", refId: r.id });
-      setInfo("Sent to the Owner / Super Admin — the rate changes when they approve.");
+      // The Owner / SA alert goes out after the Undo window, with the count (Work store), not here
+      setInfo(`Request sent: ${what}. You can Undo it for ${WAGE_UNDO_MS / 1000} seconds before the Owner / Super Admin are told.`);
       setSentAt(Date.now());
       setTimeout(() => setSentAt(0), 4000);
       return;
@@ -1711,6 +1713,22 @@ function WageBandsSheet({ showInactive }: { showInactive: boolean }) {
     setInfo(null);
     report(r);
   }
+  /** Undo: take a waiting request back — it leaves the Owner's list and count */
+  function undo(r: WageChangeRequest) {
+    const res = withdrawWageChange(r.id);
+    report(res);
+    if (res.ok) setInfo(r.notified ? "Request taken back — it is off the Owner / Super Admin's list." : "Request taken back — the Owner / Super Admin were not told.");
+  }
+  const mine = (r: WageChangeRequest) => r.requestedBy === (state.currentUserId ?? state.currentAccountId);
+  // Tick every second while one of my requests is still in its Undo window, for the countdown
+  const [, setTick] = useState(0);
+  const inWindow = pending.some((r) => mine(r) && !r.notified);
+  useEffect(() => {
+    if (!inWindow) return;
+    const t = setInterval(() => setTick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, [inWindow]);
+  const secondsLeft = (r: WageChangeRequest) => Math.max(0, Math.ceil((Date.parse(r.requestedAt) + WAGE_UNDO_MS - Date.now()) / 1000));
   function decide(r: WageChangeRequest, approve: boolean) {
     const res = decideWageChange(r.id, approve, decideNote[r.id] ?? "");
     report(res);
@@ -1748,7 +1766,17 @@ function WageBandsSheet({ showInactive }: { showInactive: boolean }) {
               <div key={r.id} className="flex flex-wrap items-center gap-2 text-sm">
                 <span className="inline-flex items-center gap-1 rounded-sm bg-[var(--sge-warn-wash)] px-1.5 text-[11px] font-semibold uppercase text-[var(--sge-warn)]"><Hourglass aria-hidden className="h-3 w-3" />waiting</span>
                 <span className="font-semibold">{describe(r)}</span>
-                <span className="text-xs text-[var(--sge-ink-3)]">by {r.requestedByName} · {r.requestedAt.slice(0, 10)}</span>
+                <span className="text-xs text-[var(--sge-ink-3)]">by {r.requestedByName} · {realToday(new Date(r.requestedAt))}</span>
+                {isAdmin && mine(r) ? (
+                  <span className="ml-auto flex items-center gap-2">
+                    <span className="text-xs text-[var(--sge-ink-3)]">
+                      {r.notified || secondsLeft(r) === 0 ? "Owner / SA told" : `Owner / SA told in ${secondsLeft(r)} s`}
+                    </span>
+                    <Button size="sm" variant="outline" className="gap-1 border-[var(--sge-warn)] text-[var(--sge-warn)]" onClick={() => undo(r)}>
+                      <Undo2 aria-hidden className="h-3.5 w-3.5" /> Undo
+                    </Button>
+                  </span>
+                ) : null}
                 {isBoss ? (
                   <span className="ml-auto flex items-center gap-1">
                     <Input aria-label="Reason" className="h-8 w-44" placeholder="Reason (to reject)" value={decideNote[r.id] ?? ""} onChange={(e) => setDecideNote({ ...decideNote, [r.id]: e.target.value })} />
@@ -1765,7 +1793,7 @@ function WageBandsSheet({ showInactive }: { showInactive: boolean }) {
             {isAdmin
               ? recent.map((r) => (
                   <div key={r.id} className="flex flex-wrap items-center gap-2 text-xs text-[var(--sge-ink-2)]">
-                    <span className={cn("rounded-sm px-1.5 font-semibold uppercase", r.status === "approved" ? "bg-[var(--sge-ok-wash)] text-[var(--sge-ok)]" : "bg-[var(--sge-crit-wash)] text-[var(--sge-crit)]")}>{r.status}</span>
+                    <span className={cn("rounded-sm px-1.5 font-semibold uppercase", r.status === "approved" ? "bg-[var(--sge-ok-wash)] text-[var(--sge-ok)]" : r.status === "withdrawn" ? "bg-[var(--sge-paper-2)] text-[var(--sge-ink-3)]" : "bg-[var(--sge-crit-wash)] text-[var(--sge-crit)]")}>{r.status === "withdrawn" ? "undone" : r.status}</span>
                     {describe(r)}
                     {r.decidedNote ? ` · ${r.decidedNote}` : ""}
                   </div>
@@ -1868,10 +1896,17 @@ function WageBandsSheet({ showInactive }: { showInactive: boolean }) {
                   </td>
                   <td className="text-right">
                     {isAdmin && waitingFor(b.id) ? (
-                      // A request is waiting: the action shows that, in amber, until Owner / SA decide
-                      <Button size="sm" disabled className="gap-1 bg-[var(--sge-brass)] text-white opacity-100 disabled:opacity-100">
-                        <Hourglass aria-hidden className="h-3.5 w-3.5" /> Requested
-                      </Button>
+                      // A request is waiting: amber "Requested", with Undo for the one who asked
+                      <span className="inline-flex items-center gap-1">
+                        <Button size="sm" disabled className="gap-1 bg-[var(--sge-brass)] text-white opacity-100 disabled:opacity-100">
+                          <Hourglass aria-hidden className="h-3.5 w-3.5" /> Requested
+                        </Button>
+                        {mine(waitingFor(b.id)!) ? (
+                          <Button size="sm" variant="outline" className="gap-1 border-[var(--sge-warn)] text-[var(--sge-warn)]" title="Take the request back" onClick={() => undo(waitingFor(b.id)!)}>
+                            <Undo2 aria-hidden className="h-3.5 w-3.5" /> Undo
+                          </Button>
+                        ) : null}
+                      </span>
                     ) : (
                       <Button size="sm" variant="ghost" className="gap-1" onClick={() => send(setWageBandActive(b.id, !b.active), `${tradeLabel(b.tradeId)} · ${skillLabelOf(b.skill)} · ${experienceLabel(b.experience)}: switch ${b.active ? "off" : "on"}`)}>
                         <Power aria-hidden className="h-3.5 w-3.5" /> {b.active ? "Off" : "On"}

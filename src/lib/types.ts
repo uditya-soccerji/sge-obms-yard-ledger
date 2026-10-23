@@ -367,10 +367,13 @@ export interface WageChangeRequest {
   requestedBy: string;
   requestedByName: string;
   requestedAt: string;
-  status: "pending" | "approved" | "rejected";
+  /** withdrawn = the Admin pressed Undo (2026-10-24) */
+  status: "pending" | "approved" | "rejected" | "withdrawn";
   decidedBy?: string;
   decidedAt?: string;
   decidedNote?: string;
+  /** Owner / SA were alerted (after the Undo window) */
+  notified?: boolean;
 }
 
 export interface WageBand {

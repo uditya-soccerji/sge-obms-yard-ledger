@@ -1,5 +1,6 @@
 "use client";
 
+import { WAGE_UNDO_MS } from "../wage-requests";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { canCloseJob, canVoidExpense, JMS_FLOW, currentMonthOf, EXPENSE_CATEGORIES, entryDiffs, finalStage, isMonthClosed, jobJmsQty, lineStatus, nextJmsStatuses, nextJobNo, nextMonth, pickWorkOrder, round3, validMembers, woUsage } from "./logic";
 import { createEmptyWork, createWorkSeed, WORK_STORAGE_KEY, WORK_TODAY } from "./seed";
@@ -113,7 +114,7 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
   ref.current = work;
 
   // Who is acting (the viewed-as account when Super Admin uses "View as")
-  const { currentAccount, state: appState, fullState, applyDprAttendance, clearDprAttendance, raiseRequestsFromDpr } = useStore();
+  const { currentAccount, state: appState, fullState, applyDprAttendance, clearDprAttendance, raiseRequestsFromDpr, markWageChangesNotified } = useStore();
   const actor = React.useRef({ name: "System", role: null as RoleId | null, staffId: null as string | null, accountId: "", impersonatedBy: undefined as string | undefined });
   actor.current = {
     name: currentAccount?.name ?? "System",
@@ -193,6 +194,33 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
 
   // docs §24: a RIL pass within 10 days of expiry (or expired) alerts HR, Admin and the
   // labourer's supervisor once per pass — a new expiry date from the RIL upload alerts again
+  // 2026-10-24: a wage change alerts Owner / SA only after the Admin's Undo window, with the count waiting
+  const wageReqs = fullState.wageChangeRequests;
+  const markNotified = React.useRef(markWageChangesNotified);
+  markNotified.current = markWageChangesNotified;
+  useEffect(() => {
+    if (!hydrated) return;
+    const tick = () => {
+      const now = Date.now();
+      const due = wageReqs.filter((r) => r.status === "pending" && !r.notified && now - Date.parse(r.requestedAt) >= WAGE_UNDO_MS);
+      if (!due.length) return;
+      const waiting = wageReqs.filter((r) => r.status === "pending").length;
+      log({
+        kind: "wage_change_requested",
+        problem: true,
+        siteId: "",
+        title: `${waiting} wage change request${waiting === 1 ? "" : "s"} waiting for approval`,
+        detail: `New from ${[...new Set(due.map((r) => r.requestedByName))].join(", ")}: ${due.length} · Master Data → Daily wages`,
+        tab: "/master-data?sheet=wageBands",
+        refId: due.map((r) => r.id).join(","),
+      });
+      markNotified.current(due.map((r) => r.id));
+    };
+    tick();
+    const t = setInterval(tick, 10_000);
+    return () => clearInterval(t);
+  }, [hydrated, wageReqs, log]);
+
   const passLabourers = fullState.labourers;
   useEffect(() => {
     if (!hydrated) return;

@@ -175,6 +175,10 @@ interface StoreApi {
   addLeave: (input: Omit<LeaveEntry, "id" | "status" | "enteredBy" | "enteredAt">) => { ok: boolean; error?: string };
   /** Owner / SA approve or reject the Admin's daily-wage change (2026-10-24) */
   decideWageChange: (id: string, approve: boolean, note: string) => { ok: boolean; error?: string };
+  /** The Admin takes a waiting request back (Undo) */
+  withdrawWageChange: (id: string) => { ok: boolean; error?: string };
+  /** Mark requests as alerted to Owner / SA (after the Undo window) */
+  markWageChangesNotified: (ids: string[]) => void;
   decideLeave: (id: string, approve: boolean, note: string) => { ok: boolean; error?: string };
   /** Refuses a label that already exists (case-insensitive) */
   addTrade: (input: Omit<TradeDefinition, "id"> & { id?: string }) => { ok: boolean; error?: string; id?: string };
@@ -1297,6 +1301,24 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       return { ...next, auditLog: [makeAudit(next, "trades", approve ? "approve" : "reject", `Wage change ${r.tradeId} · ${r.skill} · ${r.experience} ${approve ? "approved" : "rejected"} (asked by ${r.requestedByName})${note.trim() ? ` · ${note.trim()}` : ""}`), ...s.auditLog] };
     });
     return { ok: true };
+  }, []);
+
+  const withdrawWageChange = useCallback((id: string) => {
+    const cur = stateRef.current;
+    const r = cur.wageChangeRequests.find((x) => x.id === id);
+    if (!r || r.status !== "pending") return { ok: false, error: "This request isn't waiting any more" };
+    const me = cur.currentUserId ?? cur.currentAccountId;
+    if (r.requestedBy !== me && cur.currentRole !== "super_admin") return { ok: false, error: "Only the person who asked can undo it" };
+    setState((s) => {
+      const next = { ...s, wageChangeRequests: s.wageChangeRequests.map((x) => (x.id === id ? { ...x, status: "withdrawn" as const, decidedAt: new Date().toISOString() } : x)) };
+      return { ...next, auditLog: [makeAudit(next, "trades", "withdraw", `Wage change ${r.tradeId} · ${r.skill} · ${r.experience} withdrawn by ${r.requestedByName}`), ...s.auditLog] };
+    });
+    return { ok: true };
+  }, []);
+
+  const markWageChangesNotified = useCallback((ids: string[]) => {
+    const set = new Set(ids);
+    setState((s) => ({ ...s, wageChangeRequests: s.wageChangeRequests.map((x) => (set.has(x.id) ? { ...x, notified: true } : x)) }));
   }, []);
 
   const upsertWageBand = useCallback(
@@ -2642,6 +2664,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       giveAdvance,
       addLeave,
       decideWageChange,
+      withdrawWageChange,
+      markWageChangesNotified,
       decideLeave,
       addStaff,
       updateStaff,
@@ -2717,6 +2741,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       giveAdvance,
       addLeave,
       decideWageChange,
+      withdrawWageChange,
+      markWageChangesNotified,
       decideLeave,
       addStaff,
       updateStaff,
