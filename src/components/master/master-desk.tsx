@@ -1,5 +1,6 @@
 "use client";
 
+import { Building2, BookOpen, CalendarCheck, Check, ClipboardList, Clock, HardHat, Hourglass, IndianRupee, Layers, ListChecks, MapPin, PaintBucket, Power, ReceiptIndianRupee, Ruler, Save, Send, ShieldCheck, Users, Wrench, X, type LucideIcon } from "lucide-react";
 import { CENTRAL_STORE, isCentralStore } from "@/lib/site-scope";
 import React, { createContext, useContext, useMemo, useState } from "react";
 import { BlurInput } from "@/components/shared/blur-input";
@@ -49,6 +50,31 @@ function uid(prefix: string) {
   return `${prefix}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
+/** An icon for every Master Data sheet, so each is easy to spot (2026-10-24) */
+const SHEET_ICON: Partial<Record<MasterSheetId, LucideIcon>> = {
+  sites: MapPin,
+  users: Users,
+  labourers: HardHat,
+  contractors: Building2,
+  trades: Wrench,
+  wageBands: IndianRupee,
+  dprTypes: ClipboardList,
+  activityTemplates: ListChecks,
+  units: Ruler,
+  materials: PaintBucket,
+  storeBooks: BookOpen,
+  fimStages: Layers,
+  rateBook: ReceiptIndianRupee,
+  safetyFormCodes: ShieldCheck,
+  shiftTypes: Clock,
+  attendanceStatuses: CalendarCheck,
+};
+
+/** Requests waiting for Owner / SA on each sheet (only Daily wages has requests today) */
+function waitingBySheet(state: { wageChangeRequests: WageChangeRequest[] }): Partial<Record<MasterSheetId, number>> {
+  return { wageBands: state.wageChangeRequests.filter((r) => r.status === "pending").length };
+}
+
 export function MasterDesk() {
   const params = useSearchParams();
   const router = useRouter();
@@ -81,24 +107,35 @@ export function MasterDesk() {
         }
       />
       <div className="flex flex-wrap gap-1 border-b border-[var(--sge-line)] pb-2">
-        {sheets.map((s) => (
-          <button
-            key={s.id}
-            type="button"
-            onClick={() => {
-              setDeskMsg(null);
-              router.replace(`/master-data?sheet=${s.id}`);
-            }}
-            className={cn(
-              "rounded-sm px-2.5 py-1.5 text-[11px] font-semibold uppercase tracking-[0.08em]",
-              s.id === sheet
-                ? "bg-[var(--sge-night)] text-[var(--sge-brass-wash)]"
-                : "bg-[var(--sge-paper-2)] text-[var(--sge-ink-2)] hover:bg-[var(--sge-brass-wash)]"
-            )}
-          >
-            {s.label}
-          </button>
-        ))}
+        {sheets.map((s) => {
+          const Icon = SHEET_ICON[s.id];
+          const waiting = waitingBySheet(state)[s.id] ?? 0;
+          return (
+            <button
+              key={s.id}
+              type="button"
+              title={waiting ? `${waiting} request${waiting === 1 ? "" : "s"} waiting for Owner / Super Admin` : s.hint}
+              onClick={() => {
+                setDeskMsg(null);
+                router.replace(`/master-data?sheet=${s.id}`);
+              }}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-sm px-2.5 py-1.5 text-[11px] font-semibold uppercase tracking-[0.08em]",
+                s.id === sheet
+                  ? "bg-[var(--sge-night)] text-[var(--sge-brass-wash)]"
+                  : "bg-[var(--sge-paper-2)] text-[var(--sge-ink-2)] hover:bg-[var(--sge-brass-wash)]"
+              )}
+            >
+              {Icon ? <Icon aria-hidden className="h-3.5 w-3.5 shrink-0" /> : null}
+              {s.label}
+              {waiting ? (
+                <span aria-label={`${waiting} waiting`} className="ml-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--sge-brass)] px-1 text-[10px] font-bold leading-none text-white">
+                  {waiting}
+                </span>
+              ) : null}
+            </button>
+          );
+        })}
       </div>
       <div className="flex flex-wrap items-end gap-3">
         <div>
@@ -1652,6 +1689,9 @@ function WageBandsSheet({ showInactive }: { showInactive: boolean }) {
   const isBoss = state.currentRole === "owner" || state.currentRole === "super_admin";
   const [decideNote, setDecideNote] = useState<Record<string, string>>({});
   const [info, setInfo] = useState<string | null>(null);
+  // The Request button turns green for a few seconds after each request is sent
+  const [sentAt, setSentAt] = useState(0);
+  const justSent = Date.now() - sentAt < 4000;
   const tradeLabel = (id: string) => state.tradeCatalogue.find((t) => t.id === id)?.label ?? id;
   const skillLabelOf = (id: string) => SKILL_LEVELS.find((x) => x.id === id)?.label ?? id;
   const describe = (r: WageChangeRequest) =>
@@ -1664,6 +1704,8 @@ function WageBandsSheet({ showInactive }: { showInactive: boolean }) {
     if (r.ok && r.requested) {
       notify({ kind: "wage_change_requested", problem: true, siteId: "", subjectStaffId: state.currentUserId ?? undefined, title: `Wage change to approve: ${what}`, detail: `Asked by ${state.users.find((u) => u.id === state.currentAccountId)?.name ?? "Admin"}`, tab: "/master-data?sheet=wageBands", refId: r.id });
       setInfo("Sent to the Owner / Super Admin — the rate changes when they approve.");
+      setSentAt(Date.now());
+      setTimeout(() => setSentAt(0), 4000);
       return;
     }
     setInfo(null);
@@ -1704,14 +1746,18 @@ function WageBandsSheet({ showInactive }: { showInactive: boolean }) {
           <div className="space-y-1.5">
             {pending.map((r) => (
               <div key={r.id} className="flex flex-wrap items-center gap-2 text-sm">
-                <span className="rounded-sm bg-[var(--sge-warn-wash)] px-1.5 text-[11px] font-semibold uppercase text-[var(--sge-warn)]">waiting</span>
+                <span className="inline-flex items-center gap-1 rounded-sm bg-[var(--sge-warn-wash)] px-1.5 text-[11px] font-semibold uppercase text-[var(--sge-warn)]"><Hourglass aria-hidden className="h-3 w-3" />waiting</span>
                 <span className="font-semibold">{describe(r)}</span>
                 <span className="text-xs text-[var(--sge-ink-3)]">by {r.requestedByName} · {r.requestedAt.slice(0, 10)}</span>
                 {isBoss ? (
                   <span className="ml-auto flex items-center gap-1">
                     <Input aria-label="Reason" className="h-8 w-44" placeholder="Reason (to reject)" value={decideNote[r.id] ?? ""} onChange={(e) => setDecideNote({ ...decideNote, [r.id]: e.target.value })} />
-                    <Button size="sm" variant="outline" onClick={() => decide(r, false)}>Reject</Button>
-                    <Button size="sm" onClick={() => decide(r, true)}>Approve</Button>
+                    <Button size="sm" className="gap-1 bg-[var(--sge-crit)] text-white hover:bg-[var(--sge-crit)]/90" onClick={() => decide(r, false)}>
+                      <X aria-hidden className="h-3.5 w-3.5" /> Reject
+                    </Button>
+                    <Button size="sm" className="gap-1 bg-[var(--sge-ok)] text-white hover:bg-[var(--sge-ok)]/90" onClick={() => decide(r, true)}>
+                      <Check aria-hidden className="h-3.5 w-3.5" /> Approve
+                    </Button>
                   </span>
                 ) : null}
               </div>
@@ -1766,7 +1812,20 @@ function WageBandsSheet({ showInactive }: { showInactive: boolean }) {
           <Input className="mt-1" type="number" min={1} value={dailyWage} onChange={(e) => setDailyWage(e.target.value)} />
         </div>
         <div className="flex items-end">
-          <Button size="sm" type="submit">{isAdmin ? "Request change" : "Save rate"}</Button>
+          {isAdmin ? (
+            <Button
+              size="sm"
+              type="submit"
+              className={cn("gap-1.5 text-white", justSent ? "bg-[var(--sge-ok)] hover:bg-[var(--sge-ok)]" : "bg-[var(--sge-brass)] hover:bg-[var(--sge-brass-ink)]")}
+            >
+              {justSent ? <Check aria-hidden className="h-4 w-4" /> : <Send aria-hidden className="h-4 w-4" />}
+              {justSent ? "Request sent" : "Request change"}
+            </Button>
+          ) : (
+            <Button size="sm" type="submit" className="gap-1.5">
+              <Save aria-hidden className="h-4 w-4" /> Save rate
+            </Button>
+          )}
         </div>
       </form>
       <div className="max-h-[480px] overflow-auto">
@@ -1784,14 +1843,15 @@ function WageBandsSheet({ showInactive }: { showInactive: boolean }) {
             {rows.map((b) => {
               const trade = state.tradeCatalogue.find((t) => t.id === b.tradeId);
               return (
-                <tr key={b.id} className={cn("border-t border-[var(--sge-line)]", !b.active && "opacity-50")}>
+                <tr key={b.id} className={cn("border-t border-[var(--sge-line)]", !b.active && "opacity-50", waitingFor(b.id) && "bg-[var(--sge-warn-wash)]")}>
                   <td className="py-1.5">{trade?.label ?? b.tradeId}</td>
                   <td>{SKILL_LEVELS.find((s) => s.id === b.skill)?.label ?? b.skill}</td>
                   <td title={EXPERIENCE_LEVELS.find((e) => e.id === b.experience)?.hint}>{experienceLabel(b.experience)}</td>
                   <td className="text-right tabular-nums">
                     <div className="flex items-center justify-end gap-2">
                       {waitingFor(b.id) ? (
-                        <span className="whitespace-nowrap rounded-sm bg-[var(--sge-warn-wash)] px-1.5 text-[11px] font-semibold text-[var(--sge-warn)]" title={`Waiting for Owner / SA · asked by ${waitingFor(b.id)!.requestedByName}`}>
+                        <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-sm bg-[var(--sge-paper)] px-1.5 text-[11px] font-semibold text-[var(--sge-warn)] ring-1 ring-[var(--sge-warn)]/40" title={`Waiting for Owner / SA · asked by ${waitingFor(b.id)!.requestedByName}`}>
+                          <Hourglass aria-hidden className="h-3 w-3" />
                           waiting {waitingFor(b.id)!.active !== undefined ? (waitingFor(b.id)!.active ? "on" : "off") : `₹${waitingFor(b.id)!.toWage}`}
                         </span>
                       ) : null}
@@ -1800,16 +1860,23 @@ function WageBandsSheet({ showInactive }: { showInactive: boolean }) {
                         key={`${b.id}-${waitingFor(b.id)?.id ?? ""}`}
                         type="number"
                         min={1}
-                        className="w-24 text-right"
+                        className={cn("w-24 text-right", waitingFor(b.id) && "border-[var(--sge-warn)]")}
                         value={String(b.dailyWage)}
                         onSave={(v) => send(upsertWageBand({ ...b, dailyWage: Number(v) || 0 }), `${tradeLabel(b.tradeId)} · ${skillLabelOf(b.skill)} · ${experienceLabel(b.experience)}: ₹${b.dailyWage} → ₹${v}`)}
                       />
                     </div>
                   </td>
                   <td className="text-right">
-                    <Button size="sm" variant="ghost" onClick={() => send(setWageBandActive(b.id, !b.active), `${tradeLabel(b.tradeId)} · ${skillLabelOf(b.skill)} · ${experienceLabel(b.experience)}: switch ${b.active ? "off" : "on"}`)}>
-                      {b.active ? "Off" : "On"}
-                    </Button>
+                    {isAdmin && waitingFor(b.id) ? (
+                      // A request is waiting: the action shows that, in amber, until Owner / SA decide
+                      <Button size="sm" disabled className="gap-1 bg-[var(--sge-brass)] text-white opacity-100 disabled:opacity-100">
+                        <Hourglass aria-hidden className="h-3.5 w-3.5" /> Requested
+                      </Button>
+                    ) : (
+                      <Button size="sm" variant="ghost" className="gap-1" onClick={() => send(setWageBandActive(b.id, !b.active), `${tradeLabel(b.tradeId)} · ${skillLabelOf(b.skill)} · ${experienceLabel(b.experience)}: switch ${b.active ? "off" : "on"}`)}>
+                        <Power aria-hidden className="h-3.5 w-3.5" /> {b.active ? "Off" : "On"}
+                      </Button>
+                    )}
                   </td>
                 </tr>
               );
