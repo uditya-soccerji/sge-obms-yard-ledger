@@ -342,3 +342,29 @@ The owner is reworking every role's access, starting at the labourer and moving 
 - The Owner and Super Admin have **every tab and every right**. Anything added later is theirs automatically: `effectivePermission` returns true for both roles, and their Operations strip is every tab any role has (`ALL_PILLS` in `lib/desk.ts`). Don't add a feature without checking it isn't gated by a role-name list that leaves them out.
 - Still Super Admin only: **View as** (acting as another login) — to confirm with the owner.
 
+## 29. Daily wages: Admin requests, Owner / SA approve (decided 2026-10-24)
+- On Master Data → **Daily wages** the Admin can change a rate, add a new one, or switch one on / off — each is saved as a **request**, and the rate changes **only when the Owner or Super Admin approves** (reject needs a reason). One waiting request per rate.
+- Owner / SA see the waiting requests on the same page and an alert; the Admin sees "waiting ₹…" next to the rate and is told the outcome. Owner / SA edits still apply straight away. Every request and decision is in the audit log with who asked and who decided.
+- **Undo (2026-10-24):** after sending, the Admin can **Undo** a waiting request (on the rate's row and in the list); it leaves the Owner's list and count. Owner / SA are alerted only after a **60-second Undo window**, in one alert carrying the count ("N wage change requests waiting"). An undone request never alerts anyone. Master Data sheet buttons show icons and a count of requests waiting on that sheet.
+- **2026-10-24:** the requests list sits behind a **"Wage change requests"** button with the waiting count; it opens 50 per page (Previous / Next), waiting first, each with date and time asked / decided. The **form on an existing trade × skill × experience edits that rate** (a request for the Admin) instead of stopping with "already has a rate".
+- **2026-10-24:** the **Master Data** tab in the top bar shows the waiting count. Open tabs in the same browser now update each other at once (requests, counts, bell), and each tab keeps its own sign-in. **Across different phones/PCs this still needs the shared database** — Daily wages and its requests are saved on the device until they move there.
+- **2026-10-24:** the Owner / Super Admin bell opens with **Problems only ticked**; unticking is remembered for that login. The Admin gets a **green "N new" count** for approved / rejected requests they haven't seen (also on Daily wages and Master Data). The bell alert opens Daily wages with the requests list open, and the new decisions are **highlighted** (green approved, red rejected, NEW tag).
+- **2026-10-24 — own actions:** what you did yourself never counts as unread on your bell.
+- **2026-10-24 — same flow on Trades, Rate book / PO, Materials, Units:** the Admin's edits there are requests too (Undo 60 s, then Owner / SA alerted with the count; approve replays the edit, reject needs a reason; the Admin gets "N new", highlight, bell → list). Counts on each sheet button and on Master Data.
+- **2026-10-24 — counts on every role's tabs** (icons on every tab; the number = what waits for *that* role, same site filter as the page; Owner / SA see every role's queue added up):
+
+| Tab | Counts | Role |
+|---|---|---|
+| Approvals | DPRs submitted | SIC, Admin |
+| DPR | my DPR sent back | the submitter |
+| Crews | asks to release a labourer from my crew / released, waiting approval | giving supervisor / SIC |
+| Requests | open, accepted or being filled / store rejected / filled, confirm receipt | Store / SIC / the asker |
+| Equipment | returns with the store | Store |
+| Leave | leave asked for | HR |
+| Observations | fixed, to close (Owner / SA: open too) | Safety |
+| Finance | alerts not acknowledged | Finance |
+| Vendor bills | unpaid, due today or overdue | Finance |
+| JMS | waiting for the Admin's RIL no. and amount | Admin |
+| Work (top) | JMS to confirm / job ready to close | SIC / supervisor |
+| Master Data (top) | change requests waiting (+ Admin: new decisions) | Owner / SA, Admin |
+

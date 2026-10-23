@@ -59,6 +59,10 @@ import type {
   VendorBill,
   AdvanceGiven,
   LeaveEntry,
+  WageChangeRequest,
+  MasterChangeRequest,
+  MasterRequestOp,
+  MasterRequestSheet,
   CrewRequest,
   AcplPunchRow,
   AcplResolveStatus,
@@ -172,6 +176,18 @@ interface StoreApi {
   giveAdvance: (input: { labourerId: string; date: string; amount: number; note?: string }) => { ok: boolean; error?: string };
   /** HR leave register (round 2, §27) */
   addLeave: (input: Omit<LeaveEntry, "id" | "status" | "enteredBy" | "enteredAt">) => { ok: boolean; error?: string };
+  /** Owner / SA approve or reject the Admin's daily-wage change (2026-10-24) */
+  decideWageChange: (id: string, approve: boolean, note: string) => { ok: boolean; error?: string };
+  /** The Admin takes a waiting request back (Undo) */
+  withdrawWageChange: (id: string) => { ok: boolean; error?: string };
+  /** Owner / SA approve (runs the Admin's edit) or reject (reason needed) a Master Data request */
+  decideMasterChange: (id: string, approve: boolean, note: string) => Promise<{ ok: boolean; error?: string }>;
+  withdrawMasterChange: (id: string) => { ok: boolean; error?: string };
+  markMasterChanges: (ids: string[], patch: { notified?: boolean; seenByRequester?: boolean }) => void;
+  /** Mark requests as alerted to Owner / SA (after the Undo window) */
+  markWageChangesNotified: (ids: string[]) => void;
+  /** The Admin has seen these decisions (clears their "new" count) */
+  markWageDecisionsSeen: (ids: string[]) => void;
   decideLeave: (id: string, approve: boolean, note: string) => { ok: boolean; error?: string };
   /** Refuses a label that already exists (case-insensitive) */
   addTrade: (input: Omit<TradeDefinition, "id"> & { id?: string }) => { ok: boolean; error?: string; id?: string };
@@ -346,6 +362,8 @@ function migrateState(parsed: Partial<AppState>): AppState {
     vendorBills: parsed.vendorBills ?? [],
     advances: parsed.advances ?? [],
     leaves: parsed.leaves ?? [],
+    wageChangeRequests: parsed.wageChangeRequests ?? [],
+    masterChangeRequests: parsed.masterChangeRequests ?? [],
     attendance: (parsed.attendance ?? seed.attendance).map((a) =>
       (a.status as string) === "off" ? { ...a, status: "weekly_off" as const } : a
     ),
@@ -403,6 +421,20 @@ function migrateState(parsed: Partial<AppState>): AppState {
   };
 }
 
+/** Who is signed in and which site — kept per browser tab (2026-10-24) */
+const TAB_SESSION_KEY = "sge-obms-tab-session";
+function tabSession(s: AppState): Partial<AppState> {
+  return {
+    currentRole: s.currentRole,
+    currentUserId: s.currentUserId,
+    currentAccountId: s.currentAccountId,
+    impersonatorAccountId: s.impersonatorAccountId,
+    impersonatorSnapshot: s.impersonatorSnapshot,
+    currentSiteId: s.currentSiteId,
+    entrySiteId: s.entrySiteId,
+  };
+}
+
 export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [state, setState] = useState<AppState>(createSeedState);
   const [hydrated, setHydrated] = useState(false);
@@ -414,7 +446,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw) as Partial<AppState>;
-        setState(migrateState(parsed));
+        // This tab's own sign-in survives a reload even if another tab signed in as someone else
+        const mine = sessionStorage.getItem(TAB_SESSION_KEY);
+        setState({ ...migrateState(parsed), ...(mine ? (JSON.parse(mine) as Partial<AppState>) : {}) });
       }
     } catch {
       // Keep seed, but never let it overwrite saved data we failed to read: keep a copy
@@ -428,9 +462,39 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     setHydrated(true);
   }, []);
 
+  // 2026-10-24: a change saved in another tab (e.g. Admin's wage request) shows here at once.
+  // Who is signed in and which site stay this tab's own; the incoming copy isn't written back (no ping-pong).
+  const fromOtherTab = React.useRef(false);
+  useEffect(() => {
+    const onStorage = (e: StorageEvent) => {
+      if (e.key !== STORAGE_KEY || !e.newValue) return;
+      try {
+        const incoming = migrateState(JSON.parse(e.newValue) as Partial<AppState>);
+        fromOtherTab.current = true;
+        setState((s) => ({ ...incoming, ...tabSession(s) }));
+      } catch {
+        /* unreadable copy — keep ours */
+      }
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
+
   useEffect(() => {
     if (!hydrated) return;
+    if (fromOtherTab.current) {
+      fromOtherTab.current = false;
+      return;
+    }
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  }, [state, hydrated]);
+  useEffect(() => {
+    if (!hydrated) return;
+    try {
+      sessionStorage.setItem(TAB_SESSION_KEY, JSON.stringify(tabSession(state)));
+    } catch {
+      /* blocked */
+    }
   }, [state, hydrated]);
 
   // Merge plan Step 10: data under older keys is never read again — clear it out
@@ -1175,6 +1239,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         superseded?: boolean;
       }
     ) => {
+      const was = input.id ? stateRef.current.rateLines.find((r) => r.id === input.id) : undefined;
+      const asked = gateMaster("rateBook", "upsertRateLine", [input], `Rate ${input.itemKey} ₹${input.rateInr}/${input.uom} PO ${input.poNumber}${input.superseded && !was?.superseded ? " — supersede" : was ? " — edit" : " — new"}`);
+      if (asked) return asked.id;
       const id = input.id ?? uid("rl");
       setState((s) => {
         if (!can(s, "rates", input.id ? "update" : "create") && !can(s, "master", "update")) return s;
@@ -1217,6 +1284,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     }
     const changes = describeChanges(before, patch);
     if (!changes) return { ok: true };
+    const asked = gateMaster("trades", "updateTrade", [id, patch], `Trade ${before.label}: ${changes}`);
+    if (asked) return asked;
     setState((s) => {
       const next = { ...s, tradeCatalogue: s.tradeCatalogue.map((t) => (t.id === id ? { ...t, ...patch } : t)) };
       return { ...next, auditLog: [makeAudit(next, "trades", "update", `Trade ${before.label}: ${changes}`), ...s.auditLog] };
@@ -1235,6 +1304,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const label = input.label.trim();
       if (!label) return { ok: false, error: "Trade name is required" };
       if (cur.tradeCatalogue.some((t) => t.label.trim().toLowerCase() === label.toLowerCase())) return { ok: false, error: "Trade already exists" };
+      const asked = gateMaster("trades", "addTrade", [input], `New trade ${label}`);
+      if (asked) return asked;
       // A taken slug gets -2, -3, …
       let id = input.id ?? (slug || uid("trade"));
       for (let n = 2; cur.tradeCatalogue.some((t) => t.id === id); n++) id = `${slug || "trade"}-${n}`;
@@ -1253,6 +1324,86 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     []
   );
 
+  /** 2026-10-24: the Admin's edit on Trades / Rate book / Materials / Units becomes a request; approval replays it */
+  const gateMaster = (sheet: MasterRequestSheet, op: MasterRequestOp, args: unknown[], summary: string) => {
+    const cur = stateRef.current;
+    if (cur.currentRole !== "admin") return null;
+    const account = cur.users.find((u) => u.id === cur.currentAccountId);
+    const id = uid("mcr");
+    setState((s) => {
+      const req: MasterChangeRequest = { id, sheet, op, args, summary, requestedBy: s.currentUserId ?? s.currentAccountId ?? "admin", requestedByName: account?.name || account?.username || "Admin", requestedAt: new Date().toISOString(), status: "pending" };
+      const next = { ...s, masterChangeRequests: [req, ...s.masterChangeRequests] };
+      return { ...next, auditLog: [makeAudit(next, "master", "request", `Change requested: ${summary}`), ...s.auditLog] };
+    });
+    return { ok: true as const, id, requested: true as const };
+  };
+
+  /** Queue the Admin's wage change for Owner / SA (2026-10-24); one waiting request per rate */
+  const requestWageChange = (cur: AppState, input: Omit<WageChangeRequest, "id" | "requestedBy" | "requestedByName" | "requestedAt" | "status">) => {
+    const same = (r: WageChangeRequest) =>
+      r.status === "pending" && (input.bandId ? r.bandId === input.bandId : !r.bandId && r.tradeId === input.tradeId && r.skill === input.skill && r.experience === input.experience);
+    if (cur.wageChangeRequests.some(same)) return { ok: false as const, error: "A change for this rate is already waiting for the Owner / Super Admin" };
+    const account = cur.users.find((u) => u.id === cur.currentAccountId);
+    const id = uid("wcr");
+    setState((s) => {
+      const req: WageChangeRequest = { ...input, id, requestedBy: s.currentUserId ?? s.currentAccountId ?? "admin", requestedByName: account?.name || account?.username || "Admin", requestedAt: new Date().toISOString(), status: "pending" };
+      const next = { ...s, wageChangeRequests: [req, ...s.wageChangeRequests] };
+      const what = input.active !== undefined ? (input.active ? "switch on" : "switch off") : input.fromWage != null ? `₹${input.fromWage} → ₹${input.toWage}` : `new ₹${input.toWage}`;
+      return { ...next, auditLog: [makeAudit(next, "trades", "request", `Wage change requested: ${input.tradeId} · ${input.skill} · ${input.experience} ${what}`), ...s.auditLog] };
+    });
+    return { ok: true as const, id, requested: true as const };
+  };
+
+  const decideWageChange = useCallback((id: string, approve: boolean, note: string) => {
+    const cur = stateRef.current;
+    if (cur.currentRole !== "owner" && cur.currentRole !== "super_admin") return { ok: false, error: "Only the Owner or Super Admin decides wage changes" };
+    const r = cur.wageChangeRequests.find((x) => x.id === id);
+    if (!r || r.status !== "pending") return { ok: false, error: "This request isn't waiting" };
+    if (!approve && !note.trim()) return { ok: false, error: "Give a reason so the Admin knows why" };
+    if (approve && r.bandId && !cur.wageBands.some((b) => b.id === r.bandId)) return { ok: false, error: "That rate no longer exists" };
+    if (approve && !r.bandId && cur.wageBands.some((b) => b.tradeId === r.tradeId && b.skill === r.skill && b.experience === r.experience)) {
+      return { ok: false, error: "A rate for this trade × skill × experience was added meanwhile — reject this one" };
+    }
+    setState((s) => {
+      const now = new Date().toISOString();
+      let wageBands = s.wageBands;
+      if (approve) {
+        if (!r.bandId) wageBands = [...wageBands, { id: uid("wb"), tradeId: r.tradeId, skill: r.skill, experience: r.experience, dailyWage: r.toWage!, active: true }];
+        else wageBands = wageBands.map((b) => (b.id !== r.bandId ? b : r.active !== undefined ? { ...b, active: r.active } : { ...b, dailyWage: r.toWage! }));
+      }
+      const wageChangeRequests = s.wageChangeRequests.map((x) =>
+        x.id === id ? { ...x, status: approve ? ("approved" as const) : ("rejected" as const), decidedBy: s.currentUserId ?? s.currentAccountId ?? undefined, decidedAt: now, decidedNote: note.trim() || undefined } : x
+      );
+      const next = { ...s, wageBands, wageChangeRequests };
+      return { ...next, auditLog: [makeAudit(next, "trades", approve ? "approve" : "reject", `Wage change ${r.tradeId} · ${r.skill} · ${r.experience} ${approve ? "approved" : "rejected"} (asked by ${r.requestedByName})${note.trim() ? ` · ${note.trim()}` : ""}`), ...s.auditLog] };
+    });
+    return { ok: true };
+  }, []);
+
+  const withdrawWageChange = useCallback((id: string) => {
+    const cur = stateRef.current;
+    const r = cur.wageChangeRequests.find((x) => x.id === id);
+    if (!r || r.status !== "pending") return { ok: false, error: "This request isn't waiting any more" };
+    const me = cur.currentUserId ?? cur.currentAccountId;
+    if (r.requestedBy !== me && cur.currentRole !== "super_admin") return { ok: false, error: "Only the person who asked can undo it" };
+    setState((s) => {
+      const next = { ...s, wageChangeRequests: s.wageChangeRequests.map((x) => (x.id === id ? { ...x, status: "withdrawn" as const, decidedAt: new Date().toISOString() } : x)) };
+      return { ...next, auditLog: [makeAudit(next, "trades", "withdraw", `Wage change ${r.tradeId} · ${r.skill} · ${r.experience} withdrawn by ${r.requestedByName}`), ...s.auditLog] };
+    });
+    return { ok: true };
+  }, []);
+
+  const markWageDecisionsSeen = useCallback((ids: string[]) => {
+    if (!ids.length) return;
+    const set = new Set(ids);
+    setState((s) => ({ ...s, wageChangeRequests: s.wageChangeRequests.map((x) => (set.has(x.id) ? { ...x, seenByRequester: true } : x)) }));
+  }, []);
+
+  const markWageChangesNotified = useCallback((ids: string[]) => {
+    const set = new Set(ids);
+    setState((s) => ({ ...s, wageChangeRequests: s.wageChangeRequests.map((x) => (set.has(x.id) ? { ...x, notified: true } : x)) }));
+  }, []);
+
   const upsertWageBand = useCallback(
     (input: Omit<WageBand, "id" | "active"> & { id?: string; active?: boolean }) => {
       const cur = stateRef.current;
@@ -1269,7 +1420,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           b.skill === input.skill &&
           b.experience === input.experience
       );
-      if (clash) return { ok: false, error: "That trade × skill × experience already has a rate" };
+      if (clash) {
+        if (input.id) return { ok: false, error: "That trade × skill × experience already has a rate" };
+        // 2026-10-24: the form on an existing trade × skill × experience edits that rate (no "already has a rate" stop)
+        if (clash.dailyWage === dailyWage) return { ok: false, error: `${input.tradeId} · ${input.skill} · ${input.experience} is already ₹${dailyWage} — nothing to change` };
+        input = { ...input, id: clash.id, active: clash.active };
+      }
+      // Owner rule (2026-10-24): the Admin's change is a request; the rate changes only when Owner / SA approve
+      if (cur.currentRole === "admin") {
+        const before = input.id ? cur.wageBands.find((b) => b.id === input.id) : undefined;
+        if (before && before.dailyWage === dailyWage) return { ok: true, id: before.id };
+        return requestWageChange(cur, { bandId: before?.id, tradeId: input.tradeId, skill: input.skill, experience: input.experience, fromWage: before?.dailyWage, toWage: dailyWage });
+      }
       const id = input.id ?? uid("wb");
       const row: WageBand = {
         id,
@@ -1302,6 +1464,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     if (!can(cur, "trades", "update") && !can(cur, "master", "update")) return DENIED;
     const before = cur.wageBands.find((b) => b.id === id);
     if (!before) return { ok: false, error: "Wage row not found" };
+    if (cur.currentRole === "admin") {
+      return requestWageChange(cur, { bandId: id, tradeId: before.tradeId, skill: before.skill, experience: before.experience, fromWage: before.dailyWage, active });
+    }
     setState((s) => {
       const next = { ...s, wageBands: s.wageBands.map((b) => (b.id === id ? { ...b, active } : b)) };
       return {
@@ -1885,6 +2050,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     ) => {
       const id = row.id || uid("cat");
       if (!can(stateRef.current, "master", "update")) return DENIED;
+      if (sheet === "units") {
+        const was = (stateRef.current.masterCatalog.units as CatalogItem[]).find((r) => r.id === row.id);
+        const asked = gateMaster("units", "upsertCatalogItem", [sheet, row], `Unit ${row.code}${was ? `: ${describeChanges(was, row) || "no change"}` : " — new"}`);
+        if (asked) return asked;
+      }
       const next = { ...row, id };
       const saved = await remoteSaveMaster(sheet, next);
       if (!saved.ok) return saved;
@@ -1918,6 +2088,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const upsertMaterial = useCallback(async (row: MaterialItem) => {
     const id = row.id || uid("mat");
     if (!can(stateRef.current, "master", "update")) return DENIED;
+    {
+      const was = stateRef.current.masterCatalog.materials.find((m) => m.id === row.id);
+      const asked = gateMaster("materials", "upsertMaterial", [row], `Material ${row.code}${was ? `: ${describeChanges(was, row) || "no change"}` : " — new"}`);
+      if (asked) return asked;
+    }
     const next = { ...row, id };
     const saved = await remoteSaveMaster("materials", next);
     if (!saved.ok) return saved;
@@ -1952,6 +2127,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         stateRef.current.masterCatalog[sheet] as (CatalogItem | Contractor | MaterialItem)[]
       ).find((r) => r.id === id);
       if (!row) return { ok: false, error: "Row not found" };
+      if (sheet === "units" || sheet === "materials") {
+        const asked = gateMaster(sheet, "setCatalogActive", [sheet, id, active], `${sheet === "units" ? "Unit" : "Material"} ${row.code}: switch ${active ? "on" : "off"}`);
+        if (asked) return asked;
+      }
       const saved = await remoteSaveMaster(sheet, { ...row, active });
       if (!saved.ok) return saved;
       setState((s) => {
@@ -1969,6 +2148,48 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     },
     []
   );
+
+  // Approval replays the Admin's edit through the same action, as the Owner / SA
+  const masterOps = React.useRef<Record<MasterRequestOp, (...a: never[]) => unknown>>(null as never);
+  masterOps.current = { updateTrade, addTrade, upsertRateLine, upsertMaterial, setCatalogActive, upsertCatalogItem } as never;
+
+  const decideMasterChange = useCallback(async (id: string, approve: boolean, note: string) => {
+    const cur = stateRef.current;
+    if (cur.currentRole !== "owner" && cur.currentRole !== "super_admin") return { ok: false, error: "Only the Owner or Super Admin decides these changes" };
+    const r = cur.masterChangeRequests.find((x) => x.id === id);
+    if (!r || r.status !== "pending") return { ok: false, error: "This request isn't waiting any more" };
+    if (!approve && !note.trim()) return { ok: false, error: "Give a reason so the Admin knows why" };
+    if (approve) {
+      const res = await (masterOps.current[r.op] as (...a: unknown[]) => unknown)(...r.args);
+      // upsertRateLine returns the id; the rest return { ok, error }
+      if (res && typeof res === "object" && "ok" in res && !(res as { ok: boolean }).ok) return res as { ok: boolean; error?: string };
+    }
+    setState((s) => {
+      const me = s.currentUserId ?? s.currentAccountId ?? "";
+      const next = { ...s, masterChangeRequests: s.masterChangeRequests.map((x) => (x.id === id ? { ...x, status: approve ? ("approved" as const) : ("rejected" as const), decidedBy: me, decidedAt: new Date().toISOString(), decidedNote: note.trim() || undefined } : x)) };
+      return { ...next, auditLog: [makeAudit(next, "master", approve ? "approve" : "reject", `${approve ? "Approved" : "Rejected"}: ${r.summary}${note.trim() ? ` — ${note.trim()}` : ""}`), ...s.auditLog] };
+    });
+    return { ok: true };
+  }, []);
+
+  const withdrawMasterChange = useCallback((id: string) => {
+    const cur = stateRef.current;
+    const r = cur.masterChangeRequests.find((x) => x.id === id);
+    if (!r || r.status !== "pending") return { ok: false, error: "This request isn't waiting any more" };
+    const me = cur.currentUserId ?? cur.currentAccountId;
+    if (r.requestedBy !== me && cur.currentRole !== "super_admin") return { ok: false, error: "Only the person who asked can undo it" };
+    setState((s) => {
+      const next = { ...s, masterChangeRequests: s.masterChangeRequests.map((x) => (x.id === id ? { ...x, status: "withdrawn" as const, decidedAt: new Date().toISOString() } : x)) };
+      return { ...next, auditLog: [makeAudit(next, "master", "withdraw", `Withdrawn by ${r.requestedByName}: ${r.summary}`), ...s.auditLog] };
+    });
+    return { ok: true };
+  }, []);
+
+  const markMasterChanges = useCallback((ids: string[], patch: { notified?: boolean; seenByRequester?: boolean }) => {
+    if (!ids.length) return;
+    const set = new Set(ids);
+    setState((s) => ({ ...s, masterChangeRequests: s.masterChangeRequests.map((x) => (set.has(x.id) ? { ...x, ...patch } : x)) }));
+  }, []);
 
   const upsertSite = useCallback(async (input: AppState["sites"][number]) => {
     if (!can(stateRef.current, "master", "update")) return DENIED;
@@ -2586,6 +2807,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       payVendorBill,
       giveAdvance,
       addLeave,
+      decideWageChange,
+      withdrawWageChange,
+      markWageChangesNotified,
+      markWageDecisionsSeen,
+      decideMasterChange,
+      withdrawMasterChange,
+      markMasterChanges,
       decideLeave,
       addStaff,
       updateStaff,
@@ -2660,6 +2888,13 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       payVendorBill,
       giveAdvance,
       addLeave,
+      decideWageChange,
+      withdrawWageChange,
+      markWageChangesNotified,
+      markWageDecisionsSeen,
+      decideMasterChange,
+      withdrawMasterChange,
+      markMasterChanges,
       decideLeave,
       addStaff,
       updateStaff,

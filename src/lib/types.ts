@@ -352,6 +352,56 @@ export type ExperienceLevel = "junior" | "experienced" | "senior";
  * Owner / Super Admin / Admin maintain the table; the labourer's wageDaily
  * is what attendance and P&L actually use (may be overridden).
  */
+/** Master Data sheets where the Admin's edits are requests for Owner / Super Admin (2026-10-24) */
+export type MasterRequestSheet = "trades" | "rateBook" | "materials" | "units";
+/** The store action that runs when the request is approved */
+export type MasterRequestOp = "updateTrade" | "addTrade" | "upsertRateLine" | "upsertMaterial" | "setCatalogActive" | "upsertCatalogItem";
+
+/** Admin's change on Trades / Rate book / Materials / Units, waiting for Owner / Super Admin (2026-10-24) */
+export interface MasterChangeRequest {
+  id: string;
+  sheet: MasterRequestSheet;
+  op: MasterRequestOp;
+  /** The exact arguments the Admin's edit used; approval replays them */
+  args: unknown[];
+  summary: string;
+  requestedBy: string;
+  requestedByName: string;
+  requestedAt: string;
+  status: "pending" | "approved" | "rejected" | "withdrawn";
+  decidedBy?: string;
+  decidedAt?: string;
+  decidedNote?: string;
+  notified?: boolean;
+  seenByRequester?: boolean;
+}
+
+/** Admin's change to a daily wage rate, waiting for Owner / Super Admin (owner, 2026-10-24) */
+export interface WageChangeRequest {
+  id: string;
+  /** The rate being changed; unset for a new trade × skill × experience rate */
+  bandId?: string;
+  tradeId: string;
+  skill: SkillLevel;
+  experience: ExperienceLevel;
+  fromWage?: number;
+  toWage?: number;
+  /** Switch the rate on / off instead of changing the amount */
+  active?: boolean;
+  requestedBy: string;
+  requestedByName: string;
+  requestedAt: string;
+  /** withdrawn = the Admin pressed Undo (2026-10-24) */
+  status: "pending" | "approved" | "rejected" | "withdrawn";
+  decidedBy?: string;
+  decidedAt?: string;
+  decidedNote?: string;
+  /** Owner / SA were alerted (after the Undo window) */
+  notified?: boolean;
+  /** The Admin who asked has seen the decision (2026-10-24) */
+  seenByRequester?: boolean;
+}
+
 export interface WageBand {
   id: string;
   tradeId: string;
@@ -836,6 +886,9 @@ export interface AppState {
   advances: AdvanceGiven[];
   /** HR (round 2, §27) */
   leaves: LeaveEntry[];
+  /** Admin's daily-wage changes waiting for Owner / SA (2026-10-24) */
+  wageChangeRequests: WageChangeRequest[];
+  masterChangeRequests: MasterChangeRequest[];
   /** One master store — load once, resolve site-then-company in memory. */
   masterCatalog: MasterCatalog;
 }

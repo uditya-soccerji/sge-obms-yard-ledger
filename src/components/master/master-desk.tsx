@@ -1,7 +1,10 @@
 "use client";
 
+import { changeBadgeCount, sheetBadgeCount, unseenWageDecisions, WAGE_REQUESTS_TAB, WAGE_UNDO_MS, wageBadgeCount } from "@/lib/wage-requests";
+import { ChangeRequestsPanel } from "./change-requests";
+import { Building2, BookOpen, CalendarCheck, Check, ClipboardList, Clock, HardHat, Hourglass, IndianRupee, Layers, ListChecks, MapPin, PaintBucket, Power, ReceiptIndianRupee, Ruler, Save, Send, ShieldCheck, Undo2, Users, Wrench, X, type LucideIcon } from "lucide-react";
 import { CENTRAL_STORE, isCentralStore } from "@/lib/site-scope";
-import React, { createContext, useContext, useMemo, useState } from "react";
+import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { BlurInput } from "@/components/shared/blur-input";
 import { normalizeEp } from "@/lib/ep";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -33,7 +36,7 @@ import { ExcelTransfer } from "./excel-transfer";
 import { canExcelTransfer } from "@/lib/excel-io";
 import { entrySiteId } from "@/lib/site-scope";
 import { checkSeat, checkSites, MIN_PASSWORD } from "@/lib/users";
-import type { StaffMember } from "@/lib/types";
+import type { StaffMember, WageChangeRequest } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 type ScopeFilter = "site" | "company" | "all";
@@ -47,6 +50,37 @@ function useReport() {
 
 function uid(prefix: string) {
   return `${prefix}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+/** An icon for every Master Data sheet, so each is easy to spot (2026-10-24) */
+const SHEET_ICON: Partial<Record<MasterSheetId, LucideIcon>> = {
+  sites: MapPin,
+  users: Users,
+  labourers: HardHat,
+  contractors: Building2,
+  trades: Wrench,
+  wageBands: IndianRupee,
+  dprTypes: ClipboardList,
+  activityTemplates: ListChecks,
+  units: Ruler,
+  materials: PaintBucket,
+  storeBooks: BookOpen,
+  fimStages: Layers,
+  rateBook: ReceiptIndianRupee,
+  safetyFormCodes: ShieldCheck,
+  shiftTypes: Clock,
+  attendanceStatuses: CalendarCheck,
+};
+
+/** Requests waiting for Owner / SA on each sheet (only Daily wages has requests today) */
+function waitingBySheet(state: Parameters<typeof changeBadgeCount>[0]): Partial<Record<MasterSheetId, number>> {
+  return {
+    wageBands: wageBadgeCount(state),
+    trades: sheetBadgeCount(state, "trades"),
+    rateBook: sheetBadgeCount(state, "rateBook"),
+    materials: sheetBadgeCount(state, "materials"),
+    units: sheetBadgeCount(state, "units"),
+  };
 }
 
 export function MasterDesk() {
@@ -81,24 +115,35 @@ export function MasterDesk() {
         }
       />
       <div className="flex flex-wrap gap-1 border-b border-[var(--sge-line)] pb-2">
-        {sheets.map((s) => (
-          <button
-            key={s.id}
-            type="button"
-            onClick={() => {
-              setDeskMsg(null);
-              router.replace(`/master-data?sheet=${s.id}`);
-            }}
-            className={cn(
-              "rounded-sm px-2.5 py-1.5 text-[11px] font-semibold uppercase tracking-[0.08em]",
-              s.id === sheet
-                ? "bg-[var(--sge-night)] text-[var(--sge-brass-wash)]"
-                : "bg-[var(--sge-paper-2)] text-[var(--sge-ink-2)] hover:bg-[var(--sge-brass-wash)]"
-            )}
-          >
-            {s.label}
-          </button>
-        ))}
+        {sheets.map((s) => {
+          const Icon = SHEET_ICON[s.id];
+          const waiting = waitingBySheet(state)[s.id] ?? 0;
+          return (
+            <button
+              key={s.id}
+              type="button"
+              title={waiting ? (state.currentRole === "admin" ? `${waiting} wage request${waiting === 1 ? "" : "s"} waiting or newly decided` : `${waiting} request${waiting === 1 ? "" : "s"} waiting for Owner / Super Admin`) : s.hint}
+              onClick={() => {
+                setDeskMsg(null);
+                router.replace(`/master-data?sheet=${s.id}`);
+              }}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-sm px-2.5 py-1.5 text-[11px] font-semibold uppercase tracking-[0.08em]",
+                s.id === sheet
+                  ? "bg-[var(--sge-night)] text-[var(--sge-brass-wash)]"
+                  : "bg-[var(--sge-paper-2)] text-[var(--sge-ink-2)] hover:bg-[var(--sge-brass-wash)]"
+              )}
+            >
+              {Icon ? <Icon aria-hidden className="h-3.5 w-3.5 shrink-0" /> : null}
+              {s.label}
+              {waiting ? (
+                <span aria-label={`${waiting} waiting`} className="ml-0.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--sge-brass)] px-1 text-[10px] font-bold leading-none text-white">
+                  {waiting}
+                </span>
+              ) : null}
+            </button>
+          );
+        })}
       </div>
       <div className="flex flex-wrap items-end gap-3">
         <div>
@@ -1549,6 +1594,7 @@ function TradesSheet({
 
   return (
     <Panel>
+      <ChangeRequestsPanel sheet={"trades"} />
       <p className="mb-3 text-xs text-[var(--sge-ink-3)]">
         Trades appear on the labourer register and the daily wage table. Examples: Painter, Blaster, Spray Painter, Scaffolder. Optional sub-types (e.g. Driver → LMV / HMV) show when that trade is picked.
       </p>
@@ -1604,7 +1650,7 @@ function TradesSheet({
           Add sub-type
         </Button>
       </form>
-      <table className="w-full text-sm">
+      <table key={`rq-${state.masterChangeRequests.length}`} className="w-full text-sm">
         <thead>
           <tr className="text-left text-[10px] uppercase tracking-wider text-[var(--sge-ink-3)]">
             <th className="py-2">Trade</th>
@@ -1644,8 +1690,85 @@ function TradesSheet({
 }
 
 function WageBandsSheet({ showInactive }: { showInactive: boolean }) {
-  const { fullState: state, upsertWageBand, setWageBandActive } = useStore();
+  const { fullState: state, upsertWageBand, setWageBandActive, decideWageChange, withdrawWageChange, markWageDecisionsSeen } = useStore();
+  const params = useSearchParams();
   const report = useReport();
+  const { notify } = useWork();
+  // Owner rule (2026-10-24): the Admin's changes are requests; Owner / SA approve before a rate changes
+  const isAdmin = state.currentRole === "admin";
+  const isBoss = state.currentRole === "owner" || state.currentRole === "super_admin";
+  const [decideNote, setDecideNote] = useState<Record<string, string>>({});
+  const [info, setInfo] = useState<string | null>(null);
+  // The Request button turns green for a few seconds after each request is sent
+  const [sentAt, setSentAt] = useState(0);
+  const justSent = Date.now() - sentAt < 4000;
+  const tradeLabel = (id: string) => state.tradeCatalogue.find((t) => t.id === id)?.label ?? id;
+  const skillLabelOf = (id: string) => SKILL_LEVELS.find((x) => x.id === id)?.label ?? id;
+  const describe = (r: WageChangeRequest) =>
+    `${tradeLabel(r.tradeId)} · ${skillLabelOf(r.skill)} · ${experienceLabel(r.experience)}: ${r.active !== undefined ? (r.active ? "switch on" : "switch off") : r.fromWage != null ? `₹${r.fromWage} → ₹${r.toWage}` : `new rate ₹${r.toWage}`}`;
+  const pending = state.wageChangeRequests.filter((r) => r.status === "pending");
+  // Waiting first (newest first), then everything decided, newest first — 50 per page
+  const PAGE = 50;
+  const allRequests = [
+    ...[...pending].sort((a, b) => b.requestedAt.localeCompare(a.requestedAt)),
+    ...state.wageChangeRequests.filter((r) => r.status !== "pending").sort((a, b) => (b.decidedAt ?? b.requestedAt).localeCompare(a.decidedAt ?? a.requestedAt)),
+  ];
+  // A bell alert opens the list (...&requests=open)
+  const askedOpen = params.get("requests") === "open";
+  const [listOpen, setListOpen] = useState(askedOpen);
+  useEffect(() => {
+    if (askedOpen) setListOpen(true);
+  }, [askedOpen]);
+  // The Admin's decisions not yet looked at: counted on the button, highlighted while the list is open
+  const unseen = unseenWageDecisions(state);
+  const [fresh, setFresh] = useState<Set<string>>(new Set());
+  const unseenKey = unseen.map((r) => r.id).join(",");
+  useEffect(() => {
+    if (!listOpen || !unseenKey) return;
+    const ids = unseenKey.split(",");
+    setFresh((f) => new Set([...f, ...ids]));
+    markWageDecisionsSeen(ids);
+  }, [listOpen, unseenKey, markWageDecisionsSeen]);
+  const [pageNo, setPage] = useState(0);
+  const pages = Math.max(1, Math.ceil(allRequests.length / PAGE));
+  const page = Math.min(pageNo, pages - 1);
+  const pageRows = allRequests.slice(page * PAGE, page * PAGE + PAGE);
+  const stamp = (iso: string) => new Date(iso).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
+  const waitingFor = (bandId: string) => pending.find((r) => r.bandId === bandId);
+  /** Save, or — for the Admin — send the change for approval */
+  function send(r: { ok: boolean; error?: string; requested?: boolean; id?: string }, what: string) {
+    if (r.ok && r.requested) {
+      // The Owner / SA alert goes out after the Undo window, with the count (Work store), not here
+      setInfo(`Request sent: ${what}. You can Undo it for ${WAGE_UNDO_MS / 1000} seconds before the Owner / Super Admin are told.`);
+      setSentAt(Date.now());
+      setTimeout(() => setSentAt(0), 4000);
+      return;
+    }
+    setInfo(null);
+    report(r);
+  }
+  /** Undo: take a waiting request back — it leaves the Owner's list and count */
+  function undo(r: WageChangeRequest) {
+    const res = withdrawWageChange(r.id);
+    report(res);
+    if (res.ok) setInfo(r.notified ? "Request taken back — it is off the Owner / Super Admin's list." : "Request taken back — the Owner / Super Admin were not told.");
+  }
+  const mine = (r: WageChangeRequest) => r.requestedBy === (state.currentUserId ?? state.currentAccountId);
+  // Tick every second while one of my requests is still in its Undo window, for the countdown
+  const [, setTick] = useState(0);
+  const inWindow = pending.some((r) => mine(r) && !r.notified);
+  useEffect(() => {
+    if (!inWindow) return;
+    const t = setInterval(() => setTick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, [inWindow]);
+  const secondsLeft = (r: WageChangeRequest) => Math.max(0, Math.ceil((Date.parse(r.requestedAt) + WAGE_UNDO_MS - Date.now()) / 1000));
+  function decide(r: WageChangeRequest, approve: boolean) {
+    const res = decideWageChange(r.id, approve, decideNote[r.id] ?? "");
+    report(res);
+    if (res.ok) setInfo(approve ? "Approved — the rate is updated." : "Rejected — the Admin is told.");
+    if (res.ok) notify({ kind: "wage_change_decided", problem: !approve, siteId: "", subjectStaffId: r.requestedBy, title: `Wage change ${approve ? "approved" : "rejected"}: ${describe(r)}`, detail: decideNote[r.id]?.trim() || (approve ? "Rate updated" : ""), tab: WAGE_REQUESTS_TAB, refId: r.id });
+  }
   const trades = state.tradeCatalogue.filter((t) => t.active);
   const [tradeId, setTradeId] = useState(trades[0]?.id ?? "");
   const [skill, setSkill] = useState<SkillLevel>("skilled");
@@ -1661,12 +1784,109 @@ function WageBandsSheet({ showInactive }: { showInactive: boolean }) {
       <p className="mb-3 text-xs text-[var(--sge-ink-3)]">
         Default ₹ per day for a trade at a skill and experience level. The labourer register uses this when you pick skill and experience; you can still type a different wage on the person.
       </p>
+      {isAdmin ? (
+        <p className="mb-3 rounded-sm border border-[var(--sge-warn)]/40 bg-[var(--sge-warn-wash)] px-3 py-2 text-xs text-[var(--sge-warn)]">
+          Your changes go to the Owner / Super Admin as a request. A rate changes only after they approve it.
+        </p>
+      ) : null}
+      {info ? <p className="mb-3 text-sm text-[var(--sge-ok)]">{info}</p> : null}
+      {/* 2026-10-24: the list grows — a button with the waiting count opens it, 50 per page, with date and time */}
+      <div className="mb-4">
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          aria-expanded={listOpen}
+          className={cn("gap-2", pending.length ? "border-[var(--sge-brass)] text-[var(--sge-brass-ink)]" : "")}
+          onClick={() => setListOpen((v) => !v)}
+        >
+          <ListChecks aria-hidden className="h-4 w-4" />
+          Wage change requests
+          {pending.length ? (
+            <span aria-label={`${pending.length} waiting`} className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--sge-brass)] px-1.5 text-[11px] font-bold text-white">
+              {pending.length}
+            </span>
+          ) : null}
+          {unseen.length ? (
+            <span className="inline-flex h-5 items-center justify-center rounded-full bg-[var(--sge-ok)] px-1.5 text-[11px] font-bold text-white">{unseen.length} new</span>
+          ) : null}
+          <span className="text-xs font-normal text-[var(--sge-ink-3)]">{listOpen ? "Hide" : `Show (${allRequests.length})`}</span>
+        </Button>
+        {listOpen ? (
+          <div className="mt-2 rounded-sm border border-[var(--sge-line)] p-3">
+            {allRequests.length === 0 ? (
+              <p className="text-sm text-[var(--sge-ink-3)]">No requests yet.</p>
+            ) : (
+              <>
+                <div className="divide-y divide-[var(--sge-line)]">
+                  {pageRows.map((r) => (
+                    <div
+                      key={r.id}
+                      className={cn(
+                        "flex flex-wrap items-center gap-2 py-1.5 text-sm",
+                        // Just decided, not seen before: highlight it in its result colour
+                        fresh.has(r.id) && "-mx-2 rounded-sm border-l-4 px-2",
+                        fresh.has(r.id) && (r.status === "approved" ? "border-[var(--sge-ok)] bg-[var(--sge-ok-wash)]" : "border-[var(--sge-crit)] bg-[var(--sge-crit-wash)]")
+                      )}
+                    >
+                      {fresh.has(r.id) ? <span className="rounded-sm bg-[var(--sge-night)] px-1.5 text-[10px] font-bold uppercase text-white">New</span> : null}
+                      <span
+                        className={cn(
+                          "inline-flex items-center gap-1 rounded-sm px-1.5 text-[11px] font-semibold uppercase",
+                          r.status === "pending" ? "bg-[var(--sge-warn-wash)] text-[var(--sge-warn)]" : r.status === "approved" ? "bg-[var(--sge-ok-wash)] text-[var(--sge-ok)]" : r.status === "withdrawn" ? "bg-[var(--sge-paper-2)] text-[var(--sge-ink-3)]" : "bg-[var(--sge-crit-wash)] text-[var(--sge-crit)]"
+                        )}
+                      >
+                        {r.status === "pending" ? <Hourglass aria-hidden className="h-3 w-3" /> : null}
+                        {r.status === "pending" ? "waiting" : r.status === "withdrawn" ? "undone" : r.status}
+                      </span>
+                      <span className={r.status === "pending" ? "font-semibold" : ""}>{describe(r)}</span>
+                      <span className="text-xs text-[var(--sge-ink-3)]">
+                        asked by {r.requestedByName} · {stamp(r.requestedAt)}
+                        {r.decidedAt ? ` · ${r.status === "withdrawn" ? "undone" : r.status} ${stamp(r.decidedAt)}` : ""}
+                        {r.decidedNote ? ` · ${r.decidedNote}` : ""}
+                      </span>
+                      {r.status === "pending" && isAdmin && mine(r) ? (
+                        <span className="ml-auto flex items-center gap-2">
+                          <span className="text-xs text-[var(--sge-ink-3)]">{r.notified || secondsLeft(r) === 0 ? "Owner / SA told" : `Owner / SA told in ${secondsLeft(r)} s`}</span>
+                          <Button size="sm" variant="outline" className="gap-1 border-[var(--sge-warn)] text-[var(--sge-warn)]" onClick={() => undo(r)}>
+                            <Undo2 aria-hidden className="h-3.5 w-3.5" /> Undo
+                          </Button>
+                        </span>
+                      ) : null}
+                      {r.status === "pending" && isBoss ? (
+                        <span className="ml-auto flex items-center gap-1">
+                          <Input aria-label="Reason" className="h-8 w-44" placeholder="Reason (to reject)" value={decideNote[r.id] ?? ""} onChange={(e) => setDecideNote({ ...decideNote, [r.id]: e.target.value })} />
+                          <Button size="sm" className="gap-1 bg-[var(--sge-crit)] text-white hover:bg-[var(--sge-crit)]/90" onClick={() => decide(r, false)}>
+                            <X aria-hidden className="h-3.5 w-3.5" /> Reject
+                          </Button>
+                          <Button size="sm" className="gap-1 bg-[var(--sge-ok)] text-white hover:bg-[var(--sge-ok)]/90" onClick={() => decide(r, true)}>
+                            <Check aria-hidden className="h-3.5 w-3.5" /> Approve
+                          </Button>
+                        </span>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+                {pages > 1 ? (
+                  <div className="mt-2 flex items-center justify-end gap-2 text-xs">
+                    <Button size="sm" variant="outline" disabled={page === 0} onClick={() => setPage((n) => n - 1)}>Previous</Button>
+                    <span>
+                      Page {page + 1} of {pages} · {allRequests.length} requests
+                    </span>
+                    <Button size="sm" variant="outline" disabled={page >= pages - 1} onClick={() => setPage((n) => n + 1)}>Next</Button>
+                  </div>
+                ) : null}
+              </>
+            )}
+          </div>
+        ) : null}
+      </div>
       <form
         className="mb-4 grid gap-2 rounded-sm border border-[var(--sge-line)] bg-[var(--sge-linen)] p-3 sm:grid-cols-5"
         onSubmit={(e) => {
           e.preventDefault();
           const r = upsertWageBand({ tradeId, skill, experience, dailyWage: Number(dailyWage) });
-          report(r);
+          send(r, `${tradeLabel(tradeId)} · ${skillLabelOf(skill)} · ${experienceLabel(experience)} → ₹${dailyWage}`);
           if (r.ok) setDailyWage("");
         }}
       >
@@ -1699,7 +1919,20 @@ function WageBandsSheet({ showInactive }: { showInactive: boolean }) {
           <Input className="mt-1" type="number" min={1} value={dailyWage} onChange={(e) => setDailyWage(e.target.value)} />
         </div>
         <div className="flex items-end">
-          <Button size="sm" type="submit">Save rate</Button>
+          {isAdmin ? (
+            <Button
+              size="sm"
+              type="submit"
+              className={cn("gap-1.5 text-white", justSent ? "bg-[var(--sge-ok)] hover:bg-[var(--sge-ok)]" : "bg-[var(--sge-brass)] hover:bg-[var(--sge-brass-ink)]")}
+            >
+              {justSent ? <Check aria-hidden className="h-4 w-4" /> : <Send aria-hidden className="h-4 w-4" />}
+              {justSent ? "Request sent" : "Request change"}
+            </Button>
+          ) : (
+            <Button size="sm" type="submit" className="gap-1.5">
+              <Save aria-hidden className="h-4 w-4" /> Save rate
+            </Button>
+          )}
         </div>
       </form>
       <div className="max-h-[480px] overflow-auto">
@@ -1717,23 +1950,47 @@ function WageBandsSheet({ showInactive }: { showInactive: boolean }) {
             {rows.map((b) => {
               const trade = state.tradeCatalogue.find((t) => t.id === b.tradeId);
               return (
-                <tr key={b.id} className={cn("border-t border-[var(--sge-line)]", !b.active && "opacity-50")}>
+                <tr key={b.id} className={cn("border-t border-[var(--sge-line)]", !b.active && "opacity-50", waitingFor(b.id) && "bg-[var(--sge-warn-wash)]")}>
                   <td className="py-1.5">{trade?.label ?? b.tradeId}</td>
                   <td>{SKILL_LEVELS.find((s) => s.id === b.skill)?.label ?? b.skill}</td>
                   <td title={EXPERIENCE_LEVELS.find((e) => e.id === b.experience)?.hint}>{experienceLabel(b.experience)}</td>
                   <td className="text-right tabular-nums">
-                    <BlurInput
-                      type="number"
-                      min={1}
-                      className="ml-auto w-24 text-right"
-                      value={String(b.dailyWage)}
-                      onSave={(v) => report(upsertWageBand({ ...b, dailyWage: Number(v) || 0 }))}
-                    />
+                    <div className="flex items-center justify-end gap-2">
+                      {waitingFor(b.id) ? (
+                        <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-sm bg-[var(--sge-paper)] px-1.5 text-[11px] font-semibold text-[var(--sge-warn)] ring-1 ring-[var(--sge-warn)]/40" title={`Waiting for Owner / SA · asked by ${waitingFor(b.id)!.requestedByName}`}>
+                          <Hourglass aria-hidden className="h-3 w-3" />
+                          waiting {waitingFor(b.id)!.active !== undefined ? (waitingFor(b.id)!.active ? "on" : "off") : `₹${waitingFor(b.id)!.toWage}`}
+                        </span>
+                      ) : null}
+                      <BlurInput
+                        // A request sent: show the current rate again (the tag shows the asked one)
+                        key={`${b.id}-${waitingFor(b.id)?.id ?? ""}`}
+                        type="number"
+                        min={1}
+                        className={cn("w-24 text-right", waitingFor(b.id) && "border-[var(--sge-warn)]")}
+                        value={String(b.dailyWage)}
+                        onSave={(v) => send(upsertWageBand({ ...b, dailyWage: Number(v) || 0 }), `${tradeLabel(b.tradeId)} · ${skillLabelOf(b.skill)} · ${experienceLabel(b.experience)}: ₹${b.dailyWage} → ₹${v}`)}
+                      />
+                    </div>
                   </td>
                   <td className="text-right">
-                    <Button size="sm" variant="ghost" onClick={() => report(setWageBandActive(b.id, !b.active))}>
-                      {b.active ? "Off" : "On"}
-                    </Button>
+                    {isAdmin && waitingFor(b.id) ? (
+                      // A request is waiting: amber "Requested", with Undo for the one who asked
+                      <span className="inline-flex items-center gap-1">
+                        <Button size="sm" disabled className="gap-1 bg-[var(--sge-brass)] text-white opacity-100 disabled:opacity-100">
+                          <Hourglass aria-hidden className="h-3.5 w-3.5" /> Requested
+                        </Button>
+                        {mine(waitingFor(b.id)!) ? (
+                          <Button size="sm" variant="outline" className="gap-1 border-[var(--sge-warn)] text-[var(--sge-warn)]" title="Take the request back" onClick={() => undo(waitingFor(b.id)!)}>
+                            <Undo2 aria-hidden className="h-3.5 w-3.5" /> Undo
+                          </Button>
+                        ) : null}
+                      </span>
+                    ) : (
+                      <Button size="sm" variant="ghost" className="gap-1" onClick={() => send(setWageBandActive(b.id, !b.active), `${tradeLabel(b.tradeId)} · ${skillLabelOf(b.skill)} · ${experienceLabel(b.experience)}: switch ${b.active ? "off" : "on"}`)}>
+                        <Power aria-hidden className="h-3.5 w-3.5" /> {b.active ? "Off" : "On"}
+                      </Button>
+                    )}
                   </td>
                 </tr>
               );
@@ -1761,11 +2018,12 @@ function RatesSheet({
   });
   return (
     <Panel>
+      <ChangeRequestsPanel sheet={"rateBook"} />
       <p className="mb-2 text-xs text-[var(--sge-ink-3)]">
         Latest wins per site + item + UOM. Superseded rows stay for history.
       </p>
       <div className="max-h-[480px] overflow-auto">
-        <table className="w-full text-sm">
+        <table key={`rq-${state.masterChangeRequests.length}`} className="w-full text-sm">
           <thead>
             <tr className="text-left text-[10px] uppercase tracking-wider text-[var(--sge-ink-3)]">
               <th className="py-2">PO</th>
@@ -1834,6 +2092,7 @@ function MaterialsSheet({
   });
   return (
     <Panel>
+      <ChangeRequestsPanel sheet={"materials"} />
       <fieldset disabled={readOnly} className="contents">
       <div className={readOnly ? "hidden" : "mb-3"}>
         <Button
@@ -1854,7 +2113,7 @@ function MaterialsSheet({
           Add material
         </Button>
       </div>
-      <table className="w-full text-sm">
+      <table key={`rq-${state.masterChangeRequests.length}`} className="w-full text-sm">
         <thead>
           <tr className="text-left text-[10px] uppercase tracking-wider text-[var(--sge-ink-3)]">
             <th className="py-2">Type</th>
@@ -1947,6 +2206,7 @@ function CatalogSheet({
   });
   return (
     <Panel>
+      {key === "units" ? <ChangeRequestsPanel sheet="units" /> : null}
       <div className="mb-3">
         <Button
           size="sm"
@@ -1968,7 +2228,7 @@ function CatalogSheet({
           Company-wide unless you set a site on the row.
         </span>
       </div>
-      <table className="w-full text-sm">
+      <table key={`rq-${state.masterChangeRequests.length}`} className="w-full text-sm">
         <thead>
           <tr className="text-left text-[10px] uppercase tracking-wider text-[var(--sge-ink-3)]">
             <th className="py-2">Code</th>
