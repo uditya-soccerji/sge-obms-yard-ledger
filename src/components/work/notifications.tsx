@@ -76,9 +76,28 @@ export function NotificationBell() {
   const waiting = useWaitingForMe();
   const { mine, seen, accountId } = useMyEvents();
   const [open, setOpen] = useState(false);
-  const [problemsOnly, setProblemsOnly] = useState(false);
   const box = useRef<HTMLDivElement>(null);
   const isBoss = state.currentRole === "owner" || state.currentRole === "super_admin";
+  // 2026-10-24: Owner / SA see problems only by default; unticking is remembered for that login
+  const prefKey = `sge-bell-problems-only-${accountId ?? ""}`;
+  const [pref, setPref] = useState<boolean | null>(null);
+  useEffect(() => {
+    try {
+      const v = localStorage.getItem(prefKey);
+      setPref(v === null ? null : v === "1");
+    } catch {
+      setPref(null);
+    }
+  }, [prefKey]);
+  const problemsOnly = isBoss && (pref ?? true);
+  const setProblemsOnly = (on: boolean) => {
+    setPref(on);
+    try {
+      localStorage.setItem(prefKey, on ? "1" : "0");
+    } catch {
+      /* blocked */
+    }
+  };
 
   useEffect(() => {
     if (!open) return;
@@ -90,7 +109,7 @@ export function NotificationBell() {
   }, [open]);
 
   const unread = mine.filter((e) => e.seq > seen);
-  const instantNew = unread.filter(isInstant);
+  const instantNew = unread.filter(isInstant).filter((e) => !problemsOnly || e.problem);
   const badge = waiting.length + instantNew.length;
   const list = (problemsOnly ? mine.filter((e) => e.problem) : mine).slice().reverse();
   const instant = list.filter(isInstant).slice(0, 8);

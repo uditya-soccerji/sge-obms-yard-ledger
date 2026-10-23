@@ -179,6 +179,8 @@ interface StoreApi {
   withdrawWageChange: (id: string) => { ok: boolean; error?: string };
   /** Mark requests as alerted to Owner / SA (after the Undo window) */
   markWageChangesNotified: (ids: string[]) => void;
+  /** The Admin has seen these decisions (clears their "new" count) */
+  markWageDecisionsSeen: (ids: string[]) => void;
   decideLeave: (id: string, approve: boolean, note: string) => { ok: boolean; error?: string };
   /** Refuses a label that already exists (case-insensitive) */
   addTrade: (input: Omit<TradeDefinition, "id"> & { id?: string }) => { ok: boolean; error?: string; id?: string };
@@ -1360,6 +1362,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       return { ...next, auditLog: [makeAudit(next, "trades", "withdraw", `Wage change ${r.tradeId} · ${r.skill} · ${r.experience} withdrawn by ${r.requestedByName}`), ...s.auditLog] };
     });
     return { ok: true };
+  }, []);
+
+  const markWageDecisionsSeen = useCallback((ids: string[]) => {
+    if (!ids.length) return;
+    const set = new Set(ids);
+    setState((s) => ({ ...s, wageChangeRequests: s.wageChangeRequests.map((x) => (set.has(x.id) ? { ...x, seenByRequester: true } : x)) }));
   }, []);
 
   const markWageChangesNotified = useCallback((ids: string[]) => {
@@ -2717,6 +2725,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       decideWageChange,
       withdrawWageChange,
       markWageChangesNotified,
+      markWageDecisionsSeen,
       decideLeave,
       addStaff,
       updateStaff,
@@ -2794,6 +2803,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       decideWageChange,
       withdrawWageChange,
       markWageChangesNotified,
+      markWageDecisionsSeen,
       decideLeave,
       addStaff,
       updateStaff,

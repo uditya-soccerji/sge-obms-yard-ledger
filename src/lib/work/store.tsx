@@ -1,6 +1,6 @@
 "use client";
 
-import { WAGE_UNDO_MS } from "../wage-requests";
+import { WAGE_REQUESTS_TAB, WAGE_UNDO_MS } from "../wage-requests";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { canCloseJob, canVoidExpense, JMS_FLOW, currentMonthOf, EXPENSE_CATEGORIES, entryDiffs, finalStage, isMonthClosed, jobJmsQty, lineStatus, nextJmsStatuses, nextJobNo, nextMonth, pickWorkOrder, round3, validMembers, woUsage } from "./logic";
 import { createEmptyWork, createWorkSeed, WORK_STORAGE_KEY, WORK_TODAY } from "./seed";
@@ -232,7 +232,7 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
         siteId: "",
         title: `${waiting} wage change request${waiting === 1 ? "" : "s"} waiting for approval`,
         detail: `New from ${[...new Set(due.map((r) => r.requestedByName))].join(", ")}: ${due.length} · Master Data → Daily wages`,
-        tab: "/master-data?sheet=wageBands",
+        tab: WAGE_REQUESTS_TAB,
         refId: due.map((r) => r.id).join(","),
       });
       markNotified.current(due.map((r) => r.id));

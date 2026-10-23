@@ -374,6 +374,8 @@ export interface WageChangeRequest {
   decidedNote?: string;
   /** Owner / SA were alerted (after the Undo window) */
   notified?: boolean;
+  /** The Admin who asked has seen the decision (2026-10-24) */
+  seenByRequester?: boolean;
 }
 
 export interface WageBand {

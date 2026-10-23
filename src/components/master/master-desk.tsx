@@ -1,6 +1,6 @@
 "use client";
 
-import { WAGE_UNDO_MS } from "@/lib/wage-requests";
+import { unseenWageDecisions, WAGE_REQUESTS_TAB, WAGE_UNDO_MS, wageBadgeCount } from "@/lib/wage-requests";
 import { Building2, BookOpen, CalendarCheck, Check, ClipboardList, Clock, HardHat, Hourglass, IndianRupee, Layers, ListChecks, MapPin, PaintBucket, Power, ReceiptIndianRupee, Ruler, Save, Send, ShieldCheck, Undo2, Users, Wrench, X, type LucideIcon } from "lucide-react";
 import { CENTRAL_STORE, isCentralStore } from "@/lib/site-scope";
 import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
@@ -72,8 +72,8 @@ const SHEET_ICON: Partial<Record<MasterSheetId, LucideIcon>> = {
 };
 
 /** Requests waiting for Owner / SA on each sheet (only Daily wages has requests today) */
-function waitingBySheet(state: { wageChangeRequests: WageChangeRequest[] }): Partial<Record<MasterSheetId, number>> {
-  return { wageBands: state.wageChangeRequests.filter((r) => r.status === "pending").length };
+function waitingBySheet(state: Parameters<typeof wageBadgeCount>[0]): Partial<Record<MasterSheetId, number>> {
+  return { wageBands: wageBadgeCount(state) };
 }
 
 export function MasterDesk() {
@@ -115,7 +115,7 @@ export function MasterDesk() {
             <button
               key={s.id}
               type="button"
-              title={waiting ? `${waiting} request${waiting === 1 ? "" : "s"} waiting for Owner / Super Admin` : s.hint}
+              title={waiting ? (state.currentRole === "admin" ? `${waiting} wage request${waiting === 1 ? "" : "s"} waiting or newly decided` : `${waiting} request${waiting === 1 ? "" : "s"} waiting for Owner / Super Admin`) : s.hint}
               onClick={() => {
                 setDeskMsg(null);
                 router.replace(`/master-data?sheet=${s.id}`);
@@ -1682,7 +1682,8 @@ function TradesSheet({
 }
 
 function WageBandsSheet({ showInactive }: { showInactive: boolean }) {
-  const { fullState: state, upsertWageBand, setWageBandActive, decideWageChange, withdrawWageChange } = useStore();
+  const { fullState: state, upsertWageBand, setWageBandActive, decideWageChange, withdrawWageChange, markWageDecisionsSeen } = useStore();
+  const params = useSearchParams();
   const report = useReport();
   const { notify } = useWork();
   // Owner rule (2026-10-24): the Admin's changes are requests; Owner / SA approve before a rate changes
@@ -1704,7 +1705,22 @@ function WageBandsSheet({ showInactive }: { showInactive: boolean }) {
     ...[...pending].sort((a, b) => b.requestedAt.localeCompare(a.requestedAt)),
     ...state.wageChangeRequests.filter((r) => r.status !== "pending").sort((a, b) => (b.decidedAt ?? b.requestedAt).localeCompare(a.decidedAt ?? a.requestedAt)),
   ];
-  const [listOpen, setListOpen] = useState(false);
+  // A bell alert opens the list (...&requests=open)
+  const askedOpen = params.get("requests") === "open";
+  const [listOpen, setListOpen] = useState(askedOpen);
+  useEffect(() => {
+    if (askedOpen) setListOpen(true);
+  }, [askedOpen]);
+  // The Admin's decisions not yet looked at: counted on the button, highlighted while the list is open
+  const unseen = unseenWageDecisions(state);
+  const [fresh, setFresh] = useState<Set<string>>(new Set());
+  const unseenKey = unseen.map((r) => r.id).join(",");
+  useEffect(() => {
+    if (!listOpen || !unseenKey) return;
+    const ids = unseenKey.split(",");
+    setFresh((f) => new Set([...f, ...ids]));
+    markWageDecisionsSeen(ids);
+  }, [listOpen, unseenKey, markWageDecisionsSeen]);
   const [pageNo, setPage] = useState(0);
   const pages = Math.max(1, Math.ceil(allRequests.length / PAGE));
   const page = Math.min(pageNo, pages - 1);
@@ -1743,7 +1759,7 @@ function WageBandsSheet({ showInactive }: { showInactive: boolean }) {
     const res = decideWageChange(r.id, approve, decideNote[r.id] ?? "");
     report(res);
     if (res.ok) setInfo(approve ? "Approved — the rate is updated." : "Rejected — the Admin is told.");
-    if (res.ok) notify({ kind: "wage_change_decided", problem: !approve, siteId: "", subjectStaffId: r.requestedBy, title: `Wage change ${approve ? "approved" : "rejected"}: ${describe(r)}`, detail: decideNote[r.id]?.trim() || (approve ? "Rate updated" : ""), tab: "/master-data?sheet=wageBands", refId: r.id });
+    if (res.ok) notify({ kind: "wage_change_decided", problem: !approve, siteId: "", subjectStaffId: r.requestedBy, title: `Wage change ${approve ? "approved" : "rejected"}: ${describe(r)}`, detail: decideNote[r.id]?.trim() || (approve ? "Rate updated" : ""), tab: WAGE_REQUESTS_TAB, refId: r.id });
   }
   const trades = state.tradeCatalogue.filter((t) => t.active);
   const [tradeId, setTradeId] = useState(trades[0]?.id ?? "");
@@ -1783,6 +1799,9 @@ function WageBandsSheet({ showInactive }: { showInactive: boolean }) {
               {pending.length}
             </span>
           ) : null}
+          {unseen.length ? (
+            <span className="inline-flex h-5 items-center justify-center rounded-full bg-[var(--sge-ok)] px-1.5 text-[11px] font-bold text-white">{unseen.length} new</span>
+          ) : null}
           <span className="text-xs font-normal text-[var(--sge-ink-3)]">{listOpen ? "Hide" : `Show (${allRequests.length})`}</span>
         </Button>
         {listOpen ? (
@@ -1793,7 +1812,16 @@ function WageBandsSheet({ showInactive }: { showInactive: boolean }) {
               <>
                 <div className="divide-y divide-[var(--sge-line)]">
                   {pageRows.map((r) => (
-                    <div key={r.id} className="flex flex-wrap items-center gap-2 py-1.5 text-sm">
+                    <div
+                      key={r.id}
+                      className={cn(
+                        "flex flex-wrap items-center gap-2 py-1.5 text-sm",
+                        // Just decided, not seen before: highlight it in its result colour
+                        fresh.has(r.id) && "-mx-2 rounded-sm border-l-4 px-2",
+                        fresh.has(r.id) && (r.status === "approved" ? "border-[var(--sge-ok)] bg-[var(--sge-ok-wash)]" : "border-[var(--sge-crit)] bg-[var(--sge-crit-wash)]")
+                      )}
+                    >
+                      {fresh.has(r.id) ? <span className="rounded-sm bg-[var(--sge-night)] px-1.5 text-[10px] font-bold uppercase text-white">New</span> : null}
                       <span
                         className={cn(
                           "inline-flex items-center gap-1 rounded-sm px-1.5 text-[11px] font-semibold uppercase",

@@ -20,6 +20,7 @@ import { canUseTestTools } from "@/lib/permissions";
 import { ALL_SITES, canSeeAllSites, canSwitchSites, entrySiteId, isCentralStore } from "@/lib/site-scope";
 import { useStore } from "@/lib/store";
 import { useWork } from "@/lib/work/store";
+import { wageBadgeCount } from "@/lib/wage-requests";
 import type { RoleId } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -37,7 +38,7 @@ function DeskNav({
   const pathname = usePathname();
   const items = topNavFor(account, role);
   // Requests waiting for Owner / SA, counted on the Master Data tab (2026-10-24)
-  const waitingMaster = useStore().fullState.wageChangeRequests.filter((r) => r.status === "pending").length;
+  const waitingMaster = wageBadgeCount(useStore().fullState);
 
   return (
     <nav
@@ -80,7 +81,7 @@ function DeskNav({
             {item.id === "master" && waitingMaster ? (
               <span
                 aria-label={`${waitingMaster} waiting`}
-                title={`${waitingMaster} request${waitingMaster === 1 ? "" : "s"} waiting for Owner / Super Admin`}
+                title={role === "admin" ? `${waitingMaster} wage request${waitingMaster === 1 ? "" : "s"} waiting or newly decided` : `${waitingMaster} request${waitingMaster === 1 ? "" : "s"} waiting for Owner / Super Admin`}
                 className="ml-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--sge-brass)] px-1 align-middle text-[10px] font-bold leading-none tracking-normal text-white"
               >
                 {waitingMaster}
