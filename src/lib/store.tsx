@@ -1337,7 +1337,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           b.skill === input.skill &&
           b.experience === input.experience
       );
-      if (clash) return { ok: false, error: "That trade × skill × experience already has a rate" };
+      if (clash) {
+        if (input.id) return { ok: false, error: "That trade × skill × experience already has a rate" };
+        // 2026-10-24: the form on an existing trade × skill × experience edits that rate (no "already has a rate" stop)
+        if (clash.dailyWage === dailyWage) return { ok: false, error: `${input.tradeId} · ${input.skill} · ${input.experience} is already ₹${dailyWage} — nothing to change` };
+        input = { ...input, id: clash.id, active: clash.active };
+      }
       // Owner rule (2026-10-24): the Admin's change is a request; the rate changes only when Owner / SA approve
       if (cur.currentRole === "admin") {
         const before = input.id ? cur.wageBands.find((b) => b.id === input.id) : undefined;

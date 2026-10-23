@@ -1,6 +1,5 @@
 "use client";
 
-import { realToday } from "@/lib/today";
 import { WAGE_UNDO_MS } from "@/lib/wage-requests";
 import { Building2, BookOpen, CalendarCheck, Check, ClipboardList, Clock, HardHat, Hourglass, IndianRupee, Layers, ListChecks, MapPin, PaintBucket, Power, ReceiptIndianRupee, Ruler, Save, Send, ShieldCheck, Undo2, Users, Wrench, X, type LucideIcon } from "lucide-react";
 import { CENTRAL_STORE, isCentralStore } from "@/lib/site-scope";
@@ -1699,7 +1698,18 @@ function WageBandsSheet({ showInactive }: { showInactive: boolean }) {
   const describe = (r: WageChangeRequest) =>
     `${tradeLabel(r.tradeId)} · ${skillLabelOf(r.skill)} · ${experienceLabel(r.experience)}: ${r.active !== undefined ? (r.active ? "switch on" : "switch off") : r.fromWage != null ? `₹${r.fromWage} → ₹${r.toWage}` : `new rate ₹${r.toWage}`}`;
   const pending = state.wageChangeRequests.filter((r) => r.status === "pending");
-  const recent = state.wageChangeRequests.filter((r) => r.status !== "pending").slice(0, 5);
+  // Waiting first (newest first), then everything decided, newest first — 50 per page
+  const PAGE = 50;
+  const allRequests = [
+    ...[...pending].sort((a, b) => b.requestedAt.localeCompare(a.requestedAt)),
+    ...state.wageChangeRequests.filter((r) => r.status !== "pending").sort((a, b) => (b.decidedAt ?? b.requestedAt).localeCompare(a.decidedAt ?? a.requestedAt)),
+  ];
+  const [listOpen, setListOpen] = useState(false);
+  const [pageNo, setPage] = useState(0);
+  const pages = Math.max(1, Math.ceil(allRequests.length / PAGE));
+  const page = Math.min(pageNo, pages - 1);
+  const pageRows = allRequests.slice(page * PAGE, page * PAGE + PAGE);
+  const stamp = (iso: string) => new Date(iso).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
   const waitingFor = (bandId: string) => pending.find((r) => r.bandId === bandId);
   /** Save, or — for the Admin — send the change for approval */
   function send(r: { ok: boolean; error?: string; requested?: boolean; id?: string }, what: string) {
@@ -1756,52 +1766,85 @@ function WageBandsSheet({ showInactive }: { showInactive: boolean }) {
         </p>
       ) : null}
       {info ? <p className="mb-3 text-sm text-[var(--sge-ok)]">{info}</p> : null}
-      {pending.length || (isAdmin && recent.length) ? (
-        <div className="mb-4 rounded-sm border border-[var(--sge-line)] p-3">
-          <div className="mb-2 font-heading text-xs font-bold uppercase tracking-wide">
-            Wage change requests {pending.length ? `· ${pending.length} waiting` : ""}
-          </div>
-          <div className="space-y-1.5">
-            {pending.map((r) => (
-              <div key={r.id} className="flex flex-wrap items-center gap-2 text-sm">
-                <span className="inline-flex items-center gap-1 rounded-sm bg-[var(--sge-warn-wash)] px-1.5 text-[11px] font-semibold uppercase text-[var(--sge-warn)]"><Hourglass aria-hidden className="h-3 w-3" />waiting</span>
-                <span className="font-semibold">{describe(r)}</span>
-                <span className="text-xs text-[var(--sge-ink-3)]">by {r.requestedByName} · {realToday(new Date(r.requestedAt))}</span>
-                {isAdmin && mine(r) ? (
-                  <span className="ml-auto flex items-center gap-2">
-                    <span className="text-xs text-[var(--sge-ink-3)]">
-                      {r.notified || secondsLeft(r) === 0 ? "Owner / SA told" : `Owner / SA told in ${secondsLeft(r)} s`}
+      {/* 2026-10-24: the list grows — a button with the waiting count opens it, 50 per page, with date and time */}
+      <div className="mb-4">
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          aria-expanded={listOpen}
+          className={cn("gap-2", pending.length ? "border-[var(--sge-brass)] text-[var(--sge-brass-ink)]" : "")}
+          onClick={() => setListOpen((v) => !v)}
+        >
+          <ListChecks aria-hidden className="h-4 w-4" />
+          Wage change requests
+          {pending.length ? (
+            <span aria-label={`${pending.length} waiting`} className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--sge-brass)] px-1.5 text-[11px] font-bold text-white">
+              {pending.length}
+            </span>
+          ) : null}
+          <span className="text-xs font-normal text-[var(--sge-ink-3)]">{listOpen ? "Hide" : `Show (${allRequests.length})`}</span>
+        </Button>
+        {listOpen ? (
+          <div className="mt-2 rounded-sm border border-[var(--sge-line)] p-3">
+            {allRequests.length === 0 ? (
+              <p className="text-sm text-[var(--sge-ink-3)]">No requests yet.</p>
+            ) : (
+              <>
+                <div className="divide-y divide-[var(--sge-line)]">
+                  {pageRows.map((r) => (
+                    <div key={r.id} className="flex flex-wrap items-center gap-2 py-1.5 text-sm">
+                      <span
+                        className={cn(
+                          "inline-flex items-center gap-1 rounded-sm px-1.5 text-[11px] font-semibold uppercase",
+                          r.status === "pending" ? "bg-[var(--sge-warn-wash)] text-[var(--sge-warn)]" : r.status === "approved" ? "bg-[var(--sge-ok-wash)] text-[var(--sge-ok)]" : r.status === "withdrawn" ? "bg-[var(--sge-paper-2)] text-[var(--sge-ink-3)]" : "bg-[var(--sge-crit-wash)] text-[var(--sge-crit)]"
+                        )}
+                      >
+                        {r.status === "pending" ? <Hourglass aria-hidden className="h-3 w-3" /> : null}
+                        {r.status === "pending" ? "waiting" : r.status === "withdrawn" ? "undone" : r.status}
+                      </span>
+                      <span className={r.status === "pending" ? "font-semibold" : ""}>{describe(r)}</span>
+                      <span className="text-xs text-[var(--sge-ink-3)]">
+                        asked by {r.requestedByName} · {stamp(r.requestedAt)}
+                        {r.decidedAt ? ` · ${r.status === "withdrawn" ? "undone" : r.status} ${stamp(r.decidedAt)}` : ""}
+                        {r.decidedNote ? ` · ${r.decidedNote}` : ""}
+                      </span>
+                      {r.status === "pending" && isAdmin && mine(r) ? (
+                        <span className="ml-auto flex items-center gap-2">
+                          <span className="text-xs text-[var(--sge-ink-3)]">{r.notified || secondsLeft(r) === 0 ? "Owner / SA told" : `Owner / SA told in ${secondsLeft(r)} s`}</span>
+                          <Button size="sm" variant="outline" className="gap-1 border-[var(--sge-warn)] text-[var(--sge-warn)]" onClick={() => undo(r)}>
+                            <Undo2 aria-hidden className="h-3.5 w-3.5" /> Undo
+                          </Button>
+                        </span>
+                      ) : null}
+                      {r.status === "pending" && isBoss ? (
+                        <span className="ml-auto flex items-center gap-1">
+                          <Input aria-label="Reason" className="h-8 w-44" placeholder="Reason (to reject)" value={decideNote[r.id] ?? ""} onChange={(e) => setDecideNote({ ...decideNote, [r.id]: e.target.value })} />
+                          <Button size="sm" className="gap-1 bg-[var(--sge-crit)] text-white hover:bg-[var(--sge-crit)]/90" onClick={() => decide(r, false)}>
+                            <X aria-hidden className="h-3.5 w-3.5" /> Reject
+                          </Button>
+                          <Button size="sm" className="gap-1 bg-[var(--sge-ok)] text-white hover:bg-[var(--sge-ok)]/90" onClick={() => decide(r, true)}>
+                            <Check aria-hidden className="h-3.5 w-3.5" /> Approve
+                          </Button>
+                        </span>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+                {pages > 1 ? (
+                  <div className="mt-2 flex items-center justify-end gap-2 text-xs">
+                    <Button size="sm" variant="outline" disabled={page === 0} onClick={() => setPage((n) => n - 1)}>Previous</Button>
+                    <span>
+                      Page {page + 1} of {pages} · {allRequests.length} requests
                     </span>
-                    <Button size="sm" variant="outline" className="gap-1 border-[var(--sge-warn)] text-[var(--sge-warn)]" onClick={() => undo(r)}>
-                      <Undo2 aria-hidden className="h-3.5 w-3.5" /> Undo
-                    </Button>
-                  </span>
-                ) : null}
-                {isBoss ? (
-                  <span className="ml-auto flex items-center gap-1">
-                    <Input aria-label="Reason" className="h-8 w-44" placeholder="Reason (to reject)" value={decideNote[r.id] ?? ""} onChange={(e) => setDecideNote({ ...decideNote, [r.id]: e.target.value })} />
-                    <Button size="sm" className="gap-1 bg-[var(--sge-crit)] text-white hover:bg-[var(--sge-crit)]/90" onClick={() => decide(r, false)}>
-                      <X aria-hidden className="h-3.5 w-3.5" /> Reject
-                    </Button>
-                    <Button size="sm" className="gap-1 bg-[var(--sge-ok)] text-white hover:bg-[var(--sge-ok)]/90" onClick={() => decide(r, true)}>
-                      <Check aria-hidden className="h-3.5 w-3.5" /> Approve
-                    </Button>
-                  </span>
-                ) : null}
-              </div>
-            ))}
-            {isAdmin
-              ? recent.map((r) => (
-                  <div key={r.id} className="flex flex-wrap items-center gap-2 text-xs text-[var(--sge-ink-2)]">
-                    <span className={cn("rounded-sm px-1.5 font-semibold uppercase", r.status === "approved" ? "bg-[var(--sge-ok-wash)] text-[var(--sge-ok)]" : r.status === "withdrawn" ? "bg-[var(--sge-paper-2)] text-[var(--sge-ink-3)]" : "bg-[var(--sge-crit-wash)] text-[var(--sge-crit)]")}>{r.status === "withdrawn" ? "undone" : r.status}</span>
-                    {describe(r)}
-                    {r.decidedNote ? ` · ${r.decidedNote}` : ""}
+                    <Button size="sm" variant="outline" disabled={page >= pages - 1} onClick={() => setPage((n) => n + 1)}>Next</Button>
                   </div>
-                ))
-              : null}
+                ) : null}
+              </>
+            )}
           </div>
-        </div>
-      ) : null}
+        ) : null}
+      </div>
       <form
         className="mb-4 grid gap-2 rounded-sm border border-[var(--sge-line)] bg-[var(--sge-linen)] p-3 sm:grid-cols-5"
         onSubmit={(e) => {
