@@ -1052,6 +1052,7 @@ export function createSeedState(): AppState {
     vendorBills: [],
     advances: [],
     leaves: [],
+    wageChangeRequests: [],
     equipmentRequests: [
       {
         id: "er-1",

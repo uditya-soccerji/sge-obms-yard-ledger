@@ -33,7 +33,7 @@ import { ExcelTransfer } from "./excel-transfer";
 import { canExcelTransfer } from "@/lib/excel-io";
 import { entrySiteId } from "@/lib/site-scope";
 import { checkSeat, checkSites, MIN_PASSWORD } from "@/lib/users";
-import type { StaffMember } from "@/lib/types";
+import type { StaffMember, WageChangeRequest } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 type ScopeFilter = "site" | "company" | "all";
@@ -1644,8 +1644,37 @@ function TradesSheet({
 }
 
 function WageBandsSheet({ showInactive }: { showInactive: boolean }) {
-  const { fullState: state, upsertWageBand, setWageBandActive } = useStore();
+  const { fullState: state, upsertWageBand, setWageBandActive, decideWageChange } = useStore();
   const report = useReport();
+  const { notify } = useWork();
+  // Owner rule (2026-10-24): the Admin's changes are requests; Owner / SA approve before a rate changes
+  const isAdmin = state.currentRole === "admin";
+  const isBoss = state.currentRole === "owner" || state.currentRole === "super_admin";
+  const [decideNote, setDecideNote] = useState<Record<string, string>>({});
+  const [info, setInfo] = useState<string | null>(null);
+  const tradeLabel = (id: string) => state.tradeCatalogue.find((t) => t.id === id)?.label ?? id;
+  const skillLabelOf = (id: string) => SKILL_LEVELS.find((x) => x.id === id)?.label ?? id;
+  const describe = (r: WageChangeRequest) =>
+    `${tradeLabel(r.tradeId)} · ${skillLabelOf(r.skill)} · ${experienceLabel(r.experience)}: ${r.active !== undefined ? (r.active ? "switch on" : "switch off") : r.fromWage != null ? `₹${r.fromWage} → ₹${r.toWage}` : `new rate ₹${r.toWage}`}`;
+  const pending = state.wageChangeRequests.filter((r) => r.status === "pending");
+  const recent = state.wageChangeRequests.filter((r) => r.status !== "pending").slice(0, 5);
+  const waitingFor = (bandId: string) => pending.find((r) => r.bandId === bandId);
+  /** Save, or — for the Admin — send the change for approval */
+  function send(r: { ok: boolean; error?: string; requested?: boolean; id?: string }, what: string) {
+    if (r.ok && r.requested) {
+      notify({ kind: "wage_change_requested", problem: true, siteId: "", subjectStaffId: state.currentUserId ?? undefined, title: `Wage change to approve: ${what}`, detail: `Asked by ${state.users.find((u) => u.id === state.currentAccountId)?.name ?? "Admin"}`, tab: "/master-data?sheet=wageBands", refId: r.id });
+      setInfo("Sent to the Owner / Super Admin — the rate changes when they approve.");
+      return;
+    }
+    setInfo(null);
+    report(r);
+  }
+  function decide(r: WageChangeRequest, approve: boolean) {
+    const res = decideWageChange(r.id, approve, decideNote[r.id] ?? "");
+    report(res);
+    if (res.ok) setInfo(approve ? "Approved — the rate is updated." : "Rejected — the Admin is told.");
+    if (res.ok) notify({ kind: "wage_change_decided", problem: !approve, siteId: "", subjectStaffId: r.requestedBy, title: `Wage change ${approve ? "approved" : "rejected"}: ${describe(r)}`, detail: decideNote[r.id]?.trim() || (approve ? "Rate updated" : ""), tab: "/master-data?sheet=wageBands", refId: r.id });
+  }
   const trades = state.tradeCatalogue.filter((t) => t.active);
   const [tradeId, setTradeId] = useState(trades[0]?.id ?? "");
   const [skill, setSkill] = useState<SkillLevel>("skilled");
@@ -1661,12 +1690,50 @@ function WageBandsSheet({ showInactive }: { showInactive: boolean }) {
       <p className="mb-3 text-xs text-[var(--sge-ink-3)]">
         Default ₹ per day for a trade at a skill and experience level. The labourer register uses this when you pick skill and experience; you can still type a different wage on the person.
       </p>
+      {isAdmin ? (
+        <p className="mb-3 rounded-sm border border-[var(--sge-warn)]/40 bg-[var(--sge-warn-wash)] px-3 py-2 text-xs text-[var(--sge-warn)]">
+          Your changes go to the Owner / Super Admin as a request. A rate changes only after they approve it.
+        </p>
+      ) : null}
+      {info ? <p className="mb-3 text-sm text-[var(--sge-ok)]">{info}</p> : null}
+      {pending.length || (isAdmin && recent.length) ? (
+        <div className="mb-4 rounded-sm border border-[var(--sge-line)] p-3">
+          <div className="mb-2 font-heading text-xs font-bold uppercase tracking-wide">
+            Wage change requests {pending.length ? `· ${pending.length} waiting` : ""}
+          </div>
+          <div className="space-y-1.5">
+            {pending.map((r) => (
+              <div key={r.id} className="flex flex-wrap items-center gap-2 text-sm">
+                <span className="rounded-sm bg-[var(--sge-warn-wash)] px-1.5 text-[11px] font-semibold uppercase text-[var(--sge-warn)]">waiting</span>
+                <span className="font-semibold">{describe(r)}</span>
+                <span className="text-xs text-[var(--sge-ink-3)]">by {r.requestedByName} · {r.requestedAt.slice(0, 10)}</span>
+                {isBoss ? (
+                  <span className="ml-auto flex items-center gap-1">
+                    <Input aria-label="Reason" className="h-8 w-44" placeholder="Reason (to reject)" value={decideNote[r.id] ?? ""} onChange={(e) => setDecideNote({ ...decideNote, [r.id]: e.target.value })} />
+                    <Button size="sm" variant="outline" onClick={() => decide(r, false)}>Reject</Button>
+                    <Button size="sm" onClick={() => decide(r, true)}>Approve</Button>
+                  </span>
+                ) : null}
+              </div>
+            ))}
+            {isAdmin
+              ? recent.map((r) => (
+                  <div key={r.id} className="flex flex-wrap items-center gap-2 text-xs text-[var(--sge-ink-2)]">
+                    <span className={cn("rounded-sm px-1.5 font-semibold uppercase", r.status === "approved" ? "bg-[var(--sge-ok-wash)] text-[var(--sge-ok)]" : "bg-[var(--sge-crit-wash)] text-[var(--sge-crit)]")}>{r.status}</span>
+                    {describe(r)}
+                    {r.decidedNote ? ` · ${r.decidedNote}` : ""}
+                  </div>
+                ))
+              : null}
+          </div>
+        </div>
+      ) : null}
       <form
         className="mb-4 grid gap-2 rounded-sm border border-[var(--sge-line)] bg-[var(--sge-linen)] p-3 sm:grid-cols-5"
         onSubmit={(e) => {
           e.preventDefault();
           const r = upsertWageBand({ tradeId, skill, experience, dailyWage: Number(dailyWage) });
-          report(r);
+          send(r, `${tradeLabel(tradeId)} · ${skillLabelOf(skill)} · ${experienceLabel(experience)} → ₹${dailyWage}`);
           if (r.ok) setDailyWage("");
         }}
       >
@@ -1699,7 +1766,7 @@ function WageBandsSheet({ showInactive }: { showInactive: boolean }) {
           <Input className="mt-1" type="number" min={1} value={dailyWage} onChange={(e) => setDailyWage(e.target.value)} />
         </div>
         <div className="flex items-end">
-          <Button size="sm" type="submit">Save rate</Button>
+          <Button size="sm" type="submit">{isAdmin ? "Request change" : "Save rate"}</Button>
         </div>
       </form>
       <div className="max-h-[480px] overflow-auto">
@@ -1722,16 +1789,25 @@ function WageBandsSheet({ showInactive }: { showInactive: boolean }) {
                   <td>{SKILL_LEVELS.find((s) => s.id === b.skill)?.label ?? b.skill}</td>
                   <td title={EXPERIENCE_LEVELS.find((e) => e.id === b.experience)?.hint}>{experienceLabel(b.experience)}</td>
                   <td className="text-right tabular-nums">
-                    <BlurInput
-                      type="number"
-                      min={1}
-                      className="ml-auto w-24 text-right"
-                      value={String(b.dailyWage)}
-                      onSave={(v) => report(upsertWageBand({ ...b, dailyWage: Number(v) || 0 }))}
-                    />
+                    <div className="flex items-center justify-end gap-2">
+                      {waitingFor(b.id) ? (
+                        <span className="whitespace-nowrap rounded-sm bg-[var(--sge-warn-wash)] px-1.5 text-[11px] font-semibold text-[var(--sge-warn)]" title={`Waiting for Owner / SA · asked by ${waitingFor(b.id)!.requestedByName}`}>
+                          waiting {waitingFor(b.id)!.active !== undefined ? (waitingFor(b.id)!.active ? "on" : "off") : `₹${waitingFor(b.id)!.toWage}`}
+                        </span>
+                      ) : null}
+                      <BlurInput
+                        // A request sent: show the current rate again (the tag shows the asked one)
+                        key={`${b.id}-${waitingFor(b.id)?.id ?? ""}`}
+                        type="number"
+                        min={1}
+                        className="w-24 text-right"
+                        value={String(b.dailyWage)}
+                        onSave={(v) => send(upsertWageBand({ ...b, dailyWage: Number(v) || 0 }), `${tradeLabel(b.tradeId)} · ${skillLabelOf(b.skill)} · ${experienceLabel(b.experience)}: ₹${b.dailyWage} → ₹${v}`)}
+                      />
+                    </div>
                   </td>
                   <td className="text-right">
-                    <Button size="sm" variant="ghost" onClick={() => report(setWageBandActive(b.id, !b.active))}>
+                    <Button size="sm" variant="ghost" onClick={() => send(setWageBandActive(b.id, !b.active), `${tradeLabel(b.tradeId)} · ${skillLabelOf(b.skill)} · ${experienceLabel(b.experience)}: switch ${b.active ? "off" : "on"}`)}>
                       {b.active ? "Off" : "On"}
                     </Button>
                   </td>

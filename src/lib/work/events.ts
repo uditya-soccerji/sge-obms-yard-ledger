@@ -65,7 +65,10 @@ export type EventKind =
   // Equipment returns (§27)
   | "return_raised"
   | "return_scrap"
-  | "return_decided";
+  | "return_decided"
+  // Admin's daily-wage changes (2026-10-24)
+  | "wage_change_requested"
+  | "wage_change_decided";
 
 export interface WorkEvent {
   id: string;
@@ -101,7 +104,7 @@ export interface Viewer {
 }
 
 /** Events that need someone to act, or tell the submitter the outcome: instant. */
-export const INSTANT: EventKind[] = ["job_closed", "jms_confirmed", "job_sent_back", "dpr_submitted", "dpr_approved", "dpr_sent_back", "crew_requested", "crew_released", "crew_decided", "pass_expiring", "request_rejected", "request_overridden", "dpr_issue", "job_plan", "job_plan_decided", "jms_admin_pending", "jms_admin_approved", "jms_returned", "observation_raised", "stop_work"];
+export const INSTANT: EventKind[] = ["job_closed", "jms_confirmed", "job_sent_back", "dpr_submitted", "dpr_approved", "dpr_sent_back", "crew_requested", "crew_released", "crew_decided", "pass_expiring", "request_rejected", "request_overridden", "dpr_issue", "job_plan", "job_plan_decided", "jms_admin_pending", "jms_admin_approved", "jms_returned", "observation_raised", "stop_work", "wage_change_requested", "wage_change_decided"];
 
 export const KIND_LABEL: Record<EventKind, string> = {
   dpr_added: "DPR entry",
@@ -156,6 +159,8 @@ export const KIND_LABEL: Record<EventKind, string> = {
   return_raised: "Equipment returned",
   return_scrap: "Scrap to confirm",
   return_decided: "Return decided",
+  wage_change_requested: "Wage change to approve",
+  wage_change_decided: "Wage change decided",
 };
 
 // Company-wide events (no site, e.g. the monthly pay upload) reach every viewer of the right role
@@ -268,6 +273,11 @@ export function isFor(e: WorkEvent, v: Viewer): boolean {
       return v.role === "sic";
     case "return_decided":
       return mine;
+    // Owner / SA see every event already; the Admin hears the decision
+    case "wage_change_requested":
+      return false;
+    case "wage_change_decided":
+      return mine || v.role === "admin";
   }
 }
 

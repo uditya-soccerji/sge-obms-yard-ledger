@@ -342,3 +342,7 @@ The owner is reworking every role's access, starting at the labourer and moving 
 - The Owner and Super Admin have **every tab and every right**. Anything added later is theirs automatically: `effectivePermission` returns true for both roles, and their Operations strip is every tab any role has (`ALL_PILLS` in `lib/desk.ts`). Don't add a feature without checking it isn't gated by a role-name list that leaves them out.
 - Still Super Admin only: **View as** (acting as another login) — to confirm with the owner.
 
+## 29. Daily wages: Admin requests, Owner / SA approve (decided 2026-10-24)
+- On Master Data → **Daily wages** the Admin can change a rate, add a new one, or switch one on / off — each is saved as a **request**, and the rate changes **only when the Owner or Super Admin approves** (reject needs a reason). One waiting request per rate.
+- Owner / SA see the waiting requests on the same page and an alert; the Admin sees "waiting ₹…" next to the rate and is told the outcome. Owner / SA edits still apply straight away. Every request and decision is in the audit log with who asked and who decided.
+

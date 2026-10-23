@@ -352,6 +352,27 @@ export type ExperienceLevel = "junior" | "experienced" | "senior";
  * Owner / Super Admin / Admin maintain the table; the labourer's wageDaily
  * is what attendance and P&L actually use (may be overridden).
  */
+/** Admin's change to a daily wage rate, waiting for Owner / Super Admin (owner, 2026-10-24) */
+export interface WageChangeRequest {
+  id: string;
+  /** The rate being changed; unset for a new trade × skill × experience rate */
+  bandId?: string;
+  tradeId: string;
+  skill: SkillLevel;
+  experience: ExperienceLevel;
+  fromWage?: number;
+  toWage?: number;
+  /** Switch the rate on / off instead of changing the amount */
+  active?: boolean;
+  requestedBy: string;
+  requestedByName: string;
+  requestedAt: string;
+  status: "pending" | "approved" | "rejected";
+  decidedBy?: string;
+  decidedAt?: string;
+  decidedNote?: string;
+}
+
 export interface WageBand {
   id: string;
   tradeId: string;
@@ -836,6 +857,8 @@ export interface AppState {
   advances: AdvanceGiven[];
   /** HR (round 2, §27) */
   leaves: LeaveEntry[];
+  /** Admin's daily-wage changes waiting for Owner / SA (2026-10-24) */
+  wageChangeRequests: WageChangeRequest[];
   /** One master store — load once, resolve site-then-company in memory. */
   masterCatalog: MasterCatalog;
 }

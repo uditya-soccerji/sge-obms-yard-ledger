@@ -59,6 +59,7 @@ import type {
   VendorBill,
   AdvanceGiven,
   LeaveEntry,
+  WageChangeRequest,
   CrewRequest,
   AcplPunchRow,
   AcplResolveStatus,
@@ -172,6 +173,8 @@ interface StoreApi {
   giveAdvance: (input: { labourerId: string; date: string; amount: number; note?: string }) => { ok: boolean; error?: string };
   /** HR leave register (round 2, §27) */
   addLeave: (input: Omit<LeaveEntry, "id" | "status" | "enteredBy" | "enteredAt">) => { ok: boolean; error?: string };
+  /** Owner / SA approve or reject the Admin's daily-wage change (2026-10-24) */
+  decideWageChange: (id: string, approve: boolean, note: string) => { ok: boolean; error?: string };
   decideLeave: (id: string, approve: boolean, note: string) => { ok: boolean; error?: string };
   /** Refuses a label that already exists (case-insensitive) */
   addTrade: (input: Omit<TradeDefinition, "id"> & { id?: string }) => { ok: boolean; error?: string; id?: string };
@@ -346,6 +349,7 @@ function migrateState(parsed: Partial<AppState>): AppState {
     vendorBills: parsed.vendorBills ?? [],
     advances: parsed.advances ?? [],
     leaves: parsed.leaves ?? [],
+    wageChangeRequests: parsed.wageChangeRequests ?? [],
     attendance: (parsed.attendance ?? seed.attendance).map((a) =>
       (a.status as string) === "off" ? { ...a, status: "weekly_off" as const } : a
     ),
@@ -1253,6 +1257,48 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     []
   );
 
+  /** Queue the Admin's wage change for Owner / SA (2026-10-24); one waiting request per rate */
+  const requestWageChange = (cur: AppState, input: Omit<WageChangeRequest, "id" | "requestedBy" | "requestedByName" | "requestedAt" | "status">) => {
+    const same = (r: WageChangeRequest) =>
+      r.status === "pending" && (input.bandId ? r.bandId === input.bandId : !r.bandId && r.tradeId === input.tradeId && r.skill === input.skill && r.experience === input.experience);
+    if (cur.wageChangeRequests.some(same)) return { ok: false as const, error: "A change for this rate is already waiting for the Owner / Super Admin" };
+    const account = cur.users.find((u) => u.id === cur.currentAccountId);
+    const id = uid("wcr");
+    setState((s) => {
+      const req: WageChangeRequest = { ...input, id, requestedBy: s.currentUserId ?? s.currentAccountId ?? "admin", requestedByName: account?.name || account?.username || "Admin", requestedAt: new Date().toISOString(), status: "pending" };
+      const next = { ...s, wageChangeRequests: [req, ...s.wageChangeRequests] };
+      const what = input.active !== undefined ? (input.active ? "switch on" : "switch off") : input.fromWage != null ? `₹${input.fromWage} → ₹${input.toWage}` : `new ₹${input.toWage}`;
+      return { ...next, auditLog: [makeAudit(next, "trades", "request", `Wage change requested: ${input.tradeId} · ${input.skill} · ${input.experience} ${what}`), ...s.auditLog] };
+    });
+    return { ok: true as const, id, requested: true as const };
+  };
+
+  const decideWageChange = useCallback((id: string, approve: boolean, note: string) => {
+    const cur = stateRef.current;
+    if (cur.currentRole !== "owner" && cur.currentRole !== "super_admin") return { ok: false, error: "Only the Owner or Super Admin decides wage changes" };
+    const r = cur.wageChangeRequests.find((x) => x.id === id);
+    if (!r || r.status !== "pending") return { ok: false, error: "This request isn't waiting" };
+    if (!approve && !note.trim()) return { ok: false, error: "Give a reason so the Admin knows why" };
+    if (approve && r.bandId && !cur.wageBands.some((b) => b.id === r.bandId)) return { ok: false, error: "That rate no longer exists" };
+    if (approve && !r.bandId && cur.wageBands.some((b) => b.tradeId === r.tradeId && b.skill === r.skill && b.experience === r.experience)) {
+      return { ok: false, error: "A rate for this trade × skill × experience was added meanwhile — reject this one" };
+    }
+    setState((s) => {
+      const now = new Date().toISOString();
+      let wageBands = s.wageBands;
+      if (approve) {
+        if (!r.bandId) wageBands = [...wageBands, { id: uid("wb"), tradeId: r.tradeId, skill: r.skill, experience: r.experience, dailyWage: r.toWage!, active: true }];
+        else wageBands = wageBands.map((b) => (b.id !== r.bandId ? b : r.active !== undefined ? { ...b, active: r.active } : { ...b, dailyWage: r.toWage! }));
+      }
+      const wageChangeRequests = s.wageChangeRequests.map((x) =>
+        x.id === id ? { ...x, status: approve ? ("approved" as const) : ("rejected" as const), decidedBy: s.currentUserId ?? s.currentAccountId ?? undefined, decidedAt: now, decidedNote: note.trim() || undefined } : x
+      );
+      const next = { ...s, wageBands, wageChangeRequests };
+      return { ...next, auditLog: [makeAudit(next, "trades", approve ? "approve" : "reject", `Wage change ${r.tradeId} · ${r.skill} · ${r.experience} ${approve ? "approved" : "rejected"} (asked by ${r.requestedByName})${note.trim() ? ` · ${note.trim()}` : ""}`), ...s.auditLog] };
+    });
+    return { ok: true };
+  }, []);
+
   const upsertWageBand = useCallback(
     (input: Omit<WageBand, "id" | "active"> & { id?: string; active?: boolean }) => {
       const cur = stateRef.current;
@@ -1270,6 +1316,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           b.experience === input.experience
       );
       if (clash) return { ok: false, error: "That trade × skill × experience already has a rate" };
+      // Owner rule (2026-10-24): the Admin's change is a request; the rate changes only when Owner / SA approve
+      if (cur.currentRole === "admin") {
+        const before = input.id ? cur.wageBands.find((b) => b.id === input.id) : undefined;
+        if (before && before.dailyWage === dailyWage) return { ok: true, id: before.id };
+        return requestWageChange(cur, { bandId: before?.id, tradeId: input.tradeId, skill: input.skill, experience: input.experience, fromWage: before?.dailyWage, toWage: dailyWage });
+      }
       const id = input.id ?? uid("wb");
       const row: WageBand = {
         id,
@@ -1302,6 +1354,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     if (!can(cur, "trades", "update") && !can(cur, "master", "update")) return DENIED;
     const before = cur.wageBands.find((b) => b.id === id);
     if (!before) return { ok: false, error: "Wage row not found" };
+    if (cur.currentRole === "admin") {
+      return requestWageChange(cur, { bandId: id, tradeId: before.tradeId, skill: before.skill, experience: before.experience, fromWage: before.dailyWage, active });
+    }
     setState((s) => {
       const next = { ...s, wageBands: s.wageBands.map((b) => (b.id === id ? { ...b, active } : b)) };
       return {
@@ -2586,6 +2641,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       payVendorBill,
       giveAdvance,
       addLeave,
+      decideWageChange,
       decideLeave,
       addStaff,
       updateStaff,
@@ -2660,6 +2716,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       payVendorBill,
       giveAdvance,
       addLeave,
+      decideWageChange,
       decideLeave,
       addStaff,
       updateStaff,
