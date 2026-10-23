@@ -1,6 +1,6 @@
 "use client";
 
-import { WAGE_REQUESTS_TAB, WAGE_UNDO_MS } from "../wage-requests";
+import { masterRequestsTab, SHEET_NAME, WAGE_REQUESTS_TAB, WAGE_UNDO_MS } from "../wage-requests";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { canCloseJob, canVoidExpense, JMS_FLOW, currentMonthOf, EXPENSE_CATEGORIES, entryDiffs, finalStage, isMonthClosed, jobJmsQty, lineStatus, nextJmsStatuses, nextJobNo, nextMonth, pickWorkOrder, round3, validMembers, woUsage } from "./logic";
 import { createEmptyWork, createWorkSeed, WORK_STORAGE_KEY, WORK_TODAY } from "./seed";
@@ -114,7 +114,7 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
   ref.current = work;
 
   // Who is acting (the viewed-as account when Super Admin uses "View as")
-  const { currentAccount, state: appState, fullState, applyDprAttendance, clearDprAttendance, raiseRequestsFromDpr, markWageChangesNotified } = useStore();
+  const { currentAccount, state: appState, fullState, applyDprAttendance, clearDprAttendance, raiseRequestsFromDpr, markWageChangesNotified, markMasterChanges } = useStore();
   const actor = React.useRef({ name: "System", role: null as RoleId | null, staffId: null as string | null, accountId: "", impersonatedBy: undefined as string | undefined });
   actor.current = {
     name: currentAccount?.name ?? "System",
@@ -144,12 +144,13 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
   const notMine = (supervisorId: string) => actor.current.role === "supervisor" && supervisorId !== actor.current.staffId;
 
   /** Append one activity-log / notification event (docs §19). */
-  const log = useCallback((e: Omit<WorkEvent, "id" | "seq" | "at" | "day" | "actorName" | "actorRole">) => {
+  const log = useCallback((e: Omit<WorkEvent, "id" | "seq" | "at" | "day" | "actorName" | "actorRole" | "actorAccountId">) => {
     setWork((s) => {
       const seq = (s.events[s.events.length - 1]?.seq ?? 0) + 1;
       // Pass alerts come from the clock, not from whoever happened to open the app (docs §24)
-      const system = e.kind === "pass_expiring";
-      const ev: WorkEvent = { ...e, id: `ev-${seq}`, seq, at: new Date().toISOString(), day: today(), actorName: system ? "System" : actor.current.name, actorRole: system ? null : actor.current.role, impersonatedBy: system ? undefined : actor.current.impersonatedBy };
+      // …and so does the wage-request alert after the Undo window, whichever tab is open
+      const system = e.kind === "pass_expiring" || e.kind === "wage_change_requested" || e.kind === "change_requested";
+      const ev: WorkEvent = { ...e, id: `ev-${seq}`, seq, at: new Date().toISOString(), day: today(), actorName: system ? "System" : actor.current.name, actorRole: system ? null : actor.current.role, actorAccountId: system ? undefined : actor.current.accountId || undefined, impersonatedBy: system ? undefined : actor.current.impersonatedBy };
       return { ...s, events: [...s.events, ev] };
     });
     // Merge plan Step 11: the same event goes to the shared audit_log (Test tools reset never touches it)
@@ -241,6 +242,36 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
     const t = setInterval(tick, 10_000);
     return () => clearInterval(t);
   }, [hydrated, wageReqs, log]);
+
+  // Same for Trades / Rate book / Materials / Units: one alert per sheet after the Undo window
+  const masterReqs = fullState.masterChangeRequests;
+  const markMaster = React.useRef(markMasterChanges);
+  markMaster.current = markMasterChanges;
+  useEffect(() => {
+    if (!hydrated) return;
+    const tick = () => {
+      const now = Date.now();
+      const due = masterReqs.filter((r) => r.status === "pending" && !r.notified && now - Date.parse(r.requestedAt) >= WAGE_UNDO_MS);
+      if (!due.length) return;
+      for (const sheet of [...new Set(due.map((r) => r.sheet))]) {
+        const mine = due.filter((r) => r.sheet === sheet);
+        const waiting = masterReqs.filter((r) => r.sheet === sheet && r.status === "pending").length;
+        log({
+          kind: "change_requested",
+          problem: true,
+          siteId: "",
+          title: `${waiting} ${SHEET_NAME[sheet]} change request${waiting === 1 ? "" : "s"} waiting for approval`,
+          detail: `New from ${[...new Set(mine.map((r) => r.requestedByName))].join(", ")}: ${mine.length} · Master Data → ${SHEET_NAME[sheet]}`,
+          tab: masterRequestsTab(sheet),
+          refId: mine.map((r) => r.id).join(","),
+        });
+      }
+      markMaster.current(due.map((r) => r.id), { notified: true });
+    };
+    tick();
+    const t = setInterval(tick, 10_000);
+    return () => clearInterval(t);
+  }, [hydrated, masterReqs, log]);
 
   const passLabourers = fullState.labourers;
   useEffect(() => {

@@ -14,15 +14,23 @@ import {
 } from "@/components/ui/select";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { roleMeta, rolesForSwitcher } from "@/lib/roles";
-import { NotificationBell } from "@/components/work/notifications";
+import { NotificationBell, useWaitingForMe } from "@/components/work/notifications";
 import { canAccessWork, topNavFor } from "@/lib/desk";
 import { canUseTestTools } from "@/lib/permissions";
 import { ALL_SITES, canSeeAllSites, canSwitchSites, entrySiteId, isCentralStore } from "@/lib/site-scope";
 import { useStore } from "@/lib/store";
 import { useWork } from "@/lib/work/store";
-import { wageBadgeCount } from "@/lib/wage-requests";
+import { NAV_ICON, useQueueCounts } from "@/lib/queues";
 import type { RoleId } from "@/lib/types";
 import { cn } from "@/lib/utils";
+
+/** The waiting count on a phone-width tab (same numbers as the desktop bar) */
+function MobileCount({ id }: { id: string }) {
+  const { nav } = useQueueCounts();
+  const work = useWaitingForMe().length;
+  const n = id === "work" ? work : nav[id as keyof typeof nav] ?? 0;
+  return n ? <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--sge-brass)] px-1 text-[10px] font-bold leading-none text-white">{n}</span> : null;
+}
 
 function DeskNav({
   account,
@@ -37,8 +45,10 @@ function DeskNav({
 }) {
   const pathname = usePathname();
   const items = topNavFor(account, role);
-  // Requests waiting for Owner / SA, counted on the Master Data tab (2026-10-24)
-  const waitingMaster = wageBadgeCount(useStore().fullState);
+  // 2026-10-24: what waits for this role, counted on each top tab (Work = jobs to confirm / close)
+  const { nav } = useQueueCounts();
+  const waitingWork = useWaitingForMe().length;
+  const countOf = (id: string) => (id === "work" ? waitingWork : nav[id as keyof typeof nav] ?? 0);
 
   return (
     <nav
@@ -77,14 +87,18 @@ function DeskNav({
                   )
             )}
           >
+            {(() => {
+              const Icon = NAV_ICON[item.id as keyof typeof NAV_ICON];
+              return Icon ? <Icon aria-hidden className="mr-1.5 inline h-3.5 w-3.5 -translate-y-px" /> : null;
+            })()}
             {item.label}
-            {item.id === "master" && waitingMaster ? (
+            {countOf(item.id) ? (
               <span
-                aria-label={`${waitingMaster} waiting`}
-                title={role === "admin" ? `${waitingMaster} wage request${waitingMaster === 1 ? "" : "s"} waiting or newly decided` : `${waitingMaster} request${waitingMaster === 1 ? "" : "s"} waiting for Owner / Super Admin`}
+                aria-label={`${countOf(item.id)} waiting`}
+                title={`${countOf(item.id)} waiting for you`}
                 className="ml-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--sge-brass)] px-1 align-middle text-[10px] font-bold leading-none tracking-normal text-white"
               >
-                {waitingMaster}
+                {countOf(item.id)}
               </span>
             ) : null}
           </Link>
@@ -334,9 +348,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <Link
               key={item.href}
               href={item.href}
-              className="shrink-0 rounded-sm bg-[var(--sge-paper-2)] px-2.5 py-1.5 text-xs font-semibold uppercase tracking-wide text-[var(--sge-ink-2)]"
+              className="inline-flex shrink-0 items-center gap-1 rounded-sm bg-[var(--sge-paper-2)] px-2.5 py-1.5 text-xs font-semibold uppercase tracking-wide text-[var(--sge-ink-2)]"
             >
               {item.label}
+              <MobileCount id={item.id} />
             </Link>
           ))}
       </div>

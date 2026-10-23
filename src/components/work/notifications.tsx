@@ -108,7 +108,8 @@ export function NotificationBell() {
     return () => document.removeEventListener("mousedown", close);
   }, [open]);
 
-  const unread = mine.filter((e) => e.seq > seen);
+  // What you did yourself is never "new" to you
+  const unread = mine.filter((e) => e.seq > seen && e.actorAccountId !== accountId);
   const instantNew = unread.filter(isInstant).filter((e) => !problemsOnly || e.problem);
   const badge = waiting.length + instantNew.length;
   const list = (problemsOnly ? mine.filter((e) => e.problem) : mine).slice().reverse();
@@ -177,7 +178,7 @@ export function NotificationBell() {
 
             <Section title="Approvals & problems (instant)">
               {instant.length === 0 ? <Empty text="No approvals or problems." /> : null}
-              {instant.map((e) => <EventRow key={e.id} e={e} isNew={e.seq > seen} onClick={() => go(e.tab)} />)}
+              {instant.map((e) => <EventRow key={e.id} e={e} isNew={e.seq > seen && e.actorAccountId !== accountId} onClick={() => go(e.tab)} />)}
             </Section>
 
             <Section title="Daily summary">
@@ -194,7 +195,7 @@ export function NotificationBell() {
                           .join(", ")})
                       </span>
                     </summary>
-                    {evs.map((e) => <EventRow key={e.id} e={e} isNew={e.seq > seen} onClick={() => go(e.tab)} compact />)}
+                    {evs.map((e) => <EventRow key={e.id} e={e} isNew={e.seq > seen && e.actorAccountId !== accountId} onClick={() => go(e.tab)} compact />)}
                   </details>
                 );
               })}

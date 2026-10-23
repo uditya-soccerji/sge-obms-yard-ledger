@@ -1,6 +1,7 @@
 "use client";
 
-import { unseenWageDecisions, WAGE_REQUESTS_TAB, WAGE_UNDO_MS, wageBadgeCount } from "@/lib/wage-requests";
+import { changeBadgeCount, sheetBadgeCount, unseenWageDecisions, WAGE_REQUESTS_TAB, WAGE_UNDO_MS, wageBadgeCount } from "@/lib/wage-requests";
+import { ChangeRequestsPanel } from "./change-requests";
 import { Building2, BookOpen, CalendarCheck, Check, ClipboardList, Clock, HardHat, Hourglass, IndianRupee, Layers, ListChecks, MapPin, PaintBucket, Power, ReceiptIndianRupee, Ruler, Save, Send, ShieldCheck, Undo2, Users, Wrench, X, type LucideIcon } from "lucide-react";
 import { CENTRAL_STORE, isCentralStore } from "@/lib/site-scope";
 import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
@@ -72,8 +73,14 @@ const SHEET_ICON: Partial<Record<MasterSheetId, LucideIcon>> = {
 };
 
 /** Requests waiting for Owner / SA on each sheet (only Daily wages has requests today) */
-function waitingBySheet(state: Parameters<typeof wageBadgeCount>[0]): Partial<Record<MasterSheetId, number>> {
-  return { wageBands: wageBadgeCount(state) };
+function waitingBySheet(state: Parameters<typeof changeBadgeCount>[0]): Partial<Record<MasterSheetId, number>> {
+  return {
+    wageBands: wageBadgeCount(state),
+    trades: sheetBadgeCount(state, "trades"),
+    rateBook: sheetBadgeCount(state, "rateBook"),
+    materials: sheetBadgeCount(state, "materials"),
+    units: sheetBadgeCount(state, "units"),
+  };
 }
 
 export function MasterDesk() {
@@ -1587,6 +1594,7 @@ function TradesSheet({
 
   return (
     <Panel>
+      <ChangeRequestsPanel sheet={"trades"} />
       <p className="mb-3 text-xs text-[var(--sge-ink-3)]">
         Trades appear on the labourer register and the daily wage table. Examples: Painter, Blaster, Spray Painter, Scaffolder. Optional sub-types (e.g. Driver → LMV / HMV) show when that trade is picked.
       </p>
@@ -1642,7 +1650,7 @@ function TradesSheet({
           Add sub-type
         </Button>
       </form>
-      <table className="w-full text-sm">
+      <table key={`rq-${state.masterChangeRequests.length}`} className="w-full text-sm">
         <thead>
           <tr className="text-left text-[10px] uppercase tracking-wider text-[var(--sge-ink-3)]">
             <th className="py-2">Trade</th>
@@ -2010,11 +2018,12 @@ function RatesSheet({
   });
   return (
     <Panel>
+      <ChangeRequestsPanel sheet={"rateBook"} />
       <p className="mb-2 text-xs text-[var(--sge-ink-3)]">
         Latest wins per site + item + UOM. Superseded rows stay for history.
       </p>
       <div className="max-h-[480px] overflow-auto">
-        <table className="w-full text-sm">
+        <table key={`rq-${state.masterChangeRequests.length}`} className="w-full text-sm">
           <thead>
             <tr className="text-left text-[10px] uppercase tracking-wider text-[var(--sge-ink-3)]">
               <th className="py-2">PO</th>
@@ -2083,6 +2092,7 @@ function MaterialsSheet({
   });
   return (
     <Panel>
+      <ChangeRequestsPanel sheet={"materials"} />
       <fieldset disabled={readOnly} className="contents">
       <div className={readOnly ? "hidden" : "mb-3"}>
         <Button
@@ -2103,7 +2113,7 @@ function MaterialsSheet({
           Add material
         </Button>
       </div>
-      <table className="w-full text-sm">
+      <table key={`rq-${state.masterChangeRequests.length}`} className="w-full text-sm">
         <thead>
           <tr className="text-left text-[10px] uppercase tracking-wider text-[var(--sge-ink-3)]">
             <th className="py-2">Type</th>
@@ -2196,6 +2206,7 @@ function CatalogSheet({
   });
   return (
     <Panel>
+      {key === "units" ? <ChangeRequestsPanel sheet="units" /> : null}
       <div className="mb-3">
         <Button
           size="sm"
@@ -2217,7 +2228,7 @@ function CatalogSheet({
           Company-wide unless you set a site on the row.
         </span>
       </div>
-      <table className="w-full text-sm">
+      <table key={`rq-${state.masterChangeRequests.length}`} className="w-full text-sm">
         <thead>
           <tr className="text-left text-[10px] uppercase tracking-wider text-[var(--sge-ink-3)]">
             <th className="py-2">Code</th>

@@ -60,6 +60,9 @@ import type {
   AdvanceGiven,
   LeaveEntry,
   WageChangeRequest,
+  MasterChangeRequest,
+  MasterRequestOp,
+  MasterRequestSheet,
   CrewRequest,
   AcplPunchRow,
   AcplResolveStatus,
@@ -177,6 +180,10 @@ interface StoreApi {
   decideWageChange: (id: string, approve: boolean, note: string) => { ok: boolean; error?: string };
   /** The Admin takes a waiting request back (Undo) */
   withdrawWageChange: (id: string) => { ok: boolean; error?: string };
+  /** Owner / SA approve (runs the Admin's edit) or reject (reason needed) a Master Data request */
+  decideMasterChange: (id: string, approve: boolean, note: string) => Promise<{ ok: boolean; error?: string }>;
+  withdrawMasterChange: (id: string) => { ok: boolean; error?: string };
+  markMasterChanges: (ids: string[], patch: { notified?: boolean; seenByRequester?: boolean }) => void;
   /** Mark requests as alerted to Owner / SA (after the Undo window) */
   markWageChangesNotified: (ids: string[]) => void;
   /** The Admin has seen these decisions (clears their "new" count) */
@@ -356,6 +363,7 @@ function migrateState(parsed: Partial<AppState>): AppState {
     advances: parsed.advances ?? [],
     leaves: parsed.leaves ?? [],
     wageChangeRequests: parsed.wageChangeRequests ?? [],
+    masterChangeRequests: parsed.masterChangeRequests ?? [],
     attendance: (parsed.attendance ?? seed.attendance).map((a) =>
       (a.status as string) === "off" ? { ...a, status: "weekly_off" as const } : a
     ),
@@ -1231,6 +1239,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         superseded?: boolean;
       }
     ) => {
+      const was = input.id ? stateRef.current.rateLines.find((r) => r.id === input.id) : undefined;
+      const asked = gateMaster("rateBook", "upsertRateLine", [input], `Rate ${input.itemKey} ₹${input.rateInr}/${input.uom} PO ${input.poNumber}${input.superseded && !was?.superseded ? " — supersede" : was ? " — edit" : " — new"}`);
+      if (asked) return asked.id;
       const id = input.id ?? uid("rl");
       setState((s) => {
         if (!can(s, "rates", input.id ? "update" : "create") && !can(s, "master", "update")) return s;
@@ -1273,6 +1284,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     }
     const changes = describeChanges(before, patch);
     if (!changes) return { ok: true };
+    const asked = gateMaster("trades", "updateTrade", [id, patch], `Trade ${before.label}: ${changes}`);
+    if (asked) return asked;
     setState((s) => {
       const next = { ...s, tradeCatalogue: s.tradeCatalogue.map((t) => (t.id === id ? { ...t, ...patch } : t)) };
       return { ...next, auditLog: [makeAudit(next, "trades", "update", `Trade ${before.label}: ${changes}`), ...s.auditLog] };
@@ -1291,6 +1304,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const label = input.label.trim();
       if (!label) return { ok: false, error: "Trade name is required" };
       if (cur.tradeCatalogue.some((t) => t.label.trim().toLowerCase() === label.toLowerCase())) return { ok: false, error: "Trade already exists" };
+      const asked = gateMaster("trades", "addTrade", [input], `New trade ${label}`);
+      if (asked) return asked;
       // A taken slug gets -2, -3, …
       let id = input.id ?? (slug || uid("trade"));
       for (let n = 2; cur.tradeCatalogue.some((t) => t.id === id); n++) id = `${slug || "trade"}-${n}`;
@@ -1308,6 +1323,20 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     },
     []
   );
+
+  /** 2026-10-24: the Admin's edit on Trades / Rate book / Materials / Units becomes a request; approval replays it */
+  const gateMaster = (sheet: MasterRequestSheet, op: MasterRequestOp, args: unknown[], summary: string) => {
+    const cur = stateRef.current;
+    if (cur.currentRole !== "admin") return null;
+    const account = cur.users.find((u) => u.id === cur.currentAccountId);
+    const id = uid("mcr");
+    setState((s) => {
+      const req: MasterChangeRequest = { id, sheet, op, args, summary, requestedBy: s.currentUserId ?? s.currentAccountId ?? "admin", requestedByName: account?.name || account?.username || "Admin", requestedAt: new Date().toISOString(), status: "pending" };
+      const next = { ...s, masterChangeRequests: [req, ...s.masterChangeRequests] };
+      return { ...next, auditLog: [makeAudit(next, "master", "request", `Change requested: ${summary}`), ...s.auditLog] };
+    });
+    return { ok: true as const, id, requested: true as const };
+  };
 
   /** Queue the Admin's wage change for Owner / SA (2026-10-24); one waiting request per rate */
   const requestWageChange = (cur: AppState, input: Omit<WageChangeRequest, "id" | "requestedBy" | "requestedByName" | "requestedAt" | "status">) => {
@@ -2021,6 +2050,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     ) => {
       const id = row.id || uid("cat");
       if (!can(stateRef.current, "master", "update")) return DENIED;
+      if (sheet === "units") {
+        const was = (stateRef.current.masterCatalog.units as CatalogItem[]).find((r) => r.id === row.id);
+        const asked = gateMaster("units", "upsertCatalogItem", [sheet, row], `Unit ${row.code}${was ? `: ${describeChanges(was, row) || "no change"}` : " — new"}`);
+        if (asked) return asked;
+      }
       const next = { ...row, id };
       const saved = await remoteSaveMaster(sheet, next);
       if (!saved.ok) return saved;
@@ -2054,6 +2088,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const upsertMaterial = useCallback(async (row: MaterialItem) => {
     const id = row.id || uid("mat");
     if (!can(stateRef.current, "master", "update")) return DENIED;
+    {
+      const was = stateRef.current.masterCatalog.materials.find((m) => m.id === row.id);
+      const asked = gateMaster("materials", "upsertMaterial", [row], `Material ${row.code}${was ? `: ${describeChanges(was, row) || "no change"}` : " — new"}`);
+      if (asked) return asked;
+    }
     const next = { ...row, id };
     const saved = await remoteSaveMaster("materials", next);
     if (!saved.ok) return saved;
@@ -2088,6 +2127,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         stateRef.current.masterCatalog[sheet] as (CatalogItem | Contractor | MaterialItem)[]
       ).find((r) => r.id === id);
       if (!row) return { ok: false, error: "Row not found" };
+      if (sheet === "units" || sheet === "materials") {
+        const asked = gateMaster(sheet, "setCatalogActive", [sheet, id, active], `${sheet === "units" ? "Unit" : "Material"} ${row.code}: switch ${active ? "on" : "off"}`);
+        if (asked) return asked;
+      }
       const saved = await remoteSaveMaster(sheet, { ...row, active });
       if (!saved.ok) return saved;
       setState((s) => {
@@ -2105,6 +2148,48 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     },
     []
   );
+
+  // Approval replays the Admin's edit through the same action, as the Owner / SA
+  const masterOps = React.useRef<Record<MasterRequestOp, (...a: never[]) => unknown>>(null as never);
+  masterOps.current = { updateTrade, addTrade, upsertRateLine, upsertMaterial, setCatalogActive, upsertCatalogItem } as never;
+
+  const decideMasterChange = useCallback(async (id: string, approve: boolean, note: string) => {
+    const cur = stateRef.current;
+    if (cur.currentRole !== "owner" && cur.currentRole !== "super_admin") return { ok: false, error: "Only the Owner or Super Admin decides these changes" };
+    const r = cur.masterChangeRequests.find((x) => x.id === id);
+    if (!r || r.status !== "pending") return { ok: false, error: "This request isn't waiting any more" };
+    if (!approve && !note.trim()) return { ok: false, error: "Give a reason so the Admin knows why" };
+    if (approve) {
+      const res = await (masterOps.current[r.op] as (...a: unknown[]) => unknown)(...r.args);
+      // upsertRateLine returns the id; the rest return { ok, error }
+      if (res && typeof res === "object" && "ok" in res && !(res as { ok: boolean }).ok) return res as { ok: boolean; error?: string };
+    }
+    setState((s) => {
+      const me = s.currentUserId ?? s.currentAccountId ?? "";
+      const next = { ...s, masterChangeRequests: s.masterChangeRequests.map((x) => (x.id === id ? { ...x, status: approve ? ("approved" as const) : ("rejected" as const), decidedBy: me, decidedAt: new Date().toISOString(), decidedNote: note.trim() || undefined } : x)) };
+      return { ...next, auditLog: [makeAudit(next, "master", approve ? "approve" : "reject", `${approve ? "Approved" : "Rejected"}: ${r.summary}${note.trim() ? ` — ${note.trim()}` : ""}`), ...s.auditLog] };
+    });
+    return { ok: true };
+  }, []);
+
+  const withdrawMasterChange = useCallback((id: string) => {
+    const cur = stateRef.current;
+    const r = cur.masterChangeRequests.find((x) => x.id === id);
+    if (!r || r.status !== "pending") return { ok: false, error: "This request isn't waiting any more" };
+    const me = cur.currentUserId ?? cur.currentAccountId;
+    if (r.requestedBy !== me && cur.currentRole !== "super_admin") return { ok: false, error: "Only the person who asked can undo it" };
+    setState((s) => {
+      const next = { ...s, masterChangeRequests: s.masterChangeRequests.map((x) => (x.id === id ? { ...x, status: "withdrawn" as const, decidedAt: new Date().toISOString() } : x)) };
+      return { ...next, auditLog: [makeAudit(next, "master", "withdraw", `Withdrawn by ${r.requestedByName}: ${r.summary}`), ...s.auditLog] };
+    });
+    return { ok: true };
+  }, []);
+
+  const markMasterChanges = useCallback((ids: string[], patch: { notified?: boolean; seenByRequester?: boolean }) => {
+    if (!ids.length) return;
+    const set = new Set(ids);
+    setState((s) => ({ ...s, masterChangeRequests: s.masterChangeRequests.map((x) => (set.has(x.id) ? { ...x, ...patch } : x)) }));
+  }, []);
 
   const upsertSite = useCallback(async (input: AppState["sites"][number]) => {
     if (!can(stateRef.current, "master", "update")) return DENIED;
@@ -2726,6 +2811,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       withdrawWageChange,
       markWageChangesNotified,
       markWageDecisionsSeen,
+      decideMasterChange,
+      withdrawMasterChange,
+      markMasterChanges,
       decideLeave,
       addStaff,
       updateStaff,
@@ -2804,6 +2892,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       withdrawWageChange,
       markWageChangesNotified,
       markWageDecisionsSeen,
+      decideMasterChange,
+      withdrawMasterChange,
+      markMasterChanges,
       decideLeave,
       addStaff,
       updateStaff,

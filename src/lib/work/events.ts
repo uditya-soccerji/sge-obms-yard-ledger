@@ -68,7 +68,10 @@ export type EventKind =
   | "return_decided"
   // Admin's daily-wage changes (2026-10-24)
   | "wage_change_requested"
-  | "wage_change_decided";
+  | "wage_change_decided"
+  // 2026-10-24: Admin's change on Trades / Rate book / Materials / Units
+  | "change_requested"
+  | "change_decided";
 
 export interface WorkEvent {
   id: string;
@@ -80,6 +83,8 @@ export interface WorkEvent {
   kind: EventKind;
   actorName: string;
   actorRole: RoleId | null;
+  /** Login that did it — your own actions never count as unread (2026-10-24) */
+  actorAccountId?: string;
   siteId: string;
   /** Staff id the event is about (job's supervisor), for "tell the submitter" */
   subjectStaffId?: string;
@@ -104,7 +109,7 @@ export interface Viewer {
 }
 
 /** Events that need someone to act, or tell the submitter the outcome: instant. */
-export const INSTANT: EventKind[] = ["job_closed", "jms_confirmed", "job_sent_back", "dpr_submitted", "dpr_approved", "dpr_sent_back", "crew_requested", "crew_released", "crew_decided", "pass_expiring", "request_rejected", "request_overridden", "dpr_issue", "job_plan", "job_plan_decided", "jms_admin_pending", "jms_admin_approved", "jms_returned", "observation_raised", "stop_work", "wage_change_requested", "wage_change_decided"];
+export const INSTANT: EventKind[] = ["job_closed", "jms_confirmed", "job_sent_back", "dpr_submitted", "dpr_approved", "dpr_sent_back", "crew_requested", "crew_released", "crew_decided", "pass_expiring", "request_rejected", "request_overridden", "dpr_issue", "job_plan", "job_plan_decided", "jms_admin_pending", "jms_admin_approved", "jms_returned", "observation_raised", "stop_work", "wage_change_requested", "wage_change_decided", "change_requested", "change_decided"];
 
 export const KIND_LABEL: Record<EventKind, string> = {
   dpr_added: "DPR entry",
@@ -161,6 +166,8 @@ export const KIND_LABEL: Record<EventKind, string> = {
   return_decided: "Return decided",
   wage_change_requested: "Wage change to approve",
   wage_change_decided: "Wage change decided",
+  change_requested: "Master Data change to approve",
+  change_decided: "Master Data change decided",
 };
 
 // Company-wide events (no site, e.g. the monthly pay upload) reach every viewer of the right role
@@ -275,8 +282,10 @@ export function isFor(e: WorkEvent, v: Viewer): boolean {
       return mine;
     // Owner / SA see every event already; the Admin hears the decision
     case "wage_change_requested":
+    case "change_requested":
       return false;
     case "wage_change_decided":
+    case "change_decided":
       return mine || v.role === "admin";
   }
 }
