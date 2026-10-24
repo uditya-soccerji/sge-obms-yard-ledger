@@ -63,6 +63,7 @@ import type {
   MasterChangeRequest,
   MasterRequestOp,
   MasterRequestSheet,
+  RequestStep,
   CrewRequest,
   AcplPunchRow,
   AcplResolveStatus,
@@ -1324,6 +1325,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     []
   );
 
+  /** One step of a request's audit thread, by whoever is signed in */
+  const stepBy = (s: AppState, action: RequestStep["action"], note?: string): RequestStep => {
+    const a = s.users.find((u) => u.id === s.currentAccountId);
+    return { at: new Date().toISOString(), byName: a?.name || a?.username || "System", action, ...(note ? { note } : {}) };
+  };
+
   /** 2026-10-24: the Admin's edit on Trades / Rate book / Materials / Units becomes a request; approval replays it */
   const gateMaster = (sheet: MasterRequestSheet, op: MasterRequestOp, args: unknown[], summary: string) => {
     const cur = stateRef.current;
@@ -1331,7 +1338,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const account = cur.users.find((u) => u.id === cur.currentAccountId);
     const id = uid("mcr");
     setState((s) => {
-      const req: MasterChangeRequest = { id, sheet, op, args, summary, requestedBy: s.currentUserId ?? s.currentAccountId ?? "admin", requestedByName: account?.name || account?.username || "Admin", requestedAt: new Date().toISOString(), status: "pending" };
+      const req: MasterChangeRequest = { id, sheet, op, args, summary, requestedBy: s.currentUserId ?? s.currentAccountId ?? "admin", requestedByName: account?.name || account?.username || "Admin", requestedAt: new Date().toISOString(), status: "pending", thread: [stepBy(s, "requested")] };
       const next = { ...s, masterChangeRequests: [req, ...s.masterChangeRequests] };
       return { ...next, auditLog: [makeAudit(next, "master", "request", `Change requested: ${summary}`), ...s.auditLog] };
     });
@@ -1346,7 +1353,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const account = cur.users.find((u) => u.id === cur.currentAccountId);
     const id = uid("wcr");
     setState((s) => {
-      const req: WageChangeRequest = { ...input, id, requestedBy: s.currentUserId ?? s.currentAccountId ?? "admin", requestedByName: account?.name || account?.username || "Admin", requestedAt: new Date().toISOString(), status: "pending" };
+      const req: WageChangeRequest = { ...input, id, requestedBy: s.currentUserId ?? s.currentAccountId ?? "admin", requestedByName: account?.name || account?.username || "Admin", requestedAt: new Date().toISOString(), status: "pending", thread: [stepBy(s, "requested")] };
       const next = { ...s, wageChangeRequests: [req, ...s.wageChangeRequests] };
       const what = input.active !== undefined ? (input.active ? "switch on" : "switch off") : input.fromWage != null ? `₹${input.fromWage} → ₹${input.toWage}` : `new ₹${input.toWage}`;
       return { ...next, auditLog: [makeAudit(next, "trades", "request", `Wage change requested: ${input.tradeId} · ${input.skill} · ${input.experience} ${what}`), ...s.auditLog] };
@@ -1372,7 +1379,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         else wageBands = wageBands.map((b) => (b.id !== r.bandId ? b : r.active !== undefined ? { ...b, active: r.active } : { ...b, dailyWage: r.toWage! }));
       }
       const wageChangeRequests = s.wageChangeRequests.map((x) =>
-        x.id === id ? { ...x, status: approve ? ("approved" as const) : ("rejected" as const), decidedBy: s.currentUserId ?? s.currentAccountId ?? undefined, decidedAt: now, decidedNote: note.trim() || undefined } : x
+        x.id === id ? { ...x, status: approve ? ("approved" as const) : ("rejected" as const), decidedBy: s.currentUserId ?? s.currentAccountId ?? undefined, decidedAt: now, decidedNote: note.trim() || undefined, thread: [...(x.thread ?? []), stepBy(s, approve ? "approved" : "rejected", note.trim() || undefined)] } : x
       );
       const next = { ...s, wageBands, wageChangeRequests };
       return { ...next, auditLog: [makeAudit(next, "trades", approve ? "approve" : "reject", `Wage change ${r.tradeId} · ${r.skill} · ${r.experience} ${approve ? "approved" : "rejected"} (asked by ${r.requestedByName})${note.trim() ? ` · ${note.trim()}` : ""}`), ...s.auditLog] };
@@ -1387,7 +1394,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const me = cur.currentUserId ?? cur.currentAccountId;
     if (r.requestedBy !== me && cur.currentRole !== "super_admin") return { ok: false, error: "Only the person who asked can undo it" };
     setState((s) => {
-      const next = { ...s, wageChangeRequests: s.wageChangeRequests.map((x) => (x.id === id ? { ...x, status: "withdrawn" as const, decidedAt: new Date().toISOString() } : x)) };
+      const next = { ...s, wageChangeRequests: s.wageChangeRequests.map((x) => (x.id === id ? { ...x, status: "withdrawn" as const, decidedAt: new Date().toISOString(), thread: [...(x.thread ?? []), stepBy(s, "undone")] } : x)) };
       return { ...next, auditLog: [makeAudit(next, "trades", "withdraw", `Wage change ${r.tradeId} · ${r.skill} · ${r.experience} withdrawn by ${r.requestedByName}`), ...s.auditLog] };
     });
     return { ok: true };
@@ -1401,7 +1408,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   const markWageChangesNotified = useCallback((ids: string[]) => {
     const set = new Set(ids);
-    setState((s) => ({ ...s, wageChangeRequests: s.wageChangeRequests.map((x) => (set.has(x.id) ? { ...x, notified: true } : x)) }));
+    const alerted: RequestStep = { at: new Date().toISOString(), byName: "System", action: "alerted", note: "Owner / Super Admin told" };
+    setState((s) => ({ ...s, wageChangeRequests: s.wageChangeRequests.map((x) => (set.has(x.id) ? { ...x, notified: true, thread: [...(x.thread ?? []), alerted] } : x)) }));
   }, []);
 
   const upsertWageBand = useCallback(
@@ -2166,7 +2174,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     }
     setState((s) => {
       const me = s.currentUserId ?? s.currentAccountId ?? "";
-      const next = { ...s, masterChangeRequests: s.masterChangeRequests.map((x) => (x.id === id ? { ...x, status: approve ? ("approved" as const) : ("rejected" as const), decidedBy: me, decidedAt: new Date().toISOString(), decidedNote: note.trim() || undefined } : x)) };
+      const next = { ...s, masterChangeRequests: s.masterChangeRequests.map((x) => (x.id === id ? { ...x, status: approve ? ("approved" as const) : ("rejected" as const), decidedBy: me, decidedAt: new Date().toISOString(), decidedNote: note.trim() || undefined, thread: [...(x.thread ?? []), stepBy(s, approve ? "approved" : "rejected", note.trim() || undefined)] } : x)) };
       return { ...next, auditLog: [makeAudit(next, "master", approve ? "approve" : "reject", `${approve ? "Approved" : "Rejected"}: ${r.summary}${note.trim() ? ` — ${note.trim()}` : ""}`), ...s.auditLog] };
     });
     return { ok: true };
@@ -2179,7 +2187,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const me = cur.currentUserId ?? cur.currentAccountId;
     if (r.requestedBy !== me && cur.currentRole !== "super_admin") return { ok: false, error: "Only the person who asked can undo it" };
     setState((s) => {
-      const next = { ...s, masterChangeRequests: s.masterChangeRequests.map((x) => (x.id === id ? { ...x, status: "withdrawn" as const, decidedAt: new Date().toISOString() } : x)) };
+      const next = { ...s, masterChangeRequests: s.masterChangeRequests.map((x) => (x.id === id ? { ...x, status: "withdrawn" as const, decidedAt: new Date().toISOString(), thread: [...(x.thread ?? []), stepBy(s, "undone")] } : x)) };
       return { ...next, auditLog: [makeAudit(next, "master", "withdraw", `Withdrawn by ${r.requestedByName}: ${r.summary}`), ...s.auditLog] };
     });
     return { ok: true };
@@ -2188,7 +2196,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const markMasterChanges = useCallback((ids: string[], patch: { notified?: boolean; seenByRequester?: boolean }) => {
     if (!ids.length) return;
     const set = new Set(ids);
-    setState((s) => ({ ...s, masterChangeRequests: s.masterChangeRequests.map((x) => (set.has(x.id) ? { ...x, ...patch } : x)) }));
+    const alerted: RequestStep = { at: new Date().toISOString(), byName: "System", action: "alerted", note: "Owner / Super Admin told" };
+    setState((s) => ({ ...s, masterChangeRequests: s.masterChangeRequests.map((x) => (set.has(x.id) ? { ...x, ...patch, ...(patch.notified && !x.notified ? { thread: [...(x.thread ?? []), alerted] } : {}) } : x)) }));
   }, []);
 
   const upsertSite = useCallback(async (input: AppState["sites"][number]) => {

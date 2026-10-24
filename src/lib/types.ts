@@ -352,6 +352,14 @@ export type ExperienceLevel = "junior" | "experienced" | "senior";
  * Owner / Super Admin / Admin maintain the table; the labourer's wageDaily
  * is what attendance and P&L actually use (may be overridden).
  */
+/** One step in a request's audit thread: asked, alerted, undone, approved, rejected (2026-10-24) */
+export interface RequestStep {
+  at: string;
+  byName: string;
+  action: "requested" | "alerted" | "undone" | "approved" | "rejected";
+  note?: string;
+}
+
 /** Master Data sheets where the Admin's edits are requests for Owner / Super Admin (2026-10-24) */
 export type MasterRequestSheet = "trades" | "rateBook" | "materials" | "units";
 /** The store action that runs when the request is approved */
@@ -374,6 +382,7 @@ export interface MasterChangeRequest {
   decidedNote?: string;
   notified?: boolean;
   seenByRequester?: boolean;
+  thread?: RequestStep[];
 }
 
 /** Admin's change to a daily wage rate, waiting for Owner / Super Admin (owner, 2026-10-24) */
@@ -400,6 +409,7 @@ export interface WageChangeRequest {
   notified?: boolean;
   /** The Admin who asked has seen the decision (2026-10-24) */
   seenByRequester?: boolean;
+  thread?: RequestStep[];
 }
 
 export interface WageBand {

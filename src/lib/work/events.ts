@@ -71,7 +71,10 @@ export type EventKind =
   | "wage_change_decided"
   // 2026-10-24: Admin's change on Trades / Rate book / Materials / Units
   | "change_requested"
-  | "change_decided";
+  | "change_decided"
+  // 2026-10-24: Admin's plan line, approved by the SIC / Owner / SA
+  | "plan_requested"
+  | "plan_decided";
 
 export interface WorkEvent {
   id: string;
@@ -109,7 +112,7 @@ export interface Viewer {
 }
 
 /** Events that need someone to act, or tell the submitter the outcome: instant. */
-export const INSTANT: EventKind[] = ["job_closed", "jms_confirmed", "job_sent_back", "dpr_submitted", "dpr_approved", "dpr_sent_back", "crew_requested", "crew_released", "crew_decided", "pass_expiring", "request_rejected", "request_overridden", "dpr_issue", "job_plan", "job_plan_decided", "jms_admin_pending", "jms_admin_approved", "jms_returned", "observation_raised", "stop_work", "wage_change_requested", "wage_change_decided", "change_requested", "change_decided"];
+export const INSTANT: EventKind[] = ["job_closed", "jms_confirmed", "job_sent_back", "dpr_submitted", "dpr_approved", "dpr_sent_back", "crew_requested", "crew_released", "crew_decided", "pass_expiring", "request_rejected", "request_overridden", "dpr_issue", "job_plan", "job_plan_decided", "jms_admin_pending", "jms_admin_approved", "jms_returned", "observation_raised", "stop_work", "wage_change_requested", "wage_change_decided", "change_requested", "change_decided", "plan_requested", "plan_decided"];
 
 export const KIND_LABEL: Record<EventKind, string> = {
   dpr_added: "DPR entry",
@@ -168,6 +171,8 @@ export const KIND_LABEL: Record<EventKind, string> = {
   wage_change_decided: "Wage change decided",
   change_requested: "Master Data change to approve",
   change_decided: "Master Data change decided",
+  plan_requested: "Plan line to approve",
+  plan_decided: "Plan line decided",
 };
 
 // Company-wide events (no site, e.g. the monthly pay upload) reach every viewer of the right role
@@ -281,6 +286,10 @@ export function isFor(e: WorkEvent, v: Viewer): boolean {
     case "return_decided":
       return mine;
     // Owner / SA see every event already; the Admin hears the decision
+    case "plan_requested":
+      return v.role === "sic";
+    case "plan_decided":
+      return mine || v.role === "admin";
     case "wage_change_requested":
     case "change_requested":
       return false;

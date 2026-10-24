@@ -28,7 +28,7 @@ import { cn } from "@/lib/utils";
 function MobileCount({ id }: { id: string }) {
   const { nav } = useQueueCounts();
   const work = useWaitingForMe().length;
-  const n = id === "work" ? work : nav[id as keyof typeof nav] ?? 0;
+  const n = id === "work" ? work + (nav.work ?? 0) : nav[id as keyof typeof nav] ?? 0;
   return n ? <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--sge-brass)] px-1 text-[10px] font-bold leading-none text-white">{n}</span> : null;
 }
 
@@ -48,7 +48,7 @@ function DeskNav({
   // 2026-10-24: what waits for this role, counted on each top tab (Work = jobs to confirm / close)
   const { nav } = useQueueCounts();
   const waitingWork = useWaitingForMe().length;
-  const countOf = (id: string) => (id === "work" ? waitingWork : nav[id as keyof typeof nav] ?? 0);
+  const countOf = (id: string) => (id === "work" ? waitingWork + (nav.work ?? 0) : nav[id as keyof typeof nav] ?? 0);
 
   return (
     <nav

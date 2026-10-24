@@ -24,6 +24,9 @@ export function wageBadgeCount(s: WageView): number {
 
 type ChangeView = WageView & Pick<AppState, "masterChangeRequests">;
 
+/** Where a plan-line alert takes you: Work → Plan with the requests list open */
+export const PLAN_REQUESTS_TAB = "/work?t=plan&requests=open";
+
 export const SHEET_NAME: Record<MasterRequestSheet, string> = { trades: "Trades", rateBook: "Rate book", materials: "Materials", units: "Units" };
 
 /** Where an alert about a Master Data request takes you */

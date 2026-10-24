@@ -11,6 +11,8 @@ import { isSitePlant } from "@/lib/sites";
 import { STAGES } from "@/lib/work/types";
 import { fmtM2, fmtPct, Msg, selectCls, tdCls, thCls, useWorkScope } from "./common";
 import { WorkExcelTransferStack } from "./work-excel-transfer";
+import { PlanRequestsPanel } from "./plan-requests";
+import { useStore } from "@/lib/store";
 
 const FLAG = {
   ok: { tone: "ok", label: "Within band" },
@@ -21,6 +23,8 @@ const FLAG = {
 
 export function WorkPlan() {
   const { addPlanLine, closeMonth } = useWork();
+  // 2026-10-24: the Admin's plan line is a request for the SIC / Owner / SA
+  const isAdmin = useStore().state.currentRole === "admin";
   const s = useWorkScope();
   const { work } = s;
   // Each site closes its own month (docs §15). In All sites there is no single
@@ -183,6 +187,8 @@ export function WorkPlan() {
         </div>
       </Panel>
 
+      <PlanRequestsPanel inSite={s.inSite} />
+
       {(isCurrent || s.allSites) && s.canPlan ? (
         <Panel>
           <h3 className="mb-3 font-heading text-sm font-bold">Add to {monthLabel(s.monthOf(formSite))} plan · {s.siteCode(formSite)}</h3>
@@ -202,7 +208,7 @@ export function WorkPlan() {
                 planM2: Number(f.planM2),
                 supervisorId,
               });
-              setMsg(r.ok ? { ok: true, msg: `Plan line added for ${s.staffName(supervisorId)}.` } : { ok: false, msg: r.error });
+              setMsg(r.ok ? { ok: true, msg: r.requested ? `Plan line sent for approval (${s.staffName(supervisorId)}). Undo it below within 60 s.` : `Plan line added for ${s.staffName(supervisorId)}.` } : { ok: false, msg: r.error });
               if (r.ok) setF((x) => ({ ...x, planM2: "" }));
             }}
           >
@@ -243,7 +249,7 @@ export function WorkPlan() {
               </select>
             </div>
             <div className="flex items-end">
-              <Button type="submit" className="w-full">Add plan line</Button>
+              <Button type="submit" className="w-full">{isAdmin ? "Request plan line" : "Add plan line"}</Button>
             </div>
           </form>
         </Panel>

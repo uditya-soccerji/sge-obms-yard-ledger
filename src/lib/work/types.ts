@@ -7,6 +7,7 @@ import type {
   DprScaffoldWorkLine,
   DprStoreBody,
   DprSubmitterType,
+  RequestStep,
 } from "../types";
 /**
  * Work tracking: Work Order → monthly Plan → Jobs → DPR entries → JMS.
@@ -73,6 +74,24 @@ export interface PlanLine {
   carriedM2: number;
   carriedFromId?: string;
   supervisorId: string;
+}
+
+/** The Admin's plan line, final only when the SIC / Owner / Super Admin approve it (2026-10-24) */
+export interface PlanLineRequest {
+  id: string;
+  siteId: string;
+  input: Omit<PlanLine, "id" | "carriedM2" | "month"> & { month?: string };
+  summary: string;
+  requestedBy: string;
+  requestedByName: string;
+  requestedAt: string;
+  status: "pending" | "approved" | "rejected" | "withdrawn";
+  decidedBy?: string;
+  decidedAt?: string;
+  decidedNote?: string;
+  notified?: boolean;
+  seenByRequester?: boolean;
+  thread: RequestStep[];
 }
 
 export type JobStatus = "open" | "awaiting_sic" | "closed";
@@ -335,6 +354,7 @@ export interface WorkState {
   paint: PaintBatch[];
   /** 941 / 942 / 261 steps (merge plan Step 8) */
   paintSteps: PaintStep[];
+  planRequests: PlanLineRequest[];
   expenses: Expense[];
   /** Activity log + notifications (docs §19), newest last */
   events: WorkEvent[];

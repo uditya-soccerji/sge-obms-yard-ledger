@@ -367,4 +367,6 @@ The owner is reworking every role's access, starting at the labourer and moving 
 | JMS | waiting for the Admin's RIL no. and amount | Admin |
 | Work (top) | JMS to confirm / job ready to close | SIC / supervisor |
 | Master Data (top) | change requests waiting (+ Admin: new decisions) | Owner / SA, Admin |
+- **2026-10-24 — Admin's plan lines need approval:** on Work → Plan the Admin's "Request plan line" waits for the **site's SIC, the Owner or the Super Admin**; it joins the plan only when approved (reject needs a reason). Same as the other requests: Undo 60 s, then the SIC (and Owner / SA) alerted with the count; counted on Work and on the Plan tab; the Admin gets "N new", highlight, bell → list.
+- **2026-10-24 — every request has an audit thread:** each step (asked, alert sent, undone, approved, rejected) is kept on the request with who and when (IST, to the second) and shown under **History** on its row; the same steps also go to the audit log. One shared list now serves Daily wages, the Master Data sheets and Plan lines.
 

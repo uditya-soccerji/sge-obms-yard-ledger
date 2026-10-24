@@ -1,6 +1,6 @@
 "use client";
 
-import { masterRequestsTab, SHEET_NAME, WAGE_REQUESTS_TAB, WAGE_UNDO_MS } from "../wage-requests";
+import { masterRequestsTab, PLAN_REQUESTS_TAB, SHEET_NAME, WAGE_REQUESTS_TAB, WAGE_UNDO_MS } from "../wage-requests";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { canCloseJob, canVoidExpense, JMS_FLOW, currentMonthOf, EXPENSE_CATEGORIES, entryDiffs, finalStage, isMonthClosed, jobJmsQty, lineStatus, nextJmsStatuses, nextJobNo, nextMonth, pickWorkOrder, round3, validMembers, woUsage } from "./logic";
 import { createEmptyWork, createWorkSeed, WORK_STORAGE_KEY, WORK_TODAY } from "./seed";
@@ -12,7 +12,7 @@ import type { RoleId } from "../types";
 import { reasonText, type WorkEvent } from "./events";
 import { entryArea } from "./logic";
 import { workRights } from "./permissions";
-import type { DprEntry, DprReport, Expense, Jms, JmsPayment, JmsStatus, JmsSubmission, Job, PlanLine, Stage, WorkState } from "./types";
+import type { DprEntry, DprReport, Expense, Jms, JmsPayment, JmsStatus, JmsSubmission, Job, PlanLine, PlanLineRequest, Stage, WorkState } from "./types";
 import { compareJms, linkCandidates } from "./jms-compare";
 import { inStock, LIFECYCLE, LIFECYCLE_LABEL, paintUsedInMonth, stepVariance } from "./paint-steps";
 import type { PaintBatch, PaintStep } from "./types";
@@ -25,7 +25,7 @@ import { passesNeedingAction, showDate } from "../gate-pass";
 import { workTransferSpec, type WorkTransferId } from "../work-transfer";
 import type { TransferPreviewRow } from "../transfer-types";
 
-type Result = { ok: true; id?: string } | { ok: false; error: string };
+type Result = { ok: true; id?: string; requested?: boolean } | { ok: false; error: string };
 
 interface WorkApi {
   work: WorkState;
@@ -34,6 +34,11 @@ interface WorkApi {
   importExcel: (kind: WorkTransferId, rows: TransferPreviewRow[]) => { ok: boolean; error?: string; added?: number; updated?: number };
   addPlanLine: (input: Omit<PlanLine, "id" | "carriedM2" | "month"> & { month?: string }) => Result;
   startJob: (input: { planLineId: string; location: string; stages: Stage[]; startDate: string; plannedM2?: number; plannedEnd?: string }) => Result;
+  /** 2026-10-24: SIC (on the site) / Owner / SA approve or reject the Admin's plan line; reject needs a reason */
+  decidePlanRequest: (id: string, approve: boolean, note: string) => Result;
+  /** The Admin takes a waiting plan line back (Undo) */
+  withdrawPlanRequest: (id: string) => Result;
+  markPlanRequests: (ids: string[], patch: { notified?: boolean; seenByRequester?: boolean }) => void;
   /** SIC approves the supervisor's job plan or sends it back (docs §24) */
   decideJobPlan: (jobId: string, approve: boolean, note: string) => Result;
   /** Admin enters the JMS no. and amount and approves it for Finance, or sends it back (docs §24) */
@@ -149,7 +154,7 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
       const seq = (s.events[s.events.length - 1]?.seq ?? 0) + 1;
       // Pass alerts come from the clock, not from whoever happened to open the app (docs §24)
       // …and so does the wage-request alert after the Undo window, whichever tab is open
-      const system = e.kind === "pass_expiring" || e.kind === "wage_change_requested" || e.kind === "change_requested";
+      const system = e.kind === "pass_expiring" || e.kind === "wage_change_requested" || e.kind === "change_requested" || e.kind === "plan_requested";
       const ev: WorkEvent = { ...e, id: `ev-${seq}`, seq, at: new Date().toISOString(), day: today(), actorName: system ? "System" : actor.current.name, actorRole: system ? null : actor.current.role, actorAccountId: system ? undefined : actor.current.accountId || undefined, impersonatedBy: system ? undefined : actor.current.impersonatedBy };
       return { ...s, events: [...s.events, ev] };
     });
@@ -165,6 +170,10 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
       impersonatedBy: actor.current.impersonatedBy ?? null,
     });
   }, []);
+  /** A step that belongs in the audit log but isn't a notification (e.g. a request inside its Undo window) */
+  const auditOnly = (action: string, siteId: string, detail: string) => {
+    void remoteAudit({ userId: actor.current.accountId, username: actor.current.name, role: actor.current.role, siteId: siteId || null, module: "work", action, detail, impersonatedBy: actor.current.impersonatedBy ?? null });
+  };
   const siteOfJob = (w: WorkState, job: Job) => w.planLines.find((l) => l.id === job.planLineId)?.siteId ?? "";
 
   useEffect(() => {
@@ -176,7 +185,7 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
       const raw = localStorage.getItem(WORK_STORAGE_KEY);
       if (raw) {
         const saved = JSON.parse(raw) as WorkState;
-        setWork({ ...saved, reports: saved.reports ?? [], submissions: saved.submissions ?? [], paintSteps: saved.paintSteps ?? [] });
+        setWork({ ...saved, reports: saved.reports ?? [], submissions: saved.submissions ?? [], paintSteps: saved.paintSteps ?? [], planRequests: saved.planRequests ?? [] });
       }
     } catch {
       /* keep seed */
@@ -192,7 +201,7 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
       try {
         const saved = JSON.parse(e.newValue) as WorkState;
         fromOtherTab.current = true;
-        setWork({ ...saved, reports: saved.reports ?? [], submissions: saved.submissions ?? [], paintSteps: saved.paintSteps ?? [] });
+        setWork({ ...saved, reports: saved.reports ?? [], submissions: saved.submissions ?? [], paintSteps: saved.paintSteps ?? [], planRequests: saved.planRequests ?? [] });
       } catch {
         /* unreadable copy — keep ours */
       }
@@ -242,6 +251,27 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
     const t = setInterval(tick, 10_000);
     return () => clearInterval(t);
   }, [hydrated, wageReqs, log]);
+
+  const markPlanRef = React.useRef<(ids: string[], patch: { notified?: boolean }) => void>(() => {});
+  // Plan lines: after the Undo window, one alert per site to its SIC (and Owner / SA), with the count
+  const planReqs = work.planRequests;
+  useEffect(() => {
+    if (!hydrated) return;
+    const tick = () => {
+      const now = Date.now();
+      const due = planReqs.filter((r) => r.status === "pending" && !r.notified && now - Date.parse(r.requestedAt) >= WAGE_UNDO_MS);
+      if (!due.length) return;
+      for (const siteId of [...new Set(due.map((r) => r.siteId))]) {
+        const here = due.filter((r) => r.siteId === siteId);
+        const waiting = planReqs.filter((r) => r.siteId === siteId && r.status === "pending").length;
+        log({ kind: "plan_requested", problem: true, siteId, title: `${waiting} plan line request${waiting === 1 ? "" : "s"} waiting for approval`, detail: `New from ${[...new Set(here.map((r) => r.requestedByName))].join(", ")}: ${here.length} · Work → Plan`, tab: PLAN_REQUESTS_TAB, refId: here.map((r) => r.id).join(",") });
+      }
+      markPlanRef.current(due.map((r) => r.id), { notified: true });
+    };
+    tick();
+    const t = setInterval(tick, 10_000);
+    return () => clearInterval(t);
+  }, [hydrated, planReqs, log]);
 
   // Same for Trades / Rate book / Materials / Units: one alert per sheet after the Undo window
   const masterReqs = fullState.masterChangeRequests;
@@ -304,6 +334,16 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
     if (!sup || sup.role !== "supervisor" || sup.siteId !== input.siteId) {
       return { ok: false, error: "Pick a supervisor who works on this site" };
     }
+    // 2026-10-24: the Admin's plan line waits for the SIC / Owner / Super Admin; approval adds it
+    if (actor.current.role === "admin") {
+      const id = uid("plr");
+      const at = new Date().toISOString();
+      const summary = `${input.plant} · ${input.serviceCode} · +${input.planM2} m² · ${sup.name} · ${month}`;
+      const req: PlanLineRequest = { id, siteId: input.siteId, input: { ...input, month }, summary, requestedBy: actor.current.staffId ?? actor.current.accountId, requestedByName: actor.current.name, requestedAt: at, status: "pending", thread: [{ at, byName: actor.current.name, action: "requested" }] };
+      setWork((s) => ({ ...s, planRequests: [req, ...s.planRequests] }));
+      auditOnly("plan_requested", input.siteId, `Plan line requested: ${summary}`);
+      return { ok: true, id, requested: true };
+    }
     // Same plant + service item + supervisor adds to the line; another supervisor gets their own line
     const existing = w.planLines.find(
       (l) => l.month === month && l.siteId === input.siteId && l.plant === input.plant && l.serviceCode === input.serviceCode && l.supervisorId === input.supervisorId
@@ -321,6 +361,54 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
     log({ kind: "plan_added", siteId: input.siteId, subjectStaffId: input.supervisorId, title: `New plan line · ${input.plant} · ${input.planM2} m²`, detail: `${input.serviceCode} · ${month}`, tab: "plan", refId: id });
     return { ok: true, id };
   }, [log]);
+
+  const decidePlanRequest = useCallback<WorkApi["decidePlanRequest"]>((id, approve, note) => {
+    const w = ref.current;
+    const r = w.planRequests.find((x) => x.id === id);
+    if (!r || r.status !== "pending") return { ok: false, error: "This request isn't waiting any more" };
+    const role = actor.current.role;
+    const sicHere = role === "sic" && (accountRef.current?.siteIds ?? []).includes(r.siteId);
+    if (!rights().isBoss && !sicHere) return { ok: false, error: "Only the site's SIC, the Owner or the Super Admin decides plan lines" };
+    if (!approve && !note.trim()) return { ok: false, error: "Give a reason so the Admin knows why" };
+    if (approve) {
+      const res = addPlanLine(r.input);
+      if (!res.ok) return res;
+    }
+    const at = new Date().toISOString();
+    setWork((s) => ({
+      ...s,
+      planRequests: s.planRequests.map((x) =>
+        x.id === id ? { ...x, status: approve ? ("approved" as const) : ("rejected" as const), decidedBy: actor.current.staffId ?? actor.current.accountId, decidedAt: at, decidedNote: note.trim() || undefined, thread: [...x.thread, { at, byName: actor.current.name, action: approve ? ("approved" as const) : ("rejected" as const), ...(note.trim() ? { note: note.trim() } : {}) }] } : x
+      ),
+    }));
+    log({ kind: "plan_decided", problem: !approve, siteId: r.siteId, subjectStaffId: r.requestedBy, title: `Plan line ${approve ? "approved" : "rejected"}: ${r.summary}`, detail: note.trim() || (approve ? "Added to the plan" : ""), tab: PLAN_REQUESTS_TAB, refId: id });
+    return { ok: true, id };
+  }, [addPlanLine, log]);
+
+  const withdrawPlanRequest = useCallback<WorkApi["withdrawPlanRequest"]>((id) => {
+    const r = ref.current.planRequests.find((x) => x.id === id);
+    if (!r || r.status !== "pending") return { ok: false, error: "This request isn't waiting any more" };
+    const me = actor.current.staffId ?? actor.current.accountId;
+    if (r.requestedBy !== me && actor.current.role !== "super_admin") return { ok: false, error: "Only the person who asked can undo it" };
+    const at = new Date().toISOString();
+    setWork((s) => ({ ...s, planRequests: s.planRequests.map((x) => (x.id === id ? { ...x, status: "withdrawn" as const, decidedAt: at, thread: [...x.thread, { at, byName: actor.current.name, action: "undone" as const }] } : x)) }));
+    auditOnly("plan_withdrawn", r.siteId, `Plan line withdrawn: ${r.summary}`);
+    return { ok: true, id };
+  }, []);
+
+  const markPlanRequests = useCallback<WorkApi["markPlanRequests"]>((ids, patch) => {
+    if (!ids.length) return;
+    const set = new Set(ids);
+    const at = new Date().toISOString();
+    setWork((s) => ({
+      ...s,
+      planRequests: s.planRequests.map((x) =>
+        set.has(x.id) ? { ...x, ...patch, ...(patch.notified && !x.notified ? { thread: [...x.thread, { at, byName: "System", action: "alerted" as const, note: "SIC / Owner / Super Admin told" }] } : {}) } : x
+      ),
+    }));
+  }, []);
+
+  markPlanRef.current = markPlanRequests;
 
   const startJob = useCallback<WorkApi["startJob"]>((input) => {
     if (!rights().canEnter) return NOT_ALLOWED;
@@ -1095,8 +1183,8 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const api = useMemo<WorkApi>(
-    () => ({ work, hydrated, importExcel, editExpense, receivePaint, advancePaintLifecycle, recoMonth, postMonth, setRilRef, uploadSubmission, linkSubmission, unlinkSubmission, addPlanLine, startJob, decideJobPlan, adminApproveJms, adminReturnJms, addDpr, removeEntry, saveReport, submitReport, reviewReport, unlockReport, telegramToReport, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork, notify: log }),
-    [work, hydrated, importExcel, editExpense, receivePaint, advancePaintLifecycle, recoMonth, postMonth, setRilRef, uploadSubmission, linkSubmission, unlinkSubmission, addPlanLine, startJob, decideJobPlan, adminApproveJms, adminReturnJms, addDpr, removeEntry, saveReport, submitReport, reviewReport, unlockReport, telegramToReport, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork, log]
+    () => ({ work, hydrated, importExcel, editExpense, receivePaint, advancePaintLifecycle, recoMonth, postMonth, setRilRef, uploadSubmission, linkSubmission, unlinkSubmission, addPlanLine, decidePlanRequest, withdrawPlanRequest, markPlanRequests, startJob, decideJobPlan, adminApproveJms, adminReturnJms, addDpr, removeEntry, saveReport, submitReport, reviewReport, unlockReport, telegramToReport, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork, notify: log }),
+    [work, hydrated, importExcel, editExpense, receivePaint, advancePaintLifecycle, recoMonth, postMonth, setRilRef, uploadSubmission, linkSubmission, unlinkSubmission, addPlanLine, decidePlanRequest, withdrawPlanRequest, markPlanRequests, startJob, decideJobPlan, adminApproveJms, adminReturnJms, addDpr, removeEntry, saveReport, submitReport, reviewReport, unlockReport, telegramToReport, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork, log]
   );
   return <WorkContext.Provider value={api}>{children}</WorkContext.Provider>;
 }
