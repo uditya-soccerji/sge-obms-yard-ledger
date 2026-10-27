@@ -162,3 +162,57 @@ export function paintTypes(items: StoreItem[]): { type: string; label: string; i
 /** The two separate stocks: paint, and everything else */
 export type StockScope = "paint" | "other";
 export const inScope = (item: StoreItem | undefined, scope: StockScope) => !!item && (scope === "paint" ? item.group === "paint" : item.group !== "paint");
+
+// ─── Stock status (2026-10-27): expiry, idle stock, and which batch to issue next ───
+
+/** Paint near expiry = expiring within this many days */
+export const NEAR_EXPIRY_DAYS = 30;
+/** "Not used" = no issue of the item from this store in this many days */
+export const IDLE_DAYS = 30;
+
+const addDays = (iso: string, n: number) => new Date(Date.parse(`${iso}T00:00:00Z`) + n * 864e5).toISOString().slice(0, 10);
+
+/** Batches still in a store with their first-received date, for FEFO (paint) / FIFO (the rest) */
+export function batchesFor(moves: StoreMove[], siteId: string, itemId: string): { batch: string; expiry?: string; received: string; qty: number }[] {
+  const by = new Map<string, { batch: string; expiry?: string; received: string; qty: number }>();
+  for (const m of moves) {
+    if (m.siteId !== siteId || m.itemId !== itemId || !m.batch) continue;
+    const b = by.get(m.batch) ?? { batch: m.batch, expiry: m.expiry, received: m.date, qty: 0 };
+    if (!b.expiry && m.expiry) b.expiry = m.expiry;
+    if (m.kind !== "issue" && m.date < b.received) b.received = m.date;
+    b.qty = round(b.qty + signedIn(m));
+    by.set(m.batch, b);
+  }
+  return [...by.values()].filter((b) => b.qty > 0);
+}
+
+export interface StockStatus {
+  expiredQty: number;
+  nearQty: number;
+  lastIssue?: string;
+  /** In stock but no issue in the last IDLE_DAYS */
+  idle: boolean;
+  /** The batch to issue next: earliest expiry for paint (FEFO), earliest received for the rest (FIFO) */
+  next?: { batch: string; expiry?: string; received: string; qty: number };
+}
+
+export function stockStatus(moves: StoreMove[], siteId: string, item: StoreItem, today: string, inStoreQty: number): StockStatus {
+  const batches = batchesFor(moves, siteId, item.id);
+  const near = addDays(today, NEAR_EXPIRY_DAYS);
+  const expiredQty = round(batches.filter((b) => b.expiry && b.expiry < today).reduce((t, b) => t + b.qty, 0));
+  const nearQty = round(batches.filter((b) => b.expiry && b.expiry >= today && b.expiry <= near).reduce((t, b) => t + b.qty, 0));
+  const lastIssue = moves.filter((m) => m.kind === "issue" && m.siteId === siteId && m.itemId === item.id).map((m) => m.date).sort().pop();
+  const idle = inStoreQty > 0 && (!lastIssue || lastIssue < addDays(today, -IDLE_DAYS));
+  const usable = batches.filter((b) => !b.expiry || b.expiry >= today);
+  const order = item.group === "paint"
+    ? usable.sort((a, b) => (a.expiry ?? "9999").localeCompare(b.expiry ?? "9999") || a.received.localeCompare(b.received))
+    : usable.sort((a, b) => a.received.localeCompare(b.received));
+  return { expiredQty, nearQty, lastIssue, idle, next: order[0] };
+}
+
+/** Quantity issued to each plant of a site, item by item (issued, not yet used — DPR use comes in stage 2) */
+export function byPlant(moves: StoreMove[], siteId: string, itemId: string): { plant: string; qty: number }[] {
+  const m = new Map<string, number>();
+  for (const x of moves) if (x.kind === "issue" && x.siteId === siteId && x.itemId === itemId && x.plant) m.set(x.plant, round((m.get(x.plant) ?? 0) + x.qty));
+  return [...m.entries()].map(([plant, qty]) => ({ plant, qty })).filter((p) => p.qty > 0).sort((a, b) => b.qty - a.qty);
+}

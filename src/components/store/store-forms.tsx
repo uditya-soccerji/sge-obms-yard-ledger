@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { selectCls } from "@/components/work/common";
 import { cell, downloadXlsxWithHeaders, readSpreadsheet } from "@/lib/excel-io";
 import { useStore } from "@/lib/store";
-import { allStoreItems, batchesInStore, GROUP_LABEL, heldBy, inScope, inStore, paintTypeOf, paintTypes, type StockScope } from "@/lib/store-ledger";
+import { allStoreItems, batchesFor, GROUP_LABEL, heldBy, inScope, inStore, paintTypeOf, paintTypes, type StockScope } from "@/lib/store-ledger";
 import { today } from "@/lib/today";
 import type { EquipmentItem, StoreItem } from "@/lib/types";
 import { useWork } from "@/lib/work/store";
@@ -242,7 +242,12 @@ export function IssueForm({ siteId, scope }: { siteId: string; scope: StockScope
   const [msg, setMsg] = useState<Msg>(null);
   const item = items.find((i) => i.id === f.itemId);
   const stock = f.itemId ? inStore(state.storeMoves, siteId, f.itemId) : 0;
-  const batches = f.itemId ? batchesInStore(state.storeMoves, siteId, f.itemId) : [];
+  // FEFO for paint (earliest expiry; expired never offered), FIFO for the rest (earliest received)
+  const batches = f.itemId
+    ? batchesFor(state.storeMoves, siteId, f.itemId)
+        .filter((b) => !b.expiry || b.expiry >= f.date)
+        .sort((a, b) => (scope === "paint" ? (a.expiry ?? "9999").localeCompare(b.expiry ?? "9999") || a.received.localeCompare(b.received) : a.received.localeCompare(b.received)))
+    : [];
   const batch = f.batch || batches[0]?.batch || "";
   const held = f.supervisorId && f.itemId ? heldBy(state.storeMoves, f.supervisorId, f.itemId) : 0;
   const supName = (id: string) => state.staff.find((x) => x.id === id)?.name ?? id;
@@ -297,9 +302,9 @@ export function IssueForm({ siteId, scope }: { siteId: string; scope: StockScope
         </div>
         {batches.length ? (
           <div>
-            <Label>Batch (oldest expiry first)</Label>
+            <Label>Batch ({scope === "paint" ? "FEFO: expiring first" : "FIFO: oldest first"})</Label>
             <select aria-label="Batch" className={selectCls + " mt-1"} value={batch} onChange={(e) => setF({ ...f, batch: e.target.value })}>
-              {batches.map((b) => <option key={b.batch} value={b.batch}>{b.batch} · {b.qty} left{b.expiry ? ` · exp ${b.expiry}` : ""}</option>)}
+              {batches.map((b, n) => <option key={b.batch} value={b.batch}>{n === 0 ? "★ " : ""}{b.batch} · {b.qty} left{b.expiry ? ` · exp ${b.expiry}` : ` · in ${b.received}`}</option>)}
             </select>
           </div>
         ) : null}

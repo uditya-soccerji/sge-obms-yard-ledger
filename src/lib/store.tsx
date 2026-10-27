@@ -1504,6 +1504,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       history: [{ at: new Date().toISOString(), byName: me.name, action: "created" }],
     };
     if (input.kind === "issue") {
+      // Expired stock is never issued (FEFO guidance, 2026-10-27)
+      const exp = input.batch ? cur.storeMoves.find((m) => m.siteId === input.siteId && m.itemId === input.itemId && m.batch === input.batch && m.expiry)?.expiry : undefined;
+      if (exp && exp < input.date) return { ok: false, error: `Batch ${input.batch} expired on ${exp} — it can't be issued` };
       const have = ledgerInStore(cur.storeMoves, input.siteId, input.itemId);
       if (move.qty > have) return { ok: false, error: `Only ${have} ${item!.unit} of ${item!.name} in store — can't issue ${move.qty}` };
     }

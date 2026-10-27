@@ -2,13 +2,14 @@
 
 import { useMemo, useState, type ReactNode } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { AlertTriangle, ArrowDownToLine, Calculator, ArrowUpFromLine, BookOpen, Boxes, ClipboardList, Package, PaintBucket, ShieldAlert, Wrench, type LucideIcon } from "lucide-react";
+import { AlertTriangle, ArrowDownToLine, Calculator, ArrowUpFromLine, BookOpen, Boxes, ClipboardList, Info, Package, PaintBucket, ShieldAlert, Wrench, type LucideIcon } from "lucide-react";
 import { EmptyState, Panel, StatusPill } from "@/components/shared/ui-bits";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { selectCls } from "@/components/work/common";
 import { useStore } from "@/lib/store";
-import { allStoreItems, GROUP_LABEL, heldBy, holdingsOf, inScope, inStore, MOVE_LABEL, paintTypeOf, paintTypes, type StockScope } from "@/lib/store-ledger";
+import { allStoreItems, byPlant, GROUP_LABEL, holdingsOf, IDLE_DAYS, inScope, inStore, MOVE_LABEL, NEAR_EXPIRY_DAYS, paintTypeOf, paintTypes, stockStatus, type StockScope } from "@/lib/store-ledger";
+import { today } from "@/lib/today";
 import { ALL_SITES, entrySiteId } from "@/lib/site-scope";
 import type { StoreGroup, StoreMove } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -149,76 +150,163 @@ export function StoreWorkspace({ panels, counts }: { panels: Partial<Record<Stor
   );
 }
 
-/** Every item: in store, with supervisors, reorder level and status */
+/**
+ * Every item: in store, at each plant, total, the batch to issue next, and its status
+ * (2026-10-27: plant-wise quantities; quantity / type / plant / status filters; expired,
+ * near expiry, not used in a month; FEFO for paint, FIFO for the rest).
+ */
+type StatusKey = "ok" | "low" | "out" | "expired" | "near" | "idle";
+const STATUS_LABEL: Record<StatusKey, string> = { ok: "OK", low: "Low", out: "Out", expired: "Expired", near: `Near expiry`, idle: "Not used 1 month" };
+const STATUS_TONE: Record<StatusKey, "ok" | "warn" | "crit" | "default"> = { ok: "ok", low: "warn", out: "crit", expired: "crit", near: "warn", idle: "default" };
+
 function StockTab({ siteId, scope }: { siteId: string; scope: StockScope }) {
   const { fullState: state } = useStore();
   const [group, setGroup] = useState("");
+  const [plant, setPlant] = useState("");
+  const [status, setStatus] = useState<StatusKey | "">("");
+  const [qtyMode, setQtyMode] = useState<"stock" | "any" | "zero" | "min">("stock");
+  const [minQty, setMinQty] = useState("");
   const [q, setQ] = useState("");
-  const [onlyStock, setOnlyStock] = useState(true);
   const [adding, setAdding] = useState(false);
-  const sups = state.staff.filter((x) => x.role === "supervisor" && x.siteId === siteId).map((x) => x.id);
+  const day = today();
+  const plants = state.sites.find((x) => x.id === siteId)?.plants ?? [];
   const rows = allStoreItems(state)
     .filter((i) => i.active && inScope(i, scope) && (!group || (scope === "paint" ? paintTypeOf(i) === group : i.group === group)) && (!q.trim() || `${i.category} ${i.name} ${i.code ?? ""}`.toLowerCase().includes(q.trim().toLowerCase())))
     .map((i) => {
       const store = inStore(state.storeMoves, siteId, i.id);
-      const withSup = sups.reduce((t, s) => t + heldBy(state.storeMoves, s, i.id), 0);
+      const plantsQty = byPlant(state.storeMoves, siteId, i.id);
+      const atPlants = plantsQty.reduce((t, p) => t + p.qty, 0);
       const reorder = i.reorder[siteId] ?? 0;
-      return { i, store, withSup, reorder, status: store <= 0 ? "out" : reorder > 0 && store < reorder ? "low" : "ok" };
+      const st = stockStatus(state.storeMoves, siteId, i, day, store);
+      const statuses: StatusKey[] = [];
+      if (store <= 0) statuses.push("out");
+      else if (reorder > 0 && store < reorder) statuses.push("low");
+      if (st.expiredQty > 0) statuses.push("expired");
+      if (st.nearQty > 0) statuses.push("near");
+      if (st.idle) statuses.push("idle");
+      if (!statuses.length) statuses.push("ok");
+      const shown = plant ? plantsQty.find((p) => p.plant === plant)?.qty ?? 0 : store + atPlants;
+      return { i, store, plantsQty, atPlants, reorder, st, statuses, shown };
     })
-    .filter((r) => !onlyStock || r.store !== 0 || r.withSup !== 0);
+    .filter((r) => !plant || r.plantsQty.some((p) => p.plant === plant))
+    .filter((r) => !status || r.statuses.includes(status))
+    .filter((r) => (qtyMode === "stock" ? r.shown > 0 : qtyMode === "zero" ? r.shown === 0 : qtyMode === "min" ? r.shown >= (Number(minQty) || 0) : true));
+  const paint = scope === "paint";
   return (
     <div className="space-y-4">
       {adding ? <AddItemForm scope={scope} /> : null}
+      <p className="flex items-start gap-2 rounded-sm border border-[var(--sge-brass)]/40 bg-[var(--sge-brass-wash)] px-3 py-2 text-xs text-[var(--sge-brass-ink)]">
+        <Info aria-hidden className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        {paint ? (
+          <span><b>Issue paint First-Expiry-First-Out (FEFO):</b> always issue the batch that expires first, even if it came in later. Expired paint is never issued — report it. The Issue form picks the right batch for you; “Issue next” below shows it.</span>
+        ) : (
+          <span><b>Issue First-In-First-Out (FIFO):</b> issue the oldest stock received first, so nothing sits until it spoils. “Issue next” below shows the oldest batch; anything not used for a month is marked.</span>
+        )}
+      </p>
       <Panel>
-        <div className="mb-3 flex flex-wrap items-center gap-2">
+        <div className="mb-3 flex flex-wrap items-end gap-2">
           <Button type="button" size="sm" className="gap-1" onClick={() => setAdding((v) => !v)}>
-            {adding ? "Close" : scope === "paint" ? "+ Add paint" : "+ Add item"}
+            {adding ? "Close" : paint ? "+ Add paint" : "+ Add item"}
           </Button>
-          <Input aria-label="Search stock" className="w-56" placeholder="Search item, category, code" value={q} onChange={(e) => setQ(e.target.value)} />
-          <select aria-label={scope === "paint" ? "Paint type" : "Group"} className={selectCls + " w-56"} value={group} onChange={(e) => setGroup(e.target.value)}>
-            <option value="">{scope === "paint" ? "All paint types" : "All groups"}</option>
-            {scope === "paint"
+          <Input aria-label="Search stock" className="w-48" placeholder="Search name or code" value={q} onChange={(e) => setQ(e.target.value)} />
+          <select aria-label={paint ? "Paint type" : "Group"} className={selectCls + " w-48"} value={group} onChange={(e) => setGroup(e.target.value)}>
+            <option value="">{paint ? "All paint types" : "All groups"}</option>
+            {paint
               ? paintTypes(allStoreItems(state)).map((t) => <option key={t.type} value={t.type}>{t.label}</option>)
               : (Object.keys(GROUP_LABEL) as StoreGroup[]).filter((g) => g !== "paint").map((g) => <option key={g} value={g}>{GROUP_LABEL[g]}</option>)}
           </select>
-          <label className="flex items-center gap-1.5 text-xs">
-            <input type="checkbox" checked={onlyStock} onChange={(e) => setOnlyStock(e.target.checked)} /> Only items with stock
-          </label>
+          <select aria-label="Plant" className={selectCls + " w-40"} value={plant} onChange={(e) => setPlant(e.target.value)}>
+            <option value="">All plants</option>
+            {plants.map((p) => <option key={p} value={p}>{p}</option>)}
+          </select>
+          <select aria-label="Status" className={selectCls + " w-44"} value={status} onChange={(e) => setStatus(e.target.value as StatusKey | "")}>
+            <option value="">All statuses</option>
+            {(Object.keys(STATUS_LABEL) as StatusKey[]).map((k) => <option key={k} value={k}>{STATUS_LABEL[k]}</option>)}
+          </select>
+          <select aria-label="Quantity" className={selectCls + " w-40"} value={qtyMode} onChange={(e) => setQtyMode(e.target.value as typeof qtyMode)}>
+            <option value="stock">Quantity: in stock</option>
+            <option value="any">Quantity: any</option>
+            <option value="zero">Quantity: zero</option>
+            <option value="min">Quantity: at least…</option>
+          </select>
+          {qtyMode === "min" ? <Input aria-label="Minimum quantity" className="w-24" type="number" min="0" placeholder="e.g. 50" value={minQty} onChange={(e) => setMinQty(e.target.value)} /> : null}
           <span className="ml-auto text-xs text-[var(--sge-ink-3)]">{rows.length} item(s)</span>
         </div>
         {rows.length === 0 ? (
-          <EmptyState title="No stock yet" detail={onlyStock ? "Receive stock or load the opening stock (Receive tab). Untick “Only items with stock” to see the whole item list." : "No item matches."} />
+          <EmptyState title="Nothing matches" detail="Change the filters, or receive stock / load the opening stock (Receive tab)." />
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[720px] text-sm">
+            <table className="w-full min-w-[900px] text-sm">
               <thead>
                 <tr className="text-left text-[10px] uppercase tracking-wide text-[var(--sge-ink-3)]">
-                  <th className="py-1.5">Item</th>
-                  <th>{scope === "paint" ? "Paint type" : "Group · category"}</th>
+                  <th className="py-1.5">{paint ? "Paint type · SAP code" : "Group · category"}</th>
                   <th className="text-right">In store</th>
-                  <th className="text-right">With supervisors</th>
+                  <th className="pl-3">At plants{plant ? ` (${plant})` : ""}</th>
                   <th className="text-right">Total</th>
+                  <th className="pl-3">Issue next ({paint ? "FEFO" : "FIFO"})</th>
                   <th className="text-right">Reorder at</th>
                   <th className="pl-3">Status</th>
                 </tr>
               </thead>
               <tbody>
                 {rows.map((r) => (
-                  <tr key={r.i.id} className="border-t border-[var(--sge-line)]">
-                    <td className="py-1.5 font-medium">{r.i.name}{r.i.code ? <span className="ml-1 font-mono text-[10px] text-[var(--sge-ink-3)]">{r.i.code}</span> : null}</td>
-                    <td className="text-xs text-[var(--sge-ink-3)]">{scope === "paint" ? paintTypeOf(r.i) : `${GROUP_LABEL[r.i.group]} · ${r.i.category}`}</td>
+                  <tr key={r.i.id} className="border-t border-[var(--sge-line)] align-top">
+                    <td className="py-1.5">
+                      <div className="font-semibold">
+                        {paint ? paintTypeOf(r.i) : `${GROUP_LABEL[r.i.group]} · ${r.i.category}`}
+                        {r.i.code ? <span className="ml-1.5 font-mono text-xs font-normal">{r.i.code}</span> : null}
+                      </div>
+                      {/* The item's name is secondary: small and plain */}
+                      <div className="text-[11px] font-normal text-[var(--sge-ink-3)]">{r.i.name}</div>
+                    </td>
                     <td className="text-right font-mono">{r.store} {r.i.unit}</td>
-                    <td className="text-right font-mono">{r.withSup || "—"}</td>
-                    <td className="text-right font-mono font-semibold">{r.store + r.withSup}</td>
+                    <td className="pl-3">
+                      {r.plantsQty.length === 0 ? (
+                        <span className="text-xs text-[var(--sge-ink-3)]">—</span>
+                      ) : (
+                        <div className="flex flex-wrap gap-1">
+                          {r.plantsQty.map((p) => (
+                            <span key={p.plant} className={cn("rounded-sm border px-1.5 py-0.5 text-[11px]", p.plant === plant ? "border-[var(--sge-brass)] bg-[var(--sge-brass-wash)] font-semibold" : "border-[var(--sge-line)]")}>
+                              {p.plant} <b className="font-mono">{p.qty}</b>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </td>
+                    <td className="text-right font-mono font-semibold">{r.store + r.atPlants}</td>
+                    <td className="pl-3 text-xs">
+                      {r.st.next ? (
+                        <span>
+                          Batch <b>{r.st.next.batch}</b> · {r.st.next.qty} {r.i.unit}
+                          <span className="block text-[10px] text-[var(--sge-ink-3)]">{r.st.next.expiry ? `exp ${r.st.next.expiry}` : `received ${r.st.next.received}`}</span>
+                        </span>
+                      ) : r.store > 0 ? (
+                        <span className="text-[var(--sge-ink-3)]">no batch recorded</span>
+                      ) : (
+                        <span className="text-[var(--sge-ink-3)]">—</span>
+                      )}
+                    </td>
                     <td className="text-right font-mono text-[var(--sge-ink-3)]">{r.reorder || "—"}</td>
-                    <td className="pl-3"><StatusPill tone={r.status === "ok" ? "ok" : r.status === "low" ? "warn" : "crit"}>{r.status === "ok" ? "OK" : r.status === "low" ? "Low" : "Out"}</StatusPill></td>
+                    <td className="pl-3">
+                      <div className="flex flex-wrap gap-1">
+                        {r.statuses.map((k) => (
+                          <StatusPill key={k} tone={STATUS_TONE[k]}>
+                            {STATUS_LABEL[k]}
+                            {k === "expired" ? ` ${r.st.expiredQty}` : k === "near" ? ` ${r.st.nearQty}` : ""}
+                          </StatusPill>
+                        ))}
+                      </div>
+                      {r.statuses.includes("idle") ? <div className="mt-0.5 text-[10px] text-[var(--sge-ink-3)]">{r.st.lastIssue ? `last issued ${r.st.lastIssue}` : "never issued"}</div> : null}
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
         )}
-        <p className="mt-2 text-xs text-[var(--sge-ink-3)]">Reorder levels are set per site by the Owner / Super Admin (stage 4).</p>
+        <p className="mt-2 text-xs text-[var(--sge-ink-3)]">
+          Near expiry = expiring within {NEAR_EXPIRY_DAYS} days. Not used = no issue in the last {IDLE_DAYS} days. At plants = issued to that plant and not yet used. Reorder levels are set per site by the Owner / Super Admin (stage 4).
+        </p>
       </Panel>
       <Holdings siteId={siteId} scope={scope} />
     </div>
