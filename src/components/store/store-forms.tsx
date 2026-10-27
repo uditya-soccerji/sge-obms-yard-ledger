@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label";
 import { selectCls } from "@/components/work/common";
 import { cell, downloadXlsxWithHeaders, readSpreadsheet } from "@/lib/excel-io";
 import { useStore } from "@/lib/store";
-import { allStoreItems, batchesInStore, GROUP_LABEL, heldBy, inStore } from "@/lib/store-ledger";
+import { allStoreItems, batchesInStore, GROUP_LABEL, heldBy, inScope, inStore, paintTypeOf, paintTypes, type StockScope } from "@/lib/store-ledger";
 import { today } from "@/lib/today";
 import type { EquipmentItem, StoreItem } from "@/lib/types";
 import { useWork } from "@/lib/work/store";
@@ -39,10 +39,37 @@ export function ItemPicker({ items, value, onChange }: { items: StoreItem[]; val
   );
 }
 
+/** Paint: pick the paint type, then its SAP code (Type 6: the shade's code) — 2026-10-27 */
+export function PaintPicker({ items, value, onChange, siteId }: { items: StoreItem[]; value: string; onChange: (id: string) => void; siteId?: string }) {
+  const { fullState: state } = useStore();
+  const types = paintTypes(items);
+  const current = items.find((i) => i.id === value);
+  const [typePick, setType] = useState(current ? paintTypeOf(current) : "");
+  const type = current ? paintTypeOf(current) : typePick;
+  const group = types.find((t) => t.type === type);
+  return (
+    <div className="grid gap-2 sm:grid-cols-2">
+      <select aria-label="Paint type" className={selectCls} value={type} onChange={(e) => { setType(e.target.value); const g = types.find((t) => t.type === e.target.value); onChange(g?.items.length === 1 ? g.items[0].id : ""); }}>
+        <option value="">Paint type…</option>
+        {types.map((t) => <option key={t.type} value={t.type}>{t.label}</option>)}
+      </select>
+      <select aria-label="SAP code" className={selectCls} value={value} disabled={!group} onChange={(e) => onChange(e.target.value)}>
+        <option value="">{group ? `SAP code… (${group.items.length})` : "Pick the type first"}</option>
+        {group?.items.map((i) => (
+          <option key={i.id} value={i.id}>
+            {i.code ?? "no code"} · {i.name}{siteId ? ` · ${inStore(state.storeMoves, siteId, i.id)} L in store` : ""}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 /** Receive new stock, or enter opening stock (one line) */
 export function ReceiveForm({ siteId }: { siteId: string }) {
   const { fullState: state, recordStoreMove } = useStore();
-  const items = useMemo(() => allStoreItems(state), [state]);
+  // Other stock only — paint has its own receiving list (2026-10-27)
+  const items = useMemo(() => allStoreItems(state).filter((i) => inScope(i, "other")), [state]);
   const blank = { kind: "receive" as "receive" | "opening", date: today(), itemId: "", qty: "", batch: "", expiry: "", pr: "", po: "", billNo: "", vendor: "", vehicleNo: "", note: "" };
   const [f, setF] = useState(blank);
   const [msg, setMsg] = useState<Msg>(null);
@@ -127,9 +154,9 @@ export function ReceiveForm({ siteId }: { siteId: string }) {
 const OPENING_HEADERS = ["Item ID", "Group", "Category", "Item", "Unit", "Qty", "Batch", "Expiry (YYYY-MM-DD)", "Note"];
 
 /** Opening stock from Excel: download the item list, fill Qty, upload — all or nothing */
-export function OpeningStockUpload({ siteId }: { siteId: string }) {
+export function OpeningStockUpload({ siteId, scope }: { siteId: string; scope: StockScope }) {
   const { fullState: state, importOpeningStock } = useStore();
-  const items = useMemo(() => allStoreItems(state).filter((i) => i.active), [state]);
+  const items = useMemo(() => allStoreItems(state).filter((i) => i.active && inScope(i, scope)), [state, scope]);
   const [date, setDate] = useState(today());
   const [msg, setMsg] = useState<Msg>(null);
   const [pending, setPending] = useState<{ itemId: string; qty: number; batch?: string; expiry?: string; note?: string }[] | null>(null);
@@ -137,7 +164,7 @@ export function OpeningStockUpload({ siteId }: { siteId: string }) {
   const siteCode = state.sites.find((x) => x.id === siteId)?.code ?? siteId;
   return (
     <Panel>
-      <h3 className="mb-1 font-heading text-sm font-bold">Opening stock from Excel</h3>
+      <h3 className="mb-1 font-heading text-sm font-bold">{scope === "paint" ? "Paint" : "Other stock"}: opening stock from Excel</h3>
       <p className="mb-3 text-xs text-[var(--sge-ink-3)]">Download the item list, fill <b>Qty</b> (and batch / expiry for paint) for what you counted, upload it. Rows left at 0 are skipped. One bad row stops the whole upload, so nothing half-loads.</p>
       <div className="flex flex-wrap items-end gap-3">
         <div>
@@ -148,7 +175,7 @@ export function OpeningStockUpload({ siteId }: { siteId: string }) {
           type="button"
           variant="outline"
           className="gap-1.5"
-          onClick={() => downloadXlsxWithHeaders(`opening-stock-${siteCode}.xlsx`, "Opening stock", OPENING_HEADERS, items.map((i) => ({ "Item ID": i.id, Group: GROUP_LABEL[i.group], Category: i.category, Item: i.name, Unit: i.unit, Qty: 0, Batch: "", "Expiry (YYYY-MM-DD)": "", Note: "" })))}
+          onClick={() => downloadXlsxWithHeaders(`opening-${scope}-${siteCode}.xlsx`, "Opening stock", OPENING_HEADERS, items.map((i) => ({ "Item ID": i.id, Group: GROUP_LABEL[i.group], Category: i.group === "paint" ? paintTypeOf(i) : i.category, Item: i.group === "paint" ? `${i.code ?? ""} ${i.name}`.trim() : i.name, Unit: i.unit, Qty: 0, Batch: "", "Expiry (YYYY-MM-DD)": "", Note: "" })))}
         >
           <Download aria-hidden className="h-4 w-4" /> Item list to fill
         </Button>
@@ -204,10 +231,10 @@ export function OpeningStockUpload({ siteId }: { siteId: string }) {
 }
 
 /** Issue to a supervisor — shows what he already holds; an extra issue is flagged for Owner / SA */
-export function IssueForm({ siteId }: { siteId: string }) {
+export function IssueForm({ siteId, scope }: { siteId: string; scope: StockScope }) {
   const { fullState: state, recordStoreMove } = useStore();
   const { notify } = useWork();
-  const items = useMemo(() => allStoreItems(state), [state]);
+  const items = useMemo(() => allStoreItems(state).filter((i) => inScope(i, scope)), [state, scope]);
   const supervisors = state.staff.filter((x) => x.role === "supervisor" && x.siteId === siteId);
   const blank = { date: today(), supervisorId: "", plant: "", itemId: "", qty: "", batch: "", note: "" };
   const plants = state.sites.find((x) => x.id === siteId)?.plants ?? [];
@@ -221,7 +248,7 @@ export function IssueForm({ siteId }: { siteId: string }) {
   const supName = (id: string) => state.staff.find((x) => x.id === id)?.name ?? id;
   return (
     <Panel>
-      <h3 className="mb-3 font-heading text-sm font-bold">Issue to a supervisor</h3>
+      <h3 className="mb-3 font-heading text-sm font-bold">{scope === "paint" ? "Issue paint to a supervisor" : "Issue to a supervisor"}</h3>
       <form
         className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"
         onSubmit={(e) => {
@@ -254,8 +281,14 @@ export function IssueForm({ siteId }: { siteId: string }) {
           <Input aria-label="Date" className="mt-1" type="date" max={today()} value={f.date} onChange={(e) => setF({ ...f, date: e.target.value })} />
         </div>
         <div className="sm:col-span-2">
-          <Label>Item</Label>
-          <div className="mt-1"><ItemPicker items={items} value={f.itemId} onChange={(itemId) => setF({ ...f, itemId, batch: "" })} /></div>
+          <Label>{scope === "paint" ? "Paint type → SAP code" : "Item"}</Label>
+          <div className="mt-1">
+            {scope === "paint" ? (
+              <PaintPicker items={items} siteId={siteId} value={f.itemId} onChange={(itemId) => setF({ ...f, itemId, batch: "" })} />
+            ) : (
+              <ItemPicker items={items} value={f.itemId} onChange={(itemId) => setF({ ...f, itemId, batch: "" })} />
+            )}
+          </div>
         </div>
         <div>
           <Label>Quantity{item ? ` (${item.unit})` : ""}</Label>
@@ -303,10 +336,12 @@ const ADD_KINDS: { id: AddKind; label: string; unit: string; hint: string }[] = 
 const MACHINE_TYPES: EquipmentItem["type"][] = ["hopper", "compressor", "airless", "harness", "ifr", "rope_access"];
 
 /** Add an item to the store's list — paint, materials, equipment, PPE, tagged machinery, fuel or others */
-export function AddItemForm({ siteId }: { siteId: string }) {
+export function AddItemForm({ scope }: { scope: StockScope }) {
   const { fullState: state, addStoreItem, addTagged } = useStore();
   const items = allStoreItems(state);
-  const [kind, setKind] = useState<AddKind>("material");
+  // Paint and other stock are kept apart: each Stock tab adds only its own kinds
+  const kinds = ADD_KINDS.filter((x) => (scope === "paint" ? x.id === "paint" : x.id !== "paint"));
+  const [kind, setKind] = useState<AddKind>(scope === "paint" ? "paint" : "material");
   const k = ADD_KINDS.find((x) => x.id === kind)!;
   const categories = [...new Set(items.filter((i) => i.group === kind).map((i) => i.category))];
   const [f, setF] = useState({ category: "", name: "", code: "", unit: "", trackExpiry: false, machine: "hopper" as EquipmentItem["type"], tag: "", expiry: "", value: "" });
@@ -316,7 +351,7 @@ export function AddItemForm({ siteId }: { siteId: string }) {
       <h3 className="mb-1 font-heading text-sm font-bold">Add an item to the store</h3>
       <p className="mb-3 text-xs text-[var(--sge-ink-3)]">Pick what kind of item it is. Once added it can be received, issued and counted like everything else.</p>
       <div role="group" aria-label="Kind of item" className="mb-3 flex flex-wrap gap-1">
-        {ADD_KINDS.map((x) => (
+        {kinds.map((x) => (
           <button
             key={x.id}
             type="button"
@@ -329,8 +364,6 @@ export function AddItemForm({ siteId }: { siteId: string }) {
         ))}
       </div>
       <p className="mb-3 text-xs text-[var(--sge-ink-3)]">{k.hint}</p>
-      {kind === "paint" ? <PaintReceiveList siteId={siteId} /> : null}
-      {kind === "paint" ? <h4 className="mb-2 mt-5 text-xs font-semibold uppercase tracking-wide text-[var(--sge-ink-3)]">Paint not in the list? Add a new paint</h4> : null}
       {kind === "machinery" ? (
         <form
           className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5"
@@ -373,9 +406,19 @@ export function AddItemForm({ siteId }: { siteId: string }) {
           }}
         >
           <div>
-            <Label>Category</Label>
-            <Input aria-label="New item category" className="mt-1" list={`store-categories-${kind}`} placeholder={categories[0] ?? k.label} value={f.category} onChange={(e) => setF({ ...f, category: e.target.value })} />
-            <datalist id={`store-categories-${kind}`}>{categories.map((c) => <option key={c} value={c} />)}</datalist>
+            <Label>{kind === "paint" ? "Paint type" : "Category"}</Label>
+            {kind === "paint" ? (
+              <select aria-label="New paint type" className={selectCls + " mt-1"} value={f.category} onChange={(e) => setF({ ...f, category: e.target.value })}>
+                <option value="">Pick the type…</option>
+                {paintTypes(items).map((t) => <option key={t.type} value={t.type}>{t.label}</option>)}
+                <option value="Other paint">Other paint (not an RIL type)</option>
+              </select>
+            ) : (
+              <>
+                <Input aria-label="New item category" className="mt-1" list={`store-categories-${kind}`} placeholder={categories[0] ?? k.label} value={f.category} onChange={(e) => setF({ ...f, category: e.target.value })} />
+                <datalist id={`store-categories-${kind}`}>{categories.map((c) => <option key={c} value={c} />)}</datalist>
+              </>
+            )}
           </div>
           <div className="sm:col-span-2">
             <Label>{kind === "paint" ? "Paint name" : "Item name"}</Label>
@@ -409,39 +452,56 @@ export function AddItemForm({ siteId }: { siteId: string }) {
 export function PaintReceiveList({ siteId }: { siteId: string }) {
   const { fullState: state, recordStoreMove } = useStore();
   const paints = allStoreItems(state).filter((i) => i.group === "paint" && i.active).sort((a, b) => a.name.localeCompare(b.name));
-  const [head, setHead] = useState({ date: today(), vehicleNo: "", billNo: "", vendor: "" });
+  const [head, setHead] = useState({ kind: "receive" as "receive" | "opening", type: "", date: today(), vehicleNo: "", billNo: "", vendor: "" });
   const [rows, setRows] = useState<Record<string, { litres: string; batch: string; expiry: string }>>({});
   const [q, setQ] = useState("");
   const [msg, setMsg] = useState<Msg>(null);
   const row = (id: string) => rows[id] ?? { litres: "", batch: "", expiry: "" };
   const setRow = (id: string, patch: Partial<{ litres: string; batch: string; expiry: string }>) => setRows((r) => ({ ...r, [id]: { ...(r[id] ?? { litres: "", batch: "", expiry: "" }), ...patch } }));
   const filled = paints.filter((p) => Number(row(p.id).litres) > 0);
-  const shown = paints.filter((p) => !q.trim() || `${p.name} ${p.code ?? ""} ${p.category}`.toLowerCase().includes(q.trim().toLowerCase()));
+  const types = paintTypes(paints);
+  const shown = paints
+    .filter((p) => (!head.type || paintTypeOf(p) === head.type) && (!q.trim() || `${p.name} ${p.code ?? ""} ${paintTypeOf(p)}`.toLowerCase().includes(q.trim().toLowerCase())))
+    .sort((a, b) => types.findIndex((t) => t.type === paintTypeOf(a)) - types.findIndex((t) => t.type === paintTypeOf(b)) || a.name.localeCompare(b.name));
   return (
     <form
       className="space-y-3"
       onSubmit={(e) => {
         e.preventDefault();
         if (!filled.length) return setMsg({ ok: false, text: "Type the litres received against at least one paint" });
-        if (!head.vehicleNo.trim()) return setMsg({ ok: false, text: "Give the vehicle no." });
+        if (head.kind === "receive" && !head.vehicleNo.trim()) return setMsg({ ok: false, text: "Give the vehicle no." });
         const done: string[] = [];
         for (const p of filled) {
           const r = row(p.id);
-          const res = recordStoreMove({ kind: "receive", date: head.date, itemId: p.id, qty: Number(r.litres), siteId, batch: r.batch || undefined, expiry: r.expiry || undefined, vehicleNo: head.vehicleNo.trim(), billNo: head.billNo || undefined, vendor: head.vendor || undefined });
+          const res = recordStoreMove({ kind: head.kind, date: head.date, itemId: p.id, qty: Number(r.litres), siteId, batch: r.batch || undefined, expiry: r.expiry || undefined, vehicleNo: head.vehicleNo.trim() || undefined, billNo: head.billNo || undefined, vendor: head.vendor || undefined });
           if (!res.ok) return setMsg({ ok: false, text: `${p.name}: ${res.error}${done.length ? ` (saved before it: ${done.join(", ")})` : ""}` });
           done.push(`${p.name} ${r.litres} L`);
         }
         setRows({});
-        setMsg({ ok: true, text: `Received on ${head.date} by ${head.vehicleNo.trim()}: ${done.join(", ")}.` });
+        setMsg({ ok: true, text: head.kind === "opening" ? `Opening stock on ${head.date}: ${done.join(", ")}.` : `Received on ${head.date} by ${head.vehicleNo.trim()}: ${done.join(", ")}.` });
       }}
     >
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <div>
-          <Label>Date received</Label>
+          <Label>Entry</Label>
+          <select aria-label="Paint entry" className={selectCls + " mt-1"} value={head.kind} onChange={(e) => setHead({ ...head, kind: e.target.value as "receive" | "opening" })}>
+            <option value="receive">Receive (new paint)</option>
+            <option value="opening">Opening stock (count)</option>
+          </select>
+        </div>
+        <div>
+          <Label>Paint type</Label>
+          <select aria-label="Paint type filter" className={selectCls + " mt-1"} value={head.type} onChange={(e) => setHead({ ...head, type: e.target.value })}>
+            <option value="">All types ({paints.length} SAP codes)</option>
+            {types.map((t) => <option key={t.type} value={t.type}>{t.label} ({t.items.length})</option>)}
+          </select>
+        </div>
+        <div>
+          <Label>{head.kind === "opening" ? "Count date" : "Date received"}</Label>
           <Input aria-label="Date received" className="mt-1" type="date" max={today()} value={head.date} onChange={(e) => setHead({ ...head, date: e.target.value })} />
         </div>
         <div>
-          <Label>Vehicle no. *</Label>
+          <Label>Vehicle no.{head.kind === "receive" ? " *" : ""}</Label>
           <Input aria-label="Vehicle no." className="mt-1" placeholder="e.g. GJ10 AB 1234" value={head.vehicleNo} onChange={(e) => setHead({ ...head, vehicleNo: e.target.value.toUpperCase() })} />
         </div>
         <div>
@@ -458,10 +518,11 @@ export function PaintReceiveList({ siteId }: { siteId: string }) {
         <table className="w-full min-w-[760px] text-sm">
           <thead>
             <tr className="text-left text-[10px] uppercase tracking-wide text-[var(--sge-ink-3)]">
-              <th className="py-1.5">Paint</th>
+              <th className="py-1.5">Type</th>
               <th>SAP code</th>
+              <th>Paint</th>
               <th className="text-right">In store now</th>
-              <th className="w-28 pl-3">Litres received</th>
+              <th className="w-28 pl-3">Litres</th>
               <th className="w-32 pl-2">Batch (optional)</th>
               <th className="w-36 pl-2">Expiry (optional)</th>
             </tr>
@@ -469,8 +530,9 @@ export function PaintReceiveList({ siteId }: { siteId: string }) {
           <tbody>
             {shown.map((p) => (
               <tr key={p.id} className={Number(row(p.id).litres) > 0 ? "border-t border-[var(--sge-line)] bg-[var(--sge-ok-wash)]" : "border-t border-[var(--sge-line)]"}>
-                <td className="py-1.5 font-medium">{p.name}<div className="text-[10px] text-[var(--sge-ink-3)]">{p.category}</div></td>
+                <td className="py-1.5 text-xs font-semibold">{paintTypeOf(p)}</td>
                 <td className="font-mono text-xs">{p.code ?? "—"}</td>
+                <td className="font-medium">{p.name}</td>
                 <td className="text-right font-mono text-xs">{inStore(state.storeMoves, siteId, p.id)} L</td>
                 <td className="pl-3"><Input aria-label={`Litres ${p.code ?? p.name}`} className="h-8" type="number" min="0" step="any" value={row(p.id).litres} onChange={(e) => setRow(p.id, { litres: e.target.value })} /></td>
                 <td className="pl-2"><Input aria-label={`Batch ${p.code ?? p.name}`} className="h-8" value={row(p.id).batch} onChange={(e) => setRow(p.id, { batch: e.target.value })} /></td>
@@ -481,7 +543,7 @@ export function PaintReceiveList({ siteId }: { siteId: string }) {
         </table>
       </div>
       <div className="flex flex-wrap items-center gap-3">
-        <Button type="submit" disabled={!filled.length}>Save {filled.length ? `${filled.length} paint receipt(s) · ${filled.reduce((t, p) => t + Number(row(p.id).litres), 0)} L` : "receipts"}</Button>
+        <Button type="submit" disabled={!filled.length}>Save {filled.length ? `${filled.length} paint ${head.kind === "opening" ? "opening line(s)" : "receipt(s)"} · ${filled.reduce((t, p) => t + Number(row(p.id).litres), 0)} L` : "receipts"}</Button>
         {show(msg)}
       </div>
     </form>

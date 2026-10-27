@@ -2,71 +2,94 @@
 
 import { useMemo, useState, type ReactNode } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { AlertTriangle, ArrowDownToLine, Calculator, ArrowUpFromLine, BookOpen, Boxes, ClipboardList, PaintBucket, ShieldAlert, Wrench, type LucideIcon } from "lucide-react";
+import { AlertTriangle, ArrowDownToLine, Calculator, ArrowUpFromLine, BookOpen, Boxes, ClipboardList, Package, PaintBucket, ShieldAlert, Wrench, type LucideIcon } from "lucide-react";
 import { EmptyState, Panel, StatusPill } from "@/components/shared/ui-bits";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { selectCls } from "@/components/work/common";
 import { useStore } from "@/lib/store";
-import { allStoreItems, GROUP_LABEL, heldBy, holdingsOf, inStore, MOVE_LABEL } from "@/lib/store-ledger";
+import { allStoreItems, GROUP_LABEL, heldBy, holdingsOf, inScope, inStore, MOVE_LABEL, paintTypeOf, paintTypes, type StockScope } from "@/lib/store-ledger";
 import { ALL_SITES, entrySiteId } from "@/lib/site-scope";
 import type { StoreGroup, StoreMove } from "@/lib/types";
 import { cn } from "@/lib/utils";
-import { AddItemForm, IssueForm, OpeningStockUpload, ReceiveForm } from "./store-forms";
+import { AddItemForm, IssueForm, OpeningStockUpload, PaintReceiveList, ReceiveForm } from "./store-forms";
 import { MpsAchievable } from "./mps-achievable";
 
 const stamp = (iso: string) => new Date(iso).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 
 export type StoreTabId = "stock" | "receive" | "issue" | "ledger" | "mps" | "ppe" | "machinery" | "paint" | "dprs";
-const TABS: { id: StoreTabId; label: string; icon: LucideIcon }[] = [
-  { id: "stock", label: "Stock", icon: Boxes },
-  { id: "receive", label: "Receive", icon: ArrowDownToLine },
-  { id: "issue", label: "Issue", icon: ArrowUpFromLine },
-  { id: "ledger", label: "Ledger", icon: BookOpen },
-  { id: "mps", label: "MPS achievable", icon: Calculator },
-  { id: "ppe", label: "PPE", icon: ShieldAlert },
-  { id: "machinery", label: "Machinery", icon: Wrench },
-  { id: "paint", label: "Paint board", icon: PaintBucket },
-  { id: "dprs", label: "Store DPRs", icon: ClipboardList },
-];
+type SectionId = "paint" | "other" | "machinery" | "dprs";
+type Tab = { id: StoreTabId; label: string; icon: LucideIcon };
 
 /**
- * 2026-10-27, stage 1 of the store process: the store keeper's Home is a workspace —
- * Stock, Receive, Issue, Ledger — plus the existing PPE, machinery, paint board and store DPRs.
+ * 2026-10-27: paint and other stock are kept apart. Each has its own Stock · Receive · Issue · Ledger;
+ * paint adds MPS achievable and the paint board; other stock adds the PPE flags from DPRs.
  */
+const SECTIONS: { id: SectionId; label: string; icon: LucideIcon; tabs: Tab[] }[] = [
+  {
+    id: "paint",
+    label: "Paint",
+    icon: PaintBucket,
+    tabs: [
+      { id: "stock", label: "Paint stock", icon: Boxes },
+      { id: "receive", label: "Receive", icon: ArrowDownToLine },
+      { id: "issue", label: "Issue", icon: ArrowUpFromLine },
+      { id: "ledger", label: "Ledger", icon: BookOpen },
+      { id: "mps", label: "MPS achievable", icon: Calculator },
+      { id: "paint", label: "Paint board", icon: ClipboardList },
+    ],
+  },
+  {
+    id: "other",
+    label: "Other stock",
+    icon: Package,
+    tabs: [
+      { id: "stock", label: "Stock", icon: Boxes },
+      { id: "receive", label: "Receive", icon: ArrowDownToLine },
+      { id: "issue", label: "Issue", icon: ArrowUpFromLine },
+      { id: "ledger", label: "Ledger", icon: BookOpen },
+      { id: "ppe", label: "PPE from DPRs", icon: ShieldAlert },
+    ],
+  },
+  { id: "machinery", label: "Machinery", icon: Wrench, tabs: [] },
+  { id: "dprs", label: "Store DPRs", icon: ClipboardList, tabs: [] },
+];
+
+const pill = (on: boolean) =>
+  cn("inline-flex items-center gap-1.5 rounded-sm px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.1em]", on ? "bg-[var(--sge-night)] text-[var(--sge-brass-wash)]" : "bg-[var(--sge-paper-2)] text-[var(--sge-ink-2)] hover:bg-[var(--sge-brass-wash)]");
+const badge = (c: number) => (c ? <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--sge-brass)] px-1 text-[10px] font-bold leading-none tracking-normal text-white">{c}</span> : null);
+
 export function StoreWorkspace({ panels, counts }: { panels: Partial<Record<StoreTabId, ReactNode>>; counts?: Partial<Record<StoreTabId, number>> }) {
   const { fullState: state } = useStore();
   const params = useSearchParams();
   const router = useRouter();
   const pathname = usePathname();
-  const tab = (TABS.find((t) => t.id === params.get("tab"))?.id ?? "stock") as StoreTabId;
+  const sec = SECTIONS.find((x) => x.id === params.get("sec")) ?? SECTIONS[0];
+  const tab = (sec.tabs.find((t) => t.id === params.get("tab"))?.id ?? sec.tabs[0]?.id ?? sec.id) as StoreTabId;
+  const go = (s: SectionId, t?: StoreTabId) => router.replace(`${pathname}?sec=${s}${t ? `&tab=${t}` : ""}`);
   // The store's site: the header's site; on All sites (central, Owner, SA) pick one here
   const allSites = state.currentSiteId === ALL_SITES;
   const [picked, setPicked] = useState("");
   const siteId = allSites ? picked || entrySiteId(state) : state.currentSiteId;
   const sites = state.sites.filter((x) => x.enabled);
-  const lowCount = useMemo(() => allStoreItems(state).filter((i) => i.active && (i.reorder[siteId] ?? 0) > 0 && inStore(state.storeMoves, siteId, i.id) < (i.reorder[siteId] ?? 0)).length, [state, siteId]);
-  const n = (id: StoreTabId) => (id === "stock" ? lowCount : counts?.[id] ?? 0);
+  const low = useMemo(() => {
+    const items = allStoreItems(state).filter((i) => i.active && (i.reorder[siteId] ?? 0) > 0 && inStore(state.storeMoves, siteId, i.id) < (i.reorder[siteId] ?? 0));
+    return { paint: items.filter((i) => inScope(i, "paint")).length, other: items.filter((i) => inScope(i, "other")).length };
+  }, [state, siteId]);
+  const secCount = (id: SectionId) => (id === "paint" ? low.paint : id === "other" ? low.other + (counts?.ppe ?? 0) : id === "machinery" ? counts?.machinery ?? 0 : 0);
+  const tabCount = (id: StoreTabId) => (id === "stock" ? (sec.id === "paint" ? low.paint : low.other) : id === "ppe" ? counts?.ppe ?? 0 : 0);
+  const scope: StockScope = sec.id === "paint" ? "paint" : "other";
 
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-1 border-b border-[var(--sge-line)] pb-2">
-        {TABS.map((t) => {
-          const Icon = t.icon;
-          const c = n(t.id);
+      <div className="flex flex-wrap items-center gap-1.5 border-b border-[var(--sge-line)] pb-2">
+        {SECTIONS.map((x) => {
+          const Icon = x.icon;
           return (
-            <button
-              key={t.id}
-              type="button"
-              onClick={() => router.replace(`${pathname}?tab=${t.id}`)}
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded-sm px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.1em]",
-                tab === t.id ? "bg-[var(--sge-night)] text-[var(--sge-brass-wash)]" : "bg-[var(--sge-paper-2)] text-[var(--sge-ink-2)] hover:bg-[var(--sge-brass-wash)]"
-              )}
-            >
-              <Icon aria-hidden className="h-3.5 w-3.5" />
-              {t.label}
-              {c ? <span className="inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--sge-brass)] px-1 text-[10px] font-bold leading-none tracking-normal text-white">{c}</span> : null}
+            <button key={x.id} type="button" onClick={() => go(x.id)} className={cn(pill(sec.id === x.id), "px-4 py-2 text-xs")}>
+              <Icon aria-hidden className="h-4 w-4" />
+              {x.label}
+              {badge(secCount(x.id))}
             </button>
           );
         })}
@@ -76,38 +99,66 @@ export function StoreWorkspace({ panels, counts }: { panels: Partial<Record<Stor
           </select>
         ) : null}
       </div>
-      {tab === "stock" ? <StockTab siteId={siteId} /> : null}
-      {tab === "receive" ? (
-        <div className="space-y-4">
-          <ReceiveForm siteId={siteId} />
-          <OpeningStockUpload siteId={siteId} />
-          <LedgerList siteId={siteId} kinds={["receive", "opening"]} title="Recent receipts" />
+      {sec.tabs.length ? (
+        <div className="flex flex-wrap items-center gap-1 border-l-4 border-[var(--sge-brass)] pl-2">
+          {sec.tabs.map((t) => {
+            const Icon = t.icon;
+            return (
+              <button key={t.id} type="button" onClick={() => go(sec.id, t.id)} className={pill(tab === t.id)}>
+                <Icon aria-hidden className="h-3.5 w-3.5" />
+                {t.label}
+                {badge(tabCount(t.id))}
+              </button>
+            );
+          })}
         </div>
       ) : null}
-      {tab === "issue" ? (
-        <div className="space-y-4">
-          <IssueForm siteId={siteId} />
-          <Holdings siteId={siteId} />
-          <LedgerList siteId={siteId} kinds={["issue"]} title="Recent issues" />
-        </div>
+      {sec.id === "machinery" ? panels.machinery ?? null : null}
+      {sec.id === "dprs" ? panels.dprs ?? null : null}
+      {sec.id === "paint" || sec.id === "other" ? (
+        <>
+          {tab === "stock" ? <StockTab siteId={siteId} scope={scope} /> : null}
+          {tab === "receive" ? (
+            <div className="space-y-4">
+              {scope === "paint" ? (
+                <Panel>
+                  <h3 className="mb-3 font-heading text-sm font-bold">Receive paint</h3>
+                  <PaintReceiveList siteId={siteId} />
+                </Panel>
+              ) : (
+                <ReceiveForm siteId={siteId} />
+              )}
+              <OpeningStockUpload siteId={siteId} scope={scope} />
+              <LedgerList siteId={siteId} scope={scope} kinds={["receive", "opening"]} title="Recent receipts" />
+            </div>
+          ) : null}
+          {tab === "issue" ? (
+            <div className="space-y-4">
+              <IssueForm siteId={siteId} scope={scope} />
+              <Holdings siteId={siteId} scope={scope} />
+              <LedgerList siteId={siteId} scope={scope} kinds={["issue"]} title="Recent issues" />
+            </div>
+          ) : null}
+          {tab === "ledger" ? <LedgerList siteId={siteId} scope={scope} title={scope === "paint" ? "Paint ledger" : "Store ledger (other stock)"} /> : null}
+          {tab === "mps" ? <MpsAchievable siteId={siteId} /> : null}
+          {tab === "paint" ? panels.paint ?? null : null}
+          {tab === "ppe" ? panels.ppe ?? null : null}
+        </>
       ) : null}
-      {tab === "ledger" ? <LedgerList siteId={siteId} title="Store ledger" /> : null}
-      {tab === "mps" ? <MpsAchievable siteId={siteId} /> : null}
-      {tab !== "stock" && tab !== "receive" && tab !== "issue" && tab !== "ledger" && tab !== "mps" ? panels[tab] ?? null : null}
     </div>
   );
 }
 
 /** Every item: in store, with supervisors, reorder level and status */
-function StockTab({ siteId }: { siteId: string }) {
+function StockTab({ siteId, scope }: { siteId: string; scope: StockScope }) {
   const { fullState: state } = useStore();
-  const [group, setGroup] = useState<StoreGroup | "">("");
+  const [group, setGroup] = useState("");
   const [q, setQ] = useState("");
   const [onlyStock, setOnlyStock] = useState(true);
   const [adding, setAdding] = useState(false);
   const sups = state.staff.filter((x) => x.role === "supervisor" && x.siteId === siteId).map((x) => x.id);
   const rows = allStoreItems(state)
-    .filter((i) => i.active && (!group || i.group === group) && (!q.trim() || `${i.category} ${i.name} ${i.code ?? ""}`.toLowerCase().includes(q.trim().toLowerCase())))
+    .filter((i) => i.active && inScope(i, scope) && (!group || (scope === "paint" ? paintTypeOf(i) === group : i.group === group)) && (!q.trim() || `${i.category} ${i.name} ${i.code ?? ""}`.toLowerCase().includes(q.trim().toLowerCase())))
     .map((i) => {
       const store = inStore(state.storeMoves, siteId, i.id);
       const withSup = sups.reduce((t, s) => t + heldBy(state.storeMoves, s, i.id), 0);
@@ -117,16 +168,18 @@ function StockTab({ siteId }: { siteId: string }) {
     .filter((r) => !onlyStock || r.store !== 0 || r.withSup !== 0);
   return (
     <div className="space-y-4">
-      {adding ? <AddItemForm siteId={siteId} /> : null}
+      {adding ? <AddItemForm scope={scope} /> : null}
       <Panel>
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <Button type="button" size="sm" className="gap-1" onClick={() => setAdding((v) => !v)}>
-            {adding ? "Close" : "+ Add item"}
+            {adding ? "Close" : scope === "paint" ? "+ Add paint" : "+ Add item"}
           </Button>
           <Input aria-label="Search stock" className="w-56" placeholder="Search item, category, code" value={q} onChange={(e) => setQ(e.target.value)} />
-          <select aria-label="Group" className={selectCls + " w-40"} value={group} onChange={(e) => setGroup(e.target.value as StoreGroup | "")}>
-            <option value="">All groups</option>
-            {(Object.keys(GROUP_LABEL) as StoreGroup[]).map((g) => <option key={g} value={g}>{GROUP_LABEL[g]}</option>)}
+          <select aria-label={scope === "paint" ? "Paint type" : "Group"} className={selectCls + " w-56"} value={group} onChange={(e) => setGroup(e.target.value)}>
+            <option value="">{scope === "paint" ? "All paint types" : "All groups"}</option>
+            {scope === "paint"
+              ? paintTypes(allStoreItems(state)).map((t) => <option key={t.type} value={t.type}>{t.label}</option>)
+              : (Object.keys(GROUP_LABEL) as StoreGroup[]).filter((g) => g !== "paint").map((g) => <option key={g} value={g}>{GROUP_LABEL[g]}</option>)}
           </select>
           <label className="flex items-center gap-1.5 text-xs">
             <input type="checkbox" checked={onlyStock} onChange={(e) => setOnlyStock(e.target.checked)} /> Only items with stock
@@ -141,7 +194,7 @@ function StockTab({ siteId }: { siteId: string }) {
               <thead>
                 <tr className="text-left text-[10px] uppercase tracking-wide text-[var(--sge-ink-3)]">
                   <th className="py-1.5">Item</th>
-                  <th>Group · category</th>
+                  <th>{scope === "paint" ? "Paint type" : "Group · category"}</th>
                   <th className="text-right">In store</th>
                   <th className="text-right">With supervisors</th>
                   <th className="text-right">Total</th>
@@ -153,7 +206,7 @@ function StockTab({ siteId }: { siteId: string }) {
                 {rows.map((r) => (
                   <tr key={r.i.id} className="border-t border-[var(--sge-line)]">
                     <td className="py-1.5 font-medium">{r.i.name}{r.i.code ? <span className="ml-1 font-mono text-[10px] text-[var(--sge-ink-3)]">{r.i.code}</span> : null}</td>
-                    <td className="text-xs text-[var(--sge-ink-3)]">{GROUP_LABEL[r.i.group]} · {r.i.category}</td>
+                    <td className="text-xs text-[var(--sge-ink-3)]">{scope === "paint" ? paintTypeOf(r.i) : `${GROUP_LABEL[r.i.group]} · ${r.i.category}`}</td>
                     <td className="text-right font-mono">{r.store} {r.i.unit}</td>
                     <td className="text-right font-mono">{r.withSup || "—"}</td>
                     <td className="text-right font-mono font-semibold">{r.store + r.withSup}</td>
@@ -167,17 +220,17 @@ function StockTab({ siteId }: { siteId: string }) {
         )}
         <p className="mt-2 text-xs text-[var(--sge-ink-3)]">Reorder levels are set per site by the Owner / Super Admin (stage 4).</p>
       </Panel>
-      <Holdings siteId={siteId} />
+      <Holdings siteId={siteId} scope={scope} />
     </div>
   );
 }
 
 /** What each supervisor on the site holds, with extra-issue flags for Owner / SA */
-function Holdings({ siteId }: { siteId: string }) {
+function Holdings({ siteId, scope }: { siteId: string; scope: StockScope }) {
   const { fullState: state } = useStore();
   const items = allStoreItems(state);
   const sups = state.staff.filter((x) => x.role === "supervisor" && x.siteId === siteId);
-  const rows = sups.map((s) => ({ s, held: holdingsOf(state.storeMoves.filter((m) => m.siteId === siteId), s.id) })).filter((r) => r.held.length);
+  const rows = sups.map((s) => ({ s, held: holdingsOf(state.storeMoves.filter((m) => m.siteId === siteId && inScope(items.find((i) => i.id === m.itemId), scope)), s.id) })).filter((r) => r.held.length);
   return (
     <Panel>
       <h3 className="mb-2 font-heading text-sm font-bold">With supervisors</h3>
@@ -216,7 +269,7 @@ function Holdings({ siteId }: { siteId: string }) {
 const PAGE = 50;
 
 /** The ledger, newest first, 50 a page — edit a line (kept in its History) */
-function LedgerList({ siteId, kinds, title }: { siteId: string; kinds?: StoreMove["kind"][]; title: string }) {
+function LedgerList({ siteId, scope, kinds, title }: { siteId: string; scope: StockScope; kinds?: StoreMove["kind"][]; title: string }) {
   const { fullState: state, editStoreMove } = useStore();
   const items = allStoreItems(state);
   const [q, setQ] = useState("");
@@ -226,7 +279,7 @@ function LedgerList({ siteId, kinds, title }: { siteId: string; kinds?: StoreMov
   const [msg, setMsg] = useState<string | null>(null);
   const supName = (id?: string) => (id ? state.staff.find((x) => x.id === id)?.name ?? id : "");
   const rows = state.storeMoves
-    .filter((m) => m.siteId === siteId && (!kinds || kinds.includes(m.kind)))
+    .filter((m) => m.siteId === siteId && inScope(items.find((i) => i.id === m.itemId), scope) && (!kinds || kinds.includes(m.kind)))
     .filter((m) => {
       if (!q.trim()) return true;
       const it = items.find((i) => i.id === m.itemId);

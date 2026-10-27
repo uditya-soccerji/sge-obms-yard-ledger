@@ -42,12 +42,14 @@ export function seedStoreItems(): StoreItem[] {
 
 /** Every store item: the store's own list + each paint in Master Data → Materials */
 export function allStoreItems(s: Pick<AppState, "storeItems" | "masterCatalog">): StoreItem[] {
-  const paints: StoreItem[] = s.masterCatalog.materials.map((m) => ({
+  // Master Data paint: its code is the paint type ("Type 4"); the brand goes in brackets.
+  // Type 6 "by shade" is a placeholder — each shade has its own code (TYPE6_SHADES).
+  const paints: StoreItem[] = s.masterCatalog.materials.filter((m) => m.sapCode !== "by shade").map((m) => ({
     id: `paint:${m.id}`,
     group: "paint",
-    category: m.paintSystem || "Paint",
-    name: m.label,
-    code: m.sapCode,
+    category: /^type/i.test(m.code) ? m.code : m.paintSystem || "Paint",
+    name: m.paintSystem ? `${m.label} (${m.paintSystem})` : m.label,
+    code: m.sapCode || undefined,
     unit: m.uom || "L",
     trackExpiry: true,
     reorder: {},
@@ -110,3 +112,53 @@ export function batchesInStore(moves: StoreMove[], siteId: string, itemId: strin
 export function round(n: number): number {
   return Math.round(n * 1000) / 1000;
 }
+
+// ─── Paint types (2026-10-27): paint is picked by type, then SAP code ───────
+
+/** SAP code → its paint type label ("Type 17"), from the MPS sheet; Type 6 shades → "Type 6" */
+const TYPE_BY_SAP: Map<string, { type: string; name: string }> = (() => {
+  const m = new Map<string, { type: string; name: string }>();
+  for (const s of MPS_SCHEMES) {
+    for (const c of s.coats) {
+      if (!c.sap || c.sap === "by shade") continue;
+      const [type, name] = c.paint.includes(":") ? c.paint.split(":").map((x) => x.trim()) : [c.paint, ""];
+      if (!m.has(c.sap)) m.set(c.sap, { type: type.replace(/^TYPE/i, "Type").replace(/\s+/g, " "), name });
+    }
+  }
+  for (const sh of TYPE6_SHADES) m.set(sh.code, { type: "Type 6", name: "Aliphatic Acrylic Urethane finish" });
+  return m;
+})();
+
+/** A paint item's type: from its SAP code when the MPS sheet knows it, else its category */
+export function paintTypeOf(item: StoreItem): string {
+  return (item.code && TYPE_BY_SAP.get(item.code)?.type) || item.category || "Other paint";
+}
+
+/** Type 2 < Type 4 < … < Type 10A < Type 25 < named systems */
+function typeOrder(t: string): [number, string] {
+  const m = t.match(/^Type\s*(\d+)\s*([A-Z]?)/i);
+  return m ? [Number(m[1]), m[2] ?? ""] : [999, t];
+}
+
+/** Paint grouped by type, for the type dropdown; each with its SAP-coded items */
+export function paintTypes(items: StoreItem[]): { type: string; label: string; items: StoreItem[] }[] {
+  const by = new Map<string, StoreItem[]>();
+  for (const i of items.filter((x) => x.group === "paint" && x.active)) {
+    const t = paintTypeOf(i);
+    by.set(t, [...(by.get(t) ?? []), i]);
+  }
+  return [...by.entries()]
+    .map(([type, its]) => {
+      const name = its.map((i) => (i.code && TYPE_BY_SAP.get(i.code)?.name) || "").find(Boolean);
+      return { type, label: name ? `${type} · ${name}` : type, items: its.sort((a, b) => a.name.localeCompare(b.name)) };
+    })
+    .sort((a, b) => {
+      const [an, as] = typeOrder(a.type);
+      const [bn, bs] = typeOrder(b.type);
+      return an - bn || as.localeCompare(bs) || a.type.localeCompare(b.type);
+    });
+}
+
+/** The two separate stocks: paint, and everything else */
+export type StockScope = "paint" | "other";
+export const inScope = (item: StoreItem | undefined, scope: StockScope) => !!item && (scope === "paint" ? item.group === "paint" : item.group !== "paint");
