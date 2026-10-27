@@ -564,6 +564,9 @@ export interface DprEquipmentMark {
 export interface DprRequest {
   id: string;
   kind: "spare" | "equipment" | "material" | "other";
+  /** Picked from the store list (lib/store-catalogue, 2026-10-27); the item name also fills the description */
+  category?: string;
+  item?: string;
   description: string;
   qty?: number;
   urgent?: boolean;

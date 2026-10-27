@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { REQUEST_REASONS } from "@/lib/requests";
+import { STORE_CATALOGUE } from "@/lib/store-catalogue";
 import { SafetyDprForm } from "@/components/dpr/safety-dpr-form";
 import type {
   AttendanceStatus,
@@ -412,6 +413,10 @@ export function DprForm({
                       <option value="fault">Fault</option>
                     </select>
                   </div>
+                  <div className="min-w-[180px] flex-1">
+                    <Label className="text-xs">Remark{marked.status === "fault" ? " — what's wrong" : ""}</Label>
+                    <Input aria-label={`Remark ${eq.tag}`} disabled={readOnly} className="mt-1 h-8 text-xs" placeholder={marked.status === "fault" ? "e.g. pressure drops, hose leaking" : "optional"} value={marked.note ?? ""} onChange={(e) => setEquipment(eq.id, { note: e.target.value || undefined })} />
+                  </div>
                   {machine ? (
                     <>
                       <div>
@@ -466,6 +471,40 @@ export function DprForm({
                 key={r.id}
                 className="grid gap-2 rounded-md border border-[var(--sge-line)] p-2 sm:grid-cols-6"
               >
+                {/* 2026-10-27: pick from the store list — category, then item (or "Other" and type it) */}
+                <select
+                  aria-label={`Category for request ${idx + 1}`}
+                  disabled={readOnly}
+                  className="h-8 rounded-md border border-[var(--sge-line)] bg-[var(--sge-paper)] px-2 text-xs sm:col-span-2"
+                  value={r.category ?? ""}
+                  onChange={(e) => {
+                    const cat = STORE_CATALOGUE.find((c) => c.name === e.target.value);
+                    const requests = value.requests.map((x, i) => (i === idx ? { ...x, category: cat?.name, item: undefined, kind: cat?.kind ?? x.kind, description: x.item && x.description === x.item ? "" : x.description } : x));
+                    onChange({ ...value, requests });
+                  }}
+                >
+                  <option value="">Category…</option>
+                  {STORE_CATALOGUE.map((c) => (
+                    <option key={c.name} value={c.name}>{c.name}</option>
+                  ))}
+                </select>
+                <select
+                  aria-label={`Item for request ${idx + 1}`}
+                  disabled={readOnly || !r.category}
+                  className="h-8 rounded-md border border-[var(--sge-line)] bg-[var(--sge-paper)] px-2 text-xs sm:col-span-2"
+                  value={r.item ?? ""}
+                  onChange={(e) => {
+                    const item = e.target.value || undefined;
+                    // The item name becomes the description the store reads; a hand-typed one is kept
+                    const requests = value.requests.map((x, i) => (i === idx ? { ...x, item, description: item && (!x.description || x.description === x.item) ? item : x.description } : x));
+                    onChange({ ...value, requests });
+                  }}
+                >
+                  <option value="">{r.category ? "Item… (or Other: type below)" : "Pick a category first"}</option>
+                  {(STORE_CATALOGUE.find((c) => c.name === r.category)?.items ?? []).map((it) => (
+                    <option key={it} value={it}>{it}</option>
+                  ))}
+                </select>
                 <Select
                   disabled={readOnly}
                   value={r.kind}

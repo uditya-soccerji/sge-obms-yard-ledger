@@ -116,7 +116,7 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
   ref.current = work;
 
   // Who is acting (the viewed-as account when Super Admin uses "View as")
-  const { currentAccount, state: appState, fullState, applyDprAttendance, clearDprAttendance, raiseRequestsFromDpr, markWageChangesNotified, markMasterChanges } = useStore();
+  const { currentAccount, state: appState, fullState, applyDprAttendance, clearDprAttendance, raiseRequestsFromDpr, applyDprEquipment, markWageChangesNotified, markMasterChanges } = useStore();
   const actor = React.useRef({ name: "System", role: null as RoleId | null, staffId: null as string | null, accountId: "", impersonatedBy: undefined as string | undefined });
   actor.current = {
     name: currentAccount?.name ?? "System",
@@ -140,8 +140,8 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
   const may = (module: ModuleId, action: PermissionAction) => effectivePermission(accountRef.current, actor.current.role, module, action);
   const labourersRef = React.useRef(fullState.labourers);
   labourersRef.current = fullState.labourers;
-  const mainActs = React.useRef({ applyDprAttendance, clearDprAttendance, raiseRequestsFromDpr });
-  mainActs.current = { applyDprAttendance, clearDprAttendance, raiseRequestsFromDpr };
+  const mainActs = React.useRef({ applyDprAttendance, clearDprAttendance, raiseRequestsFromDpr, applyDprEquipment });
+  mainActs.current = { applyDprAttendance, clearDprAttendance, raiseRequestsFromDpr, applyDprEquipment };
   /** A supervisor may only act on their own lines and jobs. */
   const notMine = (supervisorId: string) => actor.current.role === "supervisor" && supervisorId !== actor.current.staffId;
 
@@ -660,6 +660,11 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
       updatedAt: new Date().toISOString(),
     };
     setWork((s) => ({ ...s, reports: existing ? s.reports.map((r) => (r.id === doc.id ? saved : r)) : [...s.reports, saved] }));
+    // 2026-10-27: the DPR's equipment status updates the register; a new Fault alerts the store (and SIC)
+    const faults = mainActs.current.applyDprEquipment(doc.equipmentMarks, `DPR ${doc.date}`);
+    for (const f of faults) {
+      log({ kind: "equipment_fault", problem: true, siteId: f.siteId || doc.siteId, title: `${f.tag} reported faulty`, detail: `${f.note} · DPR ${doc.date} · by ${actor.current.name}`, tab: "/operations?p=equipment", refId: doc.id });
+    }
     return { ok: true, id: doc.id };
   }, []);
 
