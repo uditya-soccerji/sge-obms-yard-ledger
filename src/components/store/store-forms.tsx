@@ -43,7 +43,7 @@ export function ItemPicker({ items, value, onChange }: { items: StoreItem[]; val
 export function ReceiveForm({ siteId }: { siteId: string }) {
   const { fullState: state, recordStoreMove } = useStore();
   const items = useMemo(() => allStoreItems(state), [state]);
-  const blank = { kind: "receive" as "receive" | "opening", date: today(), itemId: "", qty: "", batch: "", expiry: "", pr: "", po: "", billNo: "", vendor: "", note: "" };
+  const blank = { kind: "receive" as "receive" | "opening", date: today(), itemId: "", qty: "", batch: "", expiry: "", pr: "", po: "", billNo: "", vendor: "", vehicleNo: "", note: "" };
   const [f, setF] = useState(blank);
   const [msg, setMsg] = useState<Msg>(null);
   const item = items.find((i) => i.id === f.itemId);
@@ -54,7 +54,7 @@ export function ReceiveForm({ siteId }: { siteId: string }) {
         className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"
         onSubmit={(e) => {
           e.preventDefault();
-          const r = recordStoreMove({ kind: f.kind, date: f.date, itemId: f.itemId, qty: Number(f.qty), siteId, batch: f.batch, expiry: f.expiry || undefined, pr: f.pr || undefined, po: f.po || undefined, billNo: f.billNo || undefined, vendor: f.vendor || undefined, note: f.note || undefined });
+          const r = recordStoreMove({ kind: f.kind, date: f.date, itemId: f.itemId, qty: Number(f.qty), siteId, batch: f.batch, expiry: f.expiry || undefined, pr: f.pr || undefined, po: f.po || undefined, billNo: f.billNo || undefined, vendor: f.vendor || undefined, vehicleNo: f.vehicleNo || undefined, note: f.note || undefined });
           if (!r.ok) return setMsg({ ok: false, text: r.error ?? "Couldn't save" });
           setMsg({ ok: true, text: `${f.kind === "opening" ? "Opening stock" : "Received"}: ${item?.name} ${f.qty} ${item?.unit}. In store now: ${inStore(state.storeMoves, siteId, f.itemId) + Number(f.qty)} ${item?.unit}.` });
           setF({ ...blank, kind: f.kind, date: f.date });
@@ -80,7 +80,7 @@ export function ReceiveForm({ siteId }: { siteId: string }) {
           <Input aria-label="Quantity" className="mt-1" type="number" min="0" step="any" value={f.qty} onChange={(e) => setF({ ...f, qty: e.target.value })} />
         </div>
         <div>
-          <Label>Batch no.{item?.trackExpiry ? " *" : ""}</Label>
+          <Label>Batch no.</Label>
           <Input aria-label="Batch" className="mt-1" value={f.batch} onChange={(e) => setF({ ...f, batch: e.target.value })} />
         </div>
         <div>
@@ -104,6 +104,10 @@ export function ReceiveForm({ siteId }: { siteId: string }) {
             <div>
               <Label>Bill / challan no.</Label>
               <Input aria-label="Bill no." className="mt-1" value={f.billNo} onChange={(e) => setF({ ...f, billNo: e.target.value })} />
+            </div>
+            <div>
+              <Label>Vehicle no.</Label>
+              <Input aria-label="Vehicle no." className="mt-1" placeholder="e.g. GJ10 AB 1234" value={f.vehicleNo} onChange={(e) => setF({ ...f, vehicleNo: e.target.value.toUpperCase() })} />
             </div>
           </>
         ) : null}
@@ -291,7 +295,7 @@ const ADD_KINDS: { id: AddKind; label: string; unit: string; hint: string }[] = 
 const MACHINE_TYPES: EquipmentItem["type"][] = ["hopper", "compressor", "airless", "harness", "ifr", "rope_access"];
 
 /** Add an item to the store's list — paint, materials, equipment, PPE, tagged machinery, fuel or others */
-export function AddItemForm() {
+export function AddItemForm({ siteId }: { siteId: string }) {
   const { fullState: state, addStoreItem, addTagged } = useStore();
   const items = allStoreItems(state);
   const [kind, setKind] = useState<AddKind>("material");
@@ -317,6 +321,8 @@ export function AddItemForm() {
         ))}
       </div>
       <p className="mb-3 text-xs text-[var(--sge-ink-3)]">{k.hint}</p>
+      {kind === "paint" ? <PaintReceiveList siteId={siteId} /> : null}
+      {kind === "paint" ? <h4 className="mb-2 mt-5 text-xs font-semibold uppercase tracking-wide text-[var(--sge-ink-3)]">Paint not in the list? Add a new paint</h4> : null}
       {kind === "machinery" ? (
         <form
           className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5"
@@ -385,5 +391,91 @@ export function AddItemForm() {
         </form>
       )}
     </Panel>
+  );
+}
+
+/**
+ * 2026-10-27: receiving paint — every paint with its SAP code in one list; type the litres
+ * received against each, with the date and the vehicle that brought it. One save for all rows.
+ */
+export function PaintReceiveList({ siteId }: { siteId: string }) {
+  const { fullState: state, recordStoreMove } = useStore();
+  const paints = allStoreItems(state).filter((i) => i.group === "paint" && i.active).sort((a, b) => a.name.localeCompare(b.name));
+  const [head, setHead] = useState({ date: today(), vehicleNo: "", billNo: "", vendor: "" });
+  const [rows, setRows] = useState<Record<string, { litres: string; batch: string; expiry: string }>>({});
+  const [q, setQ] = useState("");
+  const [msg, setMsg] = useState<Msg>(null);
+  const row = (id: string) => rows[id] ?? { litres: "", batch: "", expiry: "" };
+  const setRow = (id: string, patch: Partial<{ litres: string; batch: string; expiry: string }>) => setRows((r) => ({ ...r, [id]: { ...(r[id] ?? { litres: "", batch: "", expiry: "" }), ...patch } }));
+  const filled = paints.filter((p) => Number(row(p.id).litres) > 0);
+  const shown = paints.filter((p) => !q.trim() || `${p.name} ${p.code ?? ""} ${p.category}`.toLowerCase().includes(q.trim().toLowerCase()));
+  return (
+    <form
+      className="space-y-3"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!filled.length) return setMsg({ ok: false, text: "Type the litres received against at least one paint" });
+        if (!head.vehicleNo.trim()) return setMsg({ ok: false, text: "Give the vehicle no." });
+        const done: string[] = [];
+        for (const p of filled) {
+          const r = row(p.id);
+          const res = recordStoreMove({ kind: "receive", date: head.date, itemId: p.id, qty: Number(r.litres), siteId, batch: r.batch || undefined, expiry: r.expiry || undefined, vehicleNo: head.vehicleNo.trim(), billNo: head.billNo || undefined, vendor: head.vendor || undefined });
+          if (!res.ok) return setMsg({ ok: false, text: `${p.name}: ${res.error}${done.length ? ` (saved before it: ${done.join(", ")})` : ""}` });
+          done.push(`${p.name} ${r.litres} L`);
+        }
+        setRows({});
+        setMsg({ ok: true, text: `Received on ${head.date} by ${head.vehicleNo.trim()}: ${done.join(", ")}.` });
+      }}
+    >
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div>
+          <Label>Date received</Label>
+          <Input aria-label="Date received" className="mt-1" type="date" max={today()} value={head.date} onChange={(e) => setHead({ ...head, date: e.target.value })} />
+        </div>
+        <div>
+          <Label>Vehicle no. *</Label>
+          <Input aria-label="Vehicle no." className="mt-1" placeholder="e.g. GJ10 AB 1234" value={head.vehicleNo} onChange={(e) => setHead({ ...head, vehicleNo: e.target.value.toUpperCase() })} />
+        </div>
+        <div>
+          <Label>Challan / bill no.</Label>
+          <Input aria-label="Challan no." className="mt-1" value={head.billNo} onChange={(e) => setHead({ ...head, billNo: e.target.value })} />
+        </div>
+        <div>
+          <Label>From (vendor / RIL)</Label>
+          <Input aria-label="From" className="mt-1" value={head.vendor} onChange={(e) => setHead({ ...head, vendor: e.target.value })} />
+        </div>
+      </div>
+      <Input aria-label="Find a paint" className="w-64" placeholder="Find a paint by name or SAP code" value={q} onChange={(e) => setQ(e.target.value)} />
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[760px] text-sm">
+          <thead>
+            <tr className="text-left text-[10px] uppercase tracking-wide text-[var(--sge-ink-3)]">
+              <th className="py-1.5">Paint</th>
+              <th>SAP code</th>
+              <th className="text-right">In store now</th>
+              <th className="w-28 pl-3">Litres received</th>
+              <th className="w-32 pl-2">Batch (optional)</th>
+              <th className="w-36 pl-2">Expiry (optional)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {shown.map((p) => (
+              <tr key={p.id} className={Number(row(p.id).litres) > 0 ? "border-t border-[var(--sge-line)] bg-[var(--sge-ok-wash)]" : "border-t border-[var(--sge-line)]"}>
+                <td className="py-1.5 font-medium">{p.name}<div className="text-[10px] text-[var(--sge-ink-3)]">{p.category}</div></td>
+                <td className="font-mono text-xs">{p.code ?? "—"}</td>
+                <td className="text-right font-mono text-xs">{inStore(state.storeMoves, siteId, p.id)} L</td>
+                <td className="pl-3"><Input aria-label={`Litres ${p.code ?? p.name}`} className="h-8" type="number" min="0" step="any" value={row(p.id).litres} onChange={(e) => setRow(p.id, { litres: e.target.value })} /></td>
+                <td className="pl-2"><Input aria-label={`Batch ${p.code ?? p.name}`} className="h-8" value={row(p.id).batch} onChange={(e) => setRow(p.id, { batch: e.target.value })} /></td>
+                <td className="pl-2"><Input aria-label={`Expiry ${p.code ?? p.name}`} className="h-8" type="date" value={row(p.id).expiry} onChange={(e) => setRow(p.id, { expiry: e.target.value })} /></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="flex flex-wrap items-center gap-3">
+        <Button type="submit" disabled={!filled.length}>Save {filled.length ? `${filled.length} paint receipt(s) · ${filled.reduce((t, p) => t + Number(row(p.id).litres), 0)} L` : "receipts"}</Button>
+        {show(msg)}
+      </div>
+    </form>
   );
 }

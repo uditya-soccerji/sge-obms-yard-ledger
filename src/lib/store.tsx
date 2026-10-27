@@ -343,7 +343,7 @@ function makeAudit(
  * still can't change data the role isn't allowed to touch.
  */
 /** What a store line is entered with (the store fills in who / when / history) */
-export type StoreMoveInput = Pick<StoreMove, "kind" | "date" | "itemId" | "qty" | "siteId" | "supervisorId" | "batch" | "expiry" | "pr" | "po" | "billNo" | "vendor" | "note">;
+export type StoreMoveInput = Pick<StoreMove, "kind" | "date" | "itemId" | "qty" | "siteId" | "supervisorId" | "batch" | "expiry" | "pr" | "po" | "billNo" | "vendor" | "vehicleNo" | "note">;
 
 function can(s: AppState, module: ModuleId, action: PermissionAction): boolean {
   const account = s.users.find((u) => u.id === s.currentAccountId);
@@ -1455,7 +1455,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const sup = cur.staff.find((x) => x.id === m.supervisorId);
       if (!sup || sup.role !== "supervisor") return "Pick the supervisor it's issued to";
     }
-    if ((m.kind === "receive" || m.kind === "opening") && item.trackExpiry && !m.batch?.trim()) return `${item.name} is tracked by batch — give the batch no.`;
+    // 2026-10-27: a batch is optional; when one is given its expiry is kept and issues go oldest-expiry first
     return null;
   };
 
@@ -1528,7 +1528,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const moves = cur.storeMoves.map((m) => (m.id === id ? next : m));
     const short = stockProblem(moves, was.siteId, was.itemId, item!.unit);
     if (short) return { ok: false, error: short };
-    const fields: (keyof StoreMoveInput)[] = ["date", "qty", "supervisorId", "batch", "expiry", "pr", "po", "billNo", "vendor", "note"];
+    const fields: (keyof StoreMoveInput)[] = ["date", "qty", "supervisorId", "batch", "expiry", "pr", "po", "billNo", "vendor", "vehicleNo", "note"];
     const changed = fields.filter((k) => (was[k] ?? "") !== (next[k] ?? "")).map((k) => `${k} ${was[k] ?? "—"} → ${next[k] ?? "—"}`).join(", ");
     if (!changed) return { ok: true };
     const me = whoAmI(cur);

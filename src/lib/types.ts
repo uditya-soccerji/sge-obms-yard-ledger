@@ -420,6 +420,8 @@ export interface StoreMove {
   po?: string;
   billNo?: string;
   vendor?: string;
+  /** Vehicle that brought a receipt (2026-10-27) */
+  vehicleNo?: string;
   note?: string;
   /** Issued while he still held unused stock of this item — flagged for Owner / SA */
   extraIssue?: { heldBefore: number };

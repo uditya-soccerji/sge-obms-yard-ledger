@@ -114,7 +114,7 @@ function StockTab({ siteId }: { siteId: string }) {
     .filter((r) => !onlyStock || r.store !== 0 || r.withSup !== 0);
   return (
     <div className="space-y-4">
-      {adding ? <AddItemForm /> : null}
+      {adding ? <AddItemForm siteId={siteId} /> : null}
       <Panel>
         <div className="mb-3 flex flex-wrap items-center gap-2">
           <Button type="button" size="sm" className="gap-1" onClick={() => setAdding((v) => !v)}>
@@ -255,7 +255,7 @@ function LedgerList({ siteId, kinds, title }: { siteId: string; kinds?: StoreMov
                   {m.supervisorId ? <span className="text-xs">→ {supName(m.supervisorId)}</span> : null}
                   {m.extraIssue ? <span className="inline-flex items-center gap-1 rounded-sm bg-[var(--sge-warn-wash)] px-1.5 text-[11px] font-semibold text-[var(--sge-warn)]"><AlertTriangle aria-hidden className="h-3 w-3" /> extra · held {m.extraIssue.heldBefore}</span> : null}
                   <span className="text-xs text-[var(--sge-ink-3)]">
-                    {[m.batch && `batch ${m.batch}`, m.expiry && `exp ${m.expiry}`, m.vendor, m.billNo && `bill ${m.billNo}`, m.po && `PO ${m.po}`, m.note].filter(Boolean).join(" · ")}
+                    {[m.batch && `batch ${m.batch}`, m.expiry && `exp ${m.expiry}`, m.vendor, m.vehicleNo && `vehicle ${m.vehicleNo}`, m.billNo && `bill ${m.billNo}`, m.po && `PO ${m.po}`, m.note].filter(Boolean).join(" · ")}
                   </span>
                   <span className="ml-auto flex items-center gap-2 text-xs">
                     <span className="text-[var(--sge-ink-3)]">{m.enteredByName} · {stamp(m.enteredAt)}</span>
