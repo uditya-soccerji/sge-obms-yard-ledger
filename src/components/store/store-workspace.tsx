@@ -101,6 +101,7 @@ function StockTab({ siteId }: { siteId: string }) {
   const [group, setGroup] = useState<StoreGroup | "">("");
   const [q, setQ] = useState("");
   const [onlyStock, setOnlyStock] = useState(true);
+  const [adding, setAdding] = useState(false);
   const sups = state.staff.filter((x) => x.role === "supervisor" && x.siteId === siteId).map((x) => x.id);
   const rows = allStoreItems(state)
     .filter((i) => i.active && (!group || i.group === group) && (!q.trim() || `${i.category} ${i.name} ${i.code ?? ""}`.toLowerCase().includes(q.trim().toLowerCase())))
@@ -113,8 +114,12 @@ function StockTab({ siteId }: { siteId: string }) {
     .filter((r) => !onlyStock || r.store !== 0 || r.withSup !== 0);
   return (
     <div className="space-y-4">
+      {adding ? <AddItemForm /> : null}
       <Panel>
         <div className="mb-3 flex flex-wrap items-center gap-2">
+          <Button type="button" size="sm" className="gap-1" onClick={() => setAdding((v) => !v)}>
+            {adding ? "Close" : "+ Add item"}
+          </Button>
           <Input aria-label="Search stock" className="w-56" placeholder="Search item, category, code" value={q} onChange={(e) => setQ(e.target.value)} />
           <select aria-label="Group" className={selectCls + " w-40"} value={group} onChange={(e) => setGroup(e.target.value as StoreGroup | "")}>
             <option value="">All groups</option>
@@ -160,7 +165,6 @@ function StockTab({ siteId }: { siteId: string }) {
         <p className="mt-2 text-xs text-[var(--sge-ink-3)]">Reorder levels are set per site by the Owner / Super Admin (stage 4).</p>
       </Panel>
       <Holdings siteId={siteId} />
-      <AddItemForm />
     </div>
   );
 }

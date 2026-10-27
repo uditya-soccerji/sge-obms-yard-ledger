@@ -39,7 +39,7 @@ import type { CatalogItem, Contractor, MasterCatalog, MaterialItem } from "./mas
 import { createSeedState, STORAGE_KEY } from "./seed";
 import type { DprReport } from "./work/types";
 import { ALL_SITES, canSeeAllSites, canSwitchSites, entrySiteId, isCentralStore, landingSite, scopeState } from "./site-scope";
-import { allStoreItems, GROUP_LABEL, heldBy, inStore as ledgerInStore, MOVE_LABEL, round, seedStoreItems } from "./store-ledger";
+import { allStoreItems, GROUP_LABEL, heldBy, inStore as ledgerInStore, MOVE_LABEL, normalizeStoreItems, round, seedStoreItems } from "./store-ledger";
 import { checkPlantRps, checkSite } from "./sites";
 import { approveBlock, checkCrewRequest } from "./crew";
 import { normalizeEp } from "./ep";
@@ -381,7 +381,7 @@ function migrateState(parsed: Partial<AppState>): AppState {
     advances: parsed.advances ?? [],
     leaves: parsed.leaves ?? [],
     wageChangeRequests: parsed.wageChangeRequests ?? [],
-    storeItems: parsed.storeItems ?? seedStoreItems(),
+    storeItems: parsed.storeItems ? normalizeStoreItems(parsed.storeItems) : seedStoreItems(),
     storeMoves: parsed.storeMoves ?? [],
     masterChangeRequests: parsed.masterChangeRequests ?? [],
     attendance: (parsed.attendance ?? seed.attendance).map((a) =>
@@ -1465,11 +1465,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     if (denied) return { ok: false, error: denied };
     const name = input.name.trim();
     if (!name) return { ok: false, error: "Give the item a name" };
-    if (input.group === "paint") return { ok: false, error: "Paint is added in Master Data → Materials (by SAP code)" };
-    if (allStoreItems(cur).some((x) => x.category === input.category && x.name.toLowerCase() === name.toLowerCase())) return { ok: false, error: "That item is already on the list" };
+    // 2026-10-27: the store keeper adds paint too — by SAP code, tracked by batch + expiry
+    const code = input.code?.trim();
+    if (input.group === "paint" && !code) return { ok: false, error: "Give the paint's SAP code" };
+    if (code && allStoreItems(cur).some((x) => x.code === code)) return { ok: false, error: `SAP / item code ${code} is already on the list` };
+    if (allStoreItems(cur).some((x) => x.category.toLowerCase() === input.category.trim().toLowerCase() && x.name.toLowerCase() === name.toLowerCase())) return { ok: false, error: "That item is already on the list" };
     const id = uid("si");
     setState((s) => {
-      const next = { ...s, storeItems: [...s.storeItems, { id, group: input.group, category: input.category.trim() || GROUP_LABEL[input.group], name, code: input.code?.trim() || undefined, unit: input.unit.trim() || "nos", trackExpiry: input.trackExpiry, reorder: {}, active: true }] };
+      const next = { ...s, storeItems: [...s.storeItems, { id, group: input.group, category: input.category.trim() || GROUP_LABEL[input.group], name, code: code || undefined, unit: input.unit.trim() || (input.group === "paint" || input.group === "fuel" ? "L" : "nos"), trackExpiry: input.group === "paint" ? true : input.trackExpiry, reorder: {}, active: true }] };
       return { ...next, auditLog: [makeAudit(next, "store", "create", `Store item added: ${input.category} · ${name}`), ...s.auditLog] };
     });
     return { ok: true, id };

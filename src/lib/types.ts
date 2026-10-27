@@ -377,7 +377,8 @@ export interface MasterChangeRequest {
 }
 
 /** Store ledger (2026-10-27, docs/store process): one item list for everything the store holds */
-export type StoreGroup = "paint" | "consumable" | "ppe" | "fuel";
+/** Groups the store keeper adds items under (2026-10-27); tagged machinery stays in the equipment register */
+export type StoreGroup = "paint" | "material" | "equipment" | "ppe" | "fuel" | "other";
 export interface StoreItem {
   id: string;
   group: StoreGroup;

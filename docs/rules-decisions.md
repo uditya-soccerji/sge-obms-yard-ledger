@@ -390,4 +390,5 @@ Process page: "Store module — process" (Claude doc). Decisions there: reorder 
 - **Opening stock**: one line at a time (Receive tab, "Opening stock") or the Excel item list (download, fill Qty, upload) — all or nothing; rows at 0 skipped.
 - Site store keepers work their own sites; a central store login, Owner and SA pick the site (All sites → site picker on the workspace).
 - Later stages: DPR use + requests + PPE + machinery fed in (2), returns + transfers + central (3), reorder levels + To order (4), delete approval (5).
+- **Store keeper adds items (2026-10-27):** Stock tab → **+ Add item**, by kind: **Paint** (SAP code required, always batch + expiry, unit L), **Materials**, **Equipment** (counted tools / machines), **PPE**, **Machinery (tagged)** (type + tag no. + inspection expiry → the equipment register / Machinery tab), **Fuel**, **Others**. Category is free text with the existing ones offered. No duplicate name in a category, no duplicate SAP / item code. The owner's 7 categories now sit in their groups: Hand Tools → Equipment, Safety & PPE → PPE, Stationery → Others, the rest → Materials.
 

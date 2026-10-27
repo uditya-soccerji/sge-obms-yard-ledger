@@ -6,7 +6,21 @@ import { STORE_CATALOGUE } from "./store-catalogue";
  * stock = the sum of the lines. Paint items come live from Master Data → Materials.
  */
 
-export const GROUP_LABEL: Record<StoreGroup, string> = { paint: "Paint", consumable: "Consumables", ppe: "PPE", fuel: "Fuel" };
+export const GROUP_LABEL: Record<StoreGroup, string> = { paint: "Paint", material: "Materials", equipment: "Equipment", ppe: "PPE", fuel: "Fuel", other: "Others" };
+
+/** Which group the owner's categories belong to */
+export function groupForCategory(category: string): StoreGroup {
+  if (category === "Safety & PPE") return "ppe";
+  if (category === "Hardware & Hand Tools") return "equipment";
+  if (category === "Office Supplies & Stationery") return "other";
+  if (category === "Fuel") return "fuel";
+  return "material";
+}
+
+/** Items saved before the groups were split ("consumable") move to their group */
+export function normalizeStoreItems(items: (Omit<StoreItem, "group"> & { group: string })[]): StoreItem[] {
+  return items.map((i) => (i.group === "consumable" ? { ...i, group: groupForCategory(i.category) } : (i as StoreItem)));
+}
 
 export const MOVE_LABEL: Record<StoreMove["kind"], string> = { opening: "Opening stock", receive: "Receive", issue: "Issue", adjust: "Adjust" };
 
@@ -16,7 +30,7 @@ const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(
 export function seedStoreItems(): StoreItem[] {
   const items: StoreItem[] = [];
   for (const c of STORE_CATALOGUE) {
-    const group: StoreGroup = c.name === "Safety & PPE" ? "ppe" : "consumable";
+    const group = groupForCategory(c.name);
     for (const name of c.items) {
       items.push({ id: `si-${slug(c.name)}-${slug(name)}`, group, category: c.name, name, unit: "nos", trackExpiry: false, reorder: {}, active: true });
     }

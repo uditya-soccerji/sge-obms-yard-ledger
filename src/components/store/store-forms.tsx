@@ -11,7 +11,7 @@ import { cell, downloadXlsxWithHeaders, readSpreadsheet } from "@/lib/excel-io";
 import { useStore } from "@/lib/store";
 import { allStoreItems, batchesInStore, GROUP_LABEL, heldBy, inStore } from "@/lib/store-ledger";
 import { today } from "@/lib/today";
-import type { StoreItem } from "@/lib/types";
+import type { EquipmentItem, StoreItem } from "@/lib/types";
 import { useWork } from "@/lib/work/store";
 
 type Msg = { ok: boolean; text: string } | null;
@@ -277,57 +277,113 @@ export function IssueForm({ siteId }: { siteId: string }) {
   );
 }
 
-/** Put a new item on the store list (paint is added in Master Data → Materials, by SAP code) */
+/** What the store keeper can add: a counted item in any group, or a tagged machine (2026-10-27) */
+type AddKind = StoreItem["group"] | "machinery";
+const ADD_KINDS: { id: AddKind; label: string; unit: string; hint: string }[] = [
+  { id: "paint", label: "Paint", unit: "L", hint: "By SAP code; tracked by batch + expiry" },
+  { id: "material", label: "Materials", unit: "nos", hint: "Pipes, hoses, brushes, abrasives, fittings…" },
+  { id: "equipment", label: "Equipment", unit: "nos", hint: "Hand tools, guns, machines counted by number" },
+  { id: "ppe", label: "PPE", unit: "nos", hint: "Gloves, masks, goggles, helmets, harness…" },
+  { id: "machinery", label: "Machinery (tagged)", unit: "", hint: "Hopper, compressor, airless… one per tag no." },
+  { id: "fuel", label: "Fuel", unit: "L", hint: "Diesel and the like" },
+  { id: "other", label: "Others", unit: "nos", hint: "Stationery and anything else" },
+];
+const MACHINE_TYPES: EquipmentItem["type"][] = ["hopper", "compressor", "airless", "harness", "ifr", "rope_access"];
+
+/** Add an item to the store's list — paint, materials, equipment, PPE, tagged machinery, fuel or others */
 export function AddItemForm() {
-  const { fullState: state, addStoreItem } = useStore();
-  const categories = [...new Set(allStoreItems(state).filter((i) => i.group !== "paint").map((i) => i.category))];
-  const [f, setF] = useState({ group: "consumable" as "consumable" | "ppe" | "fuel", category: categories[0] ?? "", name: "", code: "", unit: "nos", trackExpiry: false });
+  const { fullState: state, addStoreItem, addTagged } = useStore();
+  const items = allStoreItems(state);
+  const [kind, setKind] = useState<AddKind>("material");
+  const k = ADD_KINDS.find((x) => x.id === kind)!;
+  const categories = [...new Set(items.filter((i) => i.group === kind).map((i) => i.category))];
+  const [f, setF] = useState({ category: "", name: "", code: "", unit: "", trackExpiry: false, machine: "hopper" as EquipmentItem["type"], tag: "", expiry: "", value: "" });
   const [msg, setMsg] = useState<Msg>(null);
   return (
     <Panel>
-      <h3 className="mb-3 font-heading text-sm font-bold">Add an item to the list</h3>
-      <form
-        className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6"
-        onSubmit={(e) => {
-          e.preventDefault();
-          const r = addStoreItem(f);
-          setMsg(r.ok ? { ok: true, text: `Added: ${f.category} · ${f.name}` } : { ok: false, text: r.error ?? "Couldn't add" });
-          if (r.ok) setF({ ...f, name: "", code: "" });
-        }}
-      >
-        <div>
-          <Label>Group</Label>
-          <select aria-label="New item group" className={selectCls + " mt-1"} value={f.group} onChange={(e) => setF({ ...f, group: e.target.value as "consumable" | "ppe" | "fuel" })}>
-            <option value="consumable">Consumables</option>
-            <option value="ppe">PPE</option>
-            <option value="fuel">Fuel</option>
-          </select>
-        </div>
-        <div>
-          <Label>Category</Label>
-          <Input aria-label="New item category" className="mt-1" list="store-categories" value={f.category} onChange={(e) => setF({ ...f, category: e.target.value })} />
-          <datalist id="store-categories">{categories.map((c) => <option key={c} value={c} />)}</datalist>
-        </div>
-        <div className="sm:col-span-2">
-          <Label>Item name</Label>
-          <Input aria-label="New item name" className="mt-1" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} />
-        </div>
-        <div>
-          <Label>Unit</Label>
-          <Input aria-label="New item unit" className="mt-1" placeholder="nos / pairs / m / L" value={f.unit} onChange={(e) => setF({ ...f, unit: e.target.value })} />
-        </div>
-        <div>
-          <Label>Code (optional)</Label>
-          <Input aria-label="New item code" className="mt-1" value={f.code} onChange={(e) => setF({ ...f, code: e.target.value })} />
-        </div>
-        <label className="flex items-center gap-1.5 text-xs sm:col-span-2">
-          <input type="checkbox" checked={f.trackExpiry} onChange={(e) => setF({ ...f, trackExpiry: e.target.checked })} /> Track batch + expiry
-        </label>
-        <div className="flex items-end gap-3 sm:col-span-3 lg:col-span-4">
-          <Button type="submit" variant="outline">Add item</Button>
-          {show(msg)}
-        </div>
-      </form>
+      <h3 className="mb-1 font-heading text-sm font-bold">Add an item to the store</h3>
+      <p className="mb-3 text-xs text-[var(--sge-ink-3)]">Pick what kind of item it is. Once added it can be received, issued and counted like everything else.</p>
+      <div role="group" aria-label="Kind of item" className="mb-3 flex flex-wrap gap-1">
+        {ADD_KINDS.map((x) => (
+          <button
+            key={x.id}
+            type="button"
+            aria-pressed={kind === x.id}
+            onClick={() => { setKind(x.id); setMsg(null); setF({ ...f, category: "", unit: "" }); }}
+            className={kind === x.id ? "rounded-sm bg-[var(--sge-night)] px-2.5 py-1.5 text-xs font-semibold text-[var(--sge-brass-wash)]" : "rounded-sm bg-[var(--sge-paper-2)] px-2.5 py-1.5 text-xs font-semibold text-[var(--sge-ink-2)] hover:bg-[var(--sge-brass-wash)]"}
+          >
+            {x.label}
+          </button>
+        ))}
+      </div>
+      <p className="mb-3 text-xs text-[var(--sge-ink-3)]">{k.hint}</p>
+      {kind === "machinery" ? (
+        <form
+          className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const r = addTagged({ type: f.machine, tag: f.tag, expiryDate: f.expiry || undefined, value: Number(f.value) || undefined });
+            setMsg(r.ok ? { ok: true, text: `Added ${f.machine} ${f.tag.toUpperCase()} to the equipment register (Machinery tab).` } : { ok: false, text: r.error ?? "Couldn't add" });
+            if (r.ok) setF({ ...f, tag: "", expiry: "", value: "" });
+          }}
+        >
+          <div>
+            <Label>Type</Label>
+            <select aria-label="Machine type" className={selectCls + " mt-1"} value={f.machine} onChange={(e) => setF({ ...f, machine: e.target.value as EquipmentItem["type"] })}>
+              {MACHINE_TYPES.map((t) => <option key={t} value={t}>{t.replace("_", " ")}</option>)}
+            </select>
+          </div>
+          <div>
+            <Label>Tag / serial no.</Label>
+            <Input aria-label="Tag no." className="mt-1" placeholder="e.g. CMP-DTA-02" value={f.tag} onChange={(e) => setF({ ...f, tag: e.target.value })} />
+          </div>
+          <div>
+            <Label>Inspection expiry</Label>
+            <Input aria-label="Inspection expiry" className="mt-1" type="date" value={f.expiry} onChange={(e) => setF({ ...f, expiry: e.target.value })} />
+          </div>
+          <div>
+            <Label>Value (₹, optional)</Label>
+            <Input aria-label="Value" className="mt-1" type="number" min="0" value={f.value} onChange={(e) => setF({ ...f, value: e.target.value })} />
+          </div>
+          <div className="flex items-end"><Button type="submit" variant="outline">Add machine</Button></div>
+          <div className="sm:col-span-2 lg:col-span-5">{show(msg)}</div>
+        </form>
+      ) : (
+        <form
+          className="grid gap-3 sm:grid-cols-3 lg:grid-cols-6"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const r = addStoreItem({ group: kind, category: f.category || k.label, name: f.name, code: f.code, unit: f.unit || k.unit, trackExpiry: kind === "paint" || f.trackExpiry });
+            setMsg(r.ok ? { ok: true, text: `Added to ${k.label}: ${f.name}${f.code ? ` (${f.code})` : ""}` } : { ok: false, text: r.error ?? "Couldn't add" });
+            if (r.ok) setF({ ...f, name: "", code: "" });
+          }}
+        >
+          <div>
+            <Label>Category</Label>
+            <Input aria-label="New item category" className="mt-1" list={`store-categories-${kind}`} placeholder={categories[0] ?? k.label} value={f.category} onChange={(e) => setF({ ...f, category: e.target.value })} />
+            <datalist id={`store-categories-${kind}`}>{categories.map((c) => <option key={c} value={c} />)}</datalist>
+          </div>
+          <div className="sm:col-span-2">
+            <Label>{kind === "paint" ? "Paint name" : "Item name"}</Label>
+            <Input aria-label="New item name" className="mt-1" placeholder={kind === "paint" ? "e.g. Epoxy MIO intermediate" : ""} value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} />
+          </div>
+          <div>
+            <Label>{kind === "paint" ? "SAP code *" : "Code (optional)"}</Label>
+            <Input aria-label="New item code" className="mt-1" value={f.code} onChange={(e) => setF({ ...f, code: e.target.value })} />
+          </div>
+          <div>
+            <Label>Unit</Label>
+            <Input aria-label="New item unit" className="mt-1" placeholder={k.unit} value={f.unit} onChange={(e) => setF({ ...f, unit: e.target.value })} />
+          </div>
+          <label className="flex items-end gap-1.5 pb-2 text-xs">
+            <input type="checkbox" checked={kind === "paint" || f.trackExpiry} disabled={kind === "paint"} onChange={(e) => setF({ ...f, trackExpiry: e.target.checked })} /> Batch + expiry
+          </label>
+          <div className="flex items-end gap-3 sm:col-span-3 lg:col-span-6">
+            <Button type="submit" variant="outline">Add to {k.label}</Button>
+            {show(msg)}
+          </div>
+        </form>
+      )}
     </Panel>
   );
 }
