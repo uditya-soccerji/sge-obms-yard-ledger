@@ -10,6 +10,8 @@ import { selectCls } from "@/components/work/common";
 import { useStore } from "@/lib/store";
 import { allStoreItems, byPlant, GROUP_LABEL, holdingsOf, IDLE_DAYS, inScope, inStore, MOVE_LABEL, NEAR_EXPIRY_DAYS, paintTypeOf, paintTypes, stockStatus, type StockScope } from "@/lib/store-ledger";
 import { today } from "@/lib/today";
+import { plannedPaintNeed, TYPE6_KEY } from "@/lib/paint-need";
+import { useWork } from "@/lib/work/store";
 import { ALL_SITES, entrySiteId } from "@/lib/site-scope";
 import type { StoreGroup, StoreItem, StoreMove } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -172,6 +174,10 @@ function StockTab({ siteId, scope }: { siteId: string; scope: StockScope }) {
   const plants = state.sites.find((x) => x.id === siteId)?.plants ?? [];
   const [t6Pick, setT6Pick] = useState("");
   const paint = scope === "paint";
+  // 2026-10-27: where each paint is going to be used — this month's plan, by plant
+  const { work } = useWork();
+  const need = useMemo(() => (paint ? plannedPaintNeed(work, siteId) : new Map<string, { plant: string; litres: number }[]>()), [paint, work, siteId]);
+  const needOf = (r: { i: StoreItem; type6: boolean }) => (r.type6 || paintTypeOf(r.i) === "Type 6" ? need.get(TYPE6_KEY) : r.i.code ? need.get(r.i.code) : undefined) ?? [];
   const rowOf = (i: StoreItem) => {
       const store = inStore(state.storeMoves, siteId, i.id);
       const plantsQty = byPlant(state.storeMoves, siteId, i.id);
@@ -275,6 +281,7 @@ function StockTab({ siteId, scope }: { siteId: string; scope: StockScope }) {
                   <th className="text-right">In store</th>
                   <th className="pl-3">At plants{plant ? ` (${plant})` : ""}</th>
                   <th className="text-right">Total</th>
+                  {paint ? <th className="pl-3">To be used at (plan)</th> : null}
                   <th className="pl-3">Issue next ({paint ? "FEFO" : "FIFO"})</th>
                   <th className="text-right">Reorder at</th>
                   <th className="pl-3">Status</th>
@@ -321,6 +328,30 @@ function StockTab({ siteId, scope }: { siteId: string; scope: StockScope }) {
                       )}
                     </td>
                     <td className="text-right font-mono font-semibold">{r.store + r.atPlants}</td>
+                    {paint ? (
+                      <td className="pl-3">
+                        {needOf(r).length === 0 ? (
+                          <span className="text-xs text-[var(--sge-ink-3)]">—</span>
+                        ) : (
+                          <div className="flex flex-wrap gap-1">
+                            {needOf(r).map((n) => {
+                              const have = r.plantsQty.find((x) => x.plant === n.plant)?.qty ?? 0;
+                              const short = have < n.litres;
+                              return (
+                                <span
+                                  key={n.plant}
+                                  title={`${n.plant}: ${n.litres} L still to be used this month by the plan; ${have} L issued to it${short ? ` — ${Math.round((n.litres - have) * 10) / 10} L short` : ""}`}
+                                  className={cn("rounded-sm border px-1.5 py-0.5 text-[11px]", short ? "border-[var(--sge-crit)]/50 bg-[var(--sge-crit-wash)] text-[var(--sge-crit)]" : "border-[var(--sge-ok)]/50 bg-[var(--sge-ok-wash)]", n.plant === plant && "font-semibold")}
+                                >
+                                  {n.plant} <b className="font-mono">{n.litres}</b>
+                                </span>
+                              );
+                            })}
+                          </div>
+                        )}
+                        {r.type6 && needOf(r).length ? <div className="mt-0.5 text-[10px] text-[var(--sge-ink-3)]">Type 6, any shade (the plan doesn&apos;t name it)</div> : null}
+                      </td>
+                    ) : null}
                     <td className="pl-3 text-xs">
                       {r.st.next ? (
                         <span>
@@ -352,7 +383,7 @@ function StockTab({ siteId, scope }: { siteId: string; scope: StockScope }) {
           </div>
         )}
         <p className="mt-2 text-xs text-[var(--sge-ink-3)]">
-          Near expiry = expiring within {NEAR_EXPIRY_DAYS} days. Not used = no issue in the last {IDLE_DAYS} days. At plants = issued to that plant and not yet used. Reorder levels are set per site by the Owner / Super Admin (stage 4).
+          {paint ? "To be used at = litres this month's plan still needs at each plant (remaining m² × MPS norm per coat); red = less issued to that plant than it needs. " : ""}Near expiry = expiring within {NEAR_EXPIRY_DAYS} days. Not used = no issue in the last {IDLE_DAYS} days. At plants = issued to that plant and not yet used. Reorder levels are set per site by the Owner / Super Admin (stage 4).
         </p>
       </Panel>
       <Holdings siteId={siteId} scope={scope} />
