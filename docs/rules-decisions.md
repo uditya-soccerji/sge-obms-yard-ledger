@@ -374,4 +374,5 @@ The owner is reworking every role's access, starting at the labourer and moving 
 - A no-job line **counts as progress on its plan line** (Plan vs actual → in progress by stage) and is marked "no job" on the DPR; a job can be attached later.
 - The usual line rules still hold (no future date; today / yesterday unless Owner / SA; measured rows; DFT 1–2,000 µm; paint for litres).
 - **Submit to SIC** is unchanged: plant, permit, TBT and the submitter's crew marked are checked; saving a draft is never blocked.
+- **Equipment on the DPR (2026-10-27):** a ticked item gets a **Status today** (OK / Due / Fault — starts from the register's status). Machinery (hopper, compressor, airless) also gets **start time, end time** (hours run shown) and **meter reading**; compressors also get **diesel used (L)**. Submit checks end is after start and no negative meter / diesel. This is the DPR's record; it doesn't change the equipment register's status.
 

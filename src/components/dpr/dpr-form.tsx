@@ -19,8 +19,10 @@ import { REQUEST_REASONS } from "@/lib/requests";
 import { SafetyDprForm } from "@/components/dpr/safety-dpr-form";
 import type {
   AttendanceStatus,
+  DprEquipmentMark,
   DprRequest,
   DprScaffoldWorkLine,
+  EquipmentItem,
 } from "@/lib/types";
 import type { DprReport } from "@/lib/work/types";
 import { blankReport, reportOpen } from "@/lib/work/reports";
@@ -34,6 +36,16 @@ import { ATTENDANCE_OPTIONS, otHours, timeProblem, WORKING } from "@/lib/attenda
 
 function uid(prefix: string) {
   return `${prefix}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+/** Machinery whose run is logged on the DPR: start / end time and meter (diesel for compressors) */
+export const MACHINERY: EquipmentItem["type"][] = ["hopper", "compressor", "airless"];
+
+/** Hours between start and end (HH:MM), to 0.1 h; -1 when the end isn't after the start */
+export function runHours(start?: string, end?: string): number | null {
+  if (!start || !end) return null;
+  const [a, b] = [start, end].map((t) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5)));
+  return b > a ? Math.round(((b - a) / 60) * 10) / 10 : -1;
 }
 
 /** A new daily report (kept under the old name for the DPR desk pages). */
@@ -130,6 +142,11 @@ export function DprForm({
         },
       ],
     });
+  }
+
+  /** Change a ticked item's day figures: status, run times, meter, diesel */
+  function setEquipment(equipmentId: string, patch: Partial<DprEquipmentMark>) {
+    onChange({ ...value, equipmentMarks: value.equipmentMarks.map((e) => (e.equipmentId === equipmentId ? { ...e, ...patch } : e)) });
   }
 
   function addRequest() {
@@ -335,12 +352,15 @@ export function DprForm({
             const marked = value.equipmentMarks.find(
               (e) => e.equipmentId === eq.id
             );
+            const machine = MACHINERY.includes(eq.type);
+            const hours = marked ? runHours(marked.startTime, marked.endTime) : null;
             return (
-              <label
+              <div
                 key={eq.id}
-                className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-[var(--sge-line)] px-3 py-2 text-sm"
+                className="rounded-md border border-[var(--sge-line)] px-3 py-2 text-sm"
               >
-                <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <label className="flex items-center gap-2">
                   <Checkbox
                     disabled={readOnly}
                     checked={!!marked}
@@ -349,7 +369,7 @@ export function DprForm({
                   <span>
                     {eq.tag} · {eq.type}
                   </span>
-                </div>
+                </label>
                 <div className="flex items-center gap-2 text-xs">
                   <StatusPill
                     tone={
@@ -374,7 +394,52 @@ export function DprForm({
                     </span>
                   ) : null}
                 </div>
-              </label>
+              </div>
+              {marked ? (
+                // 2026-10-27: the day's figures for a ticked item — status for all, run time + meter for machinery, diesel for compressors
+                <div className="mt-2 flex flex-wrap items-end gap-3 border-t border-[var(--sge-line)] pt-2 text-xs">
+                  <div>
+                    <Label className="text-xs">Status today</Label>
+                    <select
+                      aria-label={`Status ${eq.tag}`}
+                      className="mt-1 h-8 rounded-md border border-[var(--sge-line)] bg-[var(--sge-paper)] px-2 text-xs"
+                      disabled={readOnly}
+                      value={marked.status}
+                      onChange={(e) => setEquipment(eq.id, { status: e.target.value as DprEquipmentMark["status"] })}
+                    >
+                      <option value="ok">OK</option>
+                      <option value="due">Due</option>
+                      <option value="fault">Fault</option>
+                    </select>
+                  </div>
+                  {machine ? (
+                    <>
+                      <div>
+                        <Label className="text-xs">Start time</Label>
+                        <Input aria-label={`Start time ${eq.tag}`} type="time" disabled={readOnly} className="mt-1 h-8 w-[110px] text-xs" value={marked.startTime ?? ""} onChange={(e) => setEquipment(eq.id, { startTime: e.target.value || undefined })} />
+                      </div>
+                      <div>
+                        <Label className="text-xs">End time</Label>
+                        <Input aria-label={`End time ${eq.tag}`} type="time" disabled={readOnly} className="mt-1 h-8 w-[110px] text-xs" value={marked.endTime ?? ""} onChange={(e) => setEquipment(eq.id, { endTime: e.target.value || undefined })} />
+                      </div>
+                      <div>
+                        <Label className="text-xs">Meter reading</Label>
+                        <Input aria-label={`Meter reading ${eq.tag}`} type="number" min="0" step="any" disabled={readOnly} className="mt-1 h-8 w-[120px] text-xs" value={marked.meterReading ?? ""} onChange={(e) => setEquipment(eq.id, { meterReading: e.target.value === "" ? undefined : Number(e.target.value) })} />
+                      </div>
+                      {eq.type === "compressor" ? (
+                        <div>
+                          <Label className="text-xs">Diesel used (L)</Label>
+                          <Input aria-label={`Diesel litres ${eq.tag}`} type="number" min="0" step="any" disabled={readOnly} className="mt-1 h-8 w-[110px] text-xs" value={marked.dieselL ?? ""} onChange={(e) => setEquipment(eq.id, { dieselL: e.target.value === "" ? undefined : Number(e.target.value) })} />
+                        </div>
+                      ) : null}
+                      <span className={hours === -1 ? "pb-2 text-[var(--sge-crit)]" : "pb-2 text-[var(--sge-ink-3)]"}>
+                        {hours === -1 ? "End must be after start" : hours != null ? `Ran ${hours} h` : ""}
+                      </span>
+                    </>
+                  ) : null}
+                </div>
+              ) : null}
+              </div>
             );
           })}
         </div>

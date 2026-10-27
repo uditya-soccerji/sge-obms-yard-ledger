@@ -553,6 +553,12 @@ export interface DprEquipmentMark {
   status: "ok" | "due" | "fault";
   expiryDate?: string;
   note?: string;
+  /** Machinery run for the day (2026-10-27): start / end time (HH:MM) and the meter reading */
+  startTime?: string;
+  endTime?: string;
+  meterReading?: number;
+  /** Diesel used, litres — compressors only */
+  dieselL?: number;
 }
 
 export interface DprRequest {

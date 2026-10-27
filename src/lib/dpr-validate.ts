@@ -29,6 +29,14 @@ export function validateDprForSubmit(
   if (!doc.plant.trim()) out.push("Pick a plant");
   else if (sitePlants.length && !sitePlants.includes(doc.plant)) out.push(`Plant "${doc.plant}" isn't on this site — pick one of ${sitePlants.join(", ")}`);
 
+  // 2026-10-27: machinery figures on the DPR
+  for (const m of doc.equipmentMarks) {
+    const t = timeProblem(m.startTime, m.endTime);
+    if (t) out.push(`Equipment ${m.equipmentId}: end time must be after start time`);
+    if (m.meterReading != null && m.meterReading < 0) out.push(`Equipment ${m.equipmentId}: meter reading can't be negative`);
+    if (m.dieselL != null && m.dieselL < 0) out.push(`Equipment ${m.equipmentId}: diesel litres can't be negative`);
+  }
+
   const fieldWork = doc.submitterType === "painting_blasting" || doc.submitterType === "scaffolding";
   if (fieldWork) {
     if (!doc.permitOk) out.push("Confirm the work permit");
