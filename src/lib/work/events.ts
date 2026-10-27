@@ -17,6 +17,9 @@ export type EventKind =
   | "jms_confirmed"
   | "job_sent_back"
   | "plan_added"
+  // 2026-10-27: a plan line corrected or removed — kept in the audit log
+  | "plan_changed"
+  | "plan_removed"
   | "month_closed"
   | "paint_issued"
   | "paint_received"
@@ -129,6 +132,8 @@ export const KIND_LABEL: Record<EventKind, string> = {
   jms_confirmed: "JMS confirmed",
   job_sent_back: "Job sent back",
   plan_added: "Plan updated",
+  plan_changed: "Plan line changed",
+  plan_removed: "Plan line removed",
   month_closed: "Month closed",
   paint_issued: "Paint issued",
   paint_received: "Paint received",
@@ -217,6 +222,8 @@ export function isFor(e: WorkEvent, v: Viewer): boolean {
     case "wo_warning":
       return v.role === "sic" || v.role === "finance";
     case "plan_added":
+    case "plan_changed":
+    case "plan_removed":
     case "month_closed":
       return v.role === "supervisor" ? mine || e.kind === "month_closed" : v.role === "sic" || v.role === "admin";
     case "paint_issued":

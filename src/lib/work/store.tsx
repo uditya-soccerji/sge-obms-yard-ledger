@@ -362,7 +362,7 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
     ].filter(Boolean).join(", ");
     if (!what) return { ok: true, id };
     setWork((s) => ({ ...s, planLines: s.planLines.map((l) => (l.id === id ? next : l)) }));
-    log({ kind: "plan_added", siteId: line.siteId, subjectStaffId: next.supervisorId, title: `Plan line changed · ${next.plant} · ${next.serviceCode}`, detail: `${what} · ${line.month}`, tab: "plan", refId: id });
+    log({ kind: "plan_changed", siteId: line.siteId, subjectStaffId: next.supervisorId, title: `Plan line changed · ${next.plant} · ${next.serviceCode}`, detail: `${what} · ${line.month}`, tab: "plan", refId: id });
     return { ok: true, id };
   }, [log]);
 
@@ -375,7 +375,7 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
     if (planLineUsed(w, id)) return { ok: false, error: "Jobs or work lines are on this line — it can't be removed" };
     if (line.carriedM2 > 0) return { ok: false, error: "This line carries work from last month — set its new plan to 0 instead" };
     setWork((s) => ({ ...s, planLines: s.planLines.filter((l) => l.id !== id) }));
-    log({ kind: "plan_added", siteId: line.siteId, subjectStaffId: line.supervisorId, title: `Plan line removed · ${line.plant} · ${line.serviceCode}`, detail: `${line.planM2} m² · ${line.month}`, tab: "plan", refId: id });
+    log({ kind: "plan_removed", siteId: line.siteId, subjectStaffId: line.supervisorId, title: `Plan line removed · ${line.plant} · ${line.serviceCode}`, detail: `${line.planM2} m² · ${line.month}`, tab: "plan", refId: id });
     return { ok: true };
   }, [log]);
 

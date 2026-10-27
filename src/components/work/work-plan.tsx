@@ -106,6 +106,75 @@ export function WorkPlan() {
         <KpiTile label="Lines outside band" value={String(flagged)} hint={`Allowed −${UNDER_TOLERANCE * 100}% to +${OVER_TOLERANCE * 100}%`} tone={flagged ? "crit" : "default"} />
       </div>
 
+      {/* 2026-10-27: the add form sits above the plan and stays in view while the list scrolls */}
+      {(isCurrent || s.allSites) && s.canPlan ? (
+        <div className="sticky z-20 rounded-sm shadow-[var(--sge-shadow)]" style={{ top: "calc(var(--sge-header-h, 0px) + 8px)" }}>
+        <Panel>
+          <h3 className="mb-3 font-heading text-sm font-bold">Add to {monthLabel(s.monthOf(formSite))} plan · {s.siteCode(formSite)}</h3>
+          <form
+            className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6"
+            onSubmit={(e) => {
+              e.preventDefault();
+              if (!f.plant.trim()) return setMsg({ ok: false, msg: "Plant is required" });
+              if (!isSitePlant(s.sites, formSite, f.plant)) return setMsg({ ok: false, msg: "Pick a plant from this site's Master Data list" });
+              if (!supervisorId) return setMsg({ ok: false, msg: `No supervisor on ${s.siteCode(formSite)} yet — add one in Master Data first.` });
+              const it = s.item(f.serviceCode);
+              const r = addPlanLine({
+                siteId: formSite,
+                plant: f.plant.trim().toUpperCase(),
+                serviceCode: f.serviceCode,
+                jobType: it?.description.replace(/^APLY\s*/i, "") ?? "",
+                planM2: Number(f.planM2),
+                supervisorId,
+              });
+              setMsg(r.ok ? { ok: true, msg: `Plan line added for ${s.staffName(supervisorId)}.` } : { ok: false, msg: r.error });
+              if (r.ok) setF((x) => ({ ...x, planM2: "" }));
+            }}
+          >
+            {s.allSites ? (
+              <div>
+                <Label>Site</Label>
+                <select className={selectCls + " mt-1"} value={formSite} onChange={(e) => setF({ ...f, siteId: e.target.value, plant: "", supervisorId: "" })}>
+                  {s.sites.filter((x) => x.enabled).map((x) => <option key={x.id} value={x.id}>{x.code}</option>)}
+                </select>
+              </div>
+            ) : null}
+            <div>
+              <Label>Plant</Label>
+              <select className={selectCls + " mt-1"} value={f.plant} onChange={(e) => setF({ ...f, plant: e.target.value })}>
+                <option value="">{sitePlants.length ? "Pick a plant…" : "No plants — add them in Master Data → Sites"}</option>
+                {sitePlants.map((p) => (
+                  <option key={p} value={p}>{p}</option>
+                ))}
+              </select>
+            </div>
+            <div className="lg:col-span-2">
+              <Label>Service item</Label>
+              <select className={selectCls + " mt-1"} value={f.serviceCode} onChange={(e) => setF({ ...f, serviceCode: e.target.value })}>
+                {work.serviceItems.map((x) => (
+                  <option key={x.code} value={x.code}>{x.mps} · {x.description}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <Label>Plan m²</Label>
+              <Input className="mt-1" type="number" min="0" step="any" value={f.planM2} onChange={(e) => setF({ ...f, planM2: e.target.value })} />
+            </div>
+            <div>
+              <Label>Supervisor</Label>
+              <select className={selectCls + " mt-1"} value={supervisorId} onChange={(e) => setF({ ...f, supervisorId: e.target.value })}>
+                {supervisors.length === 0 ? <option value="">No supervisor on this site</option> : null}
+                {supervisors.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+              </select>
+            </div>
+            <div className="flex items-end">
+              <Button type="submit" className="w-full">Add plan line</Button>
+            </div>
+          </form>
+        </Panel>
+        </div>
+      ) : null}
+
       <Panel>
         <div className="overflow-x-auto">
           <table className="w-full min-w-[980px] border-collapse text-sm">
@@ -220,71 +289,6 @@ export function WorkPlan() {
         </div>
       </Panel>
 
-      {(isCurrent || s.allSites) && s.canPlan ? (
-        <Panel>
-          <h3 className="mb-3 font-heading text-sm font-bold">Add to {monthLabel(s.monthOf(formSite))} plan · {s.siteCode(formSite)}</h3>
-          <form
-            className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6"
-            onSubmit={(e) => {
-              e.preventDefault();
-              if (!f.plant.trim()) return setMsg({ ok: false, msg: "Plant is required" });
-              if (!isSitePlant(s.sites, formSite, f.plant)) return setMsg({ ok: false, msg: "Pick a plant from this site's Master Data list" });
-              if (!supervisorId) return setMsg({ ok: false, msg: `No supervisor on ${s.siteCode(formSite)} yet — add one in Master Data first.` });
-              const it = s.item(f.serviceCode);
-              const r = addPlanLine({
-                siteId: formSite,
-                plant: f.plant.trim().toUpperCase(),
-                serviceCode: f.serviceCode,
-                jobType: it?.description.replace(/^APLY\s*/i, "") ?? "",
-                planM2: Number(f.planM2),
-                supervisorId,
-              });
-              setMsg(r.ok ? { ok: true, msg: `Plan line added for ${s.staffName(supervisorId)}.` } : { ok: false, msg: r.error });
-              if (r.ok) setF((x) => ({ ...x, planM2: "" }));
-            }}
-          >
-            {s.allSites ? (
-              <div>
-                <Label>Site</Label>
-                <select className={selectCls + " mt-1"} value={formSite} onChange={(e) => setF({ ...f, siteId: e.target.value, plant: "", supervisorId: "" })}>
-                  {s.sites.filter((x) => x.enabled).map((x) => <option key={x.id} value={x.id}>{x.code}</option>)}
-                </select>
-              </div>
-            ) : null}
-            <div>
-              <Label>Plant</Label>
-              <select className={selectCls + " mt-1"} value={f.plant} onChange={(e) => setF({ ...f, plant: e.target.value })}>
-                <option value="">{sitePlants.length ? "Pick a plant…" : "No plants — add them in Master Data → Sites"}</option>
-                {sitePlants.map((p) => (
-                  <option key={p} value={p}>{p}</option>
-                ))}
-              </select>
-            </div>
-            <div className="lg:col-span-2">
-              <Label>Service item</Label>
-              <select className={selectCls + " mt-1"} value={f.serviceCode} onChange={(e) => setF({ ...f, serviceCode: e.target.value })}>
-                {work.serviceItems.map((x) => (
-                  <option key={x.code} value={x.code}>{x.mps} · {x.description}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <Label>Plan m²</Label>
-              <Input className="mt-1" type="number" min="0" step="any" value={f.planM2} onChange={(e) => setF({ ...f, planM2: e.target.value })} />
-            </div>
-            <div>
-              <Label>Supervisor</Label>
-              <select className={selectCls + " mt-1"} value={supervisorId} onChange={(e) => setF({ ...f, supervisorId: e.target.value })}>
-                {supervisors.length === 0 ? <option value="">No supervisor on this site</option> : null}
-                {supervisors.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
-              </select>
-            </div>
-            <div className="flex items-end">
-              <Button type="submit" className="w-full">Add plan line</Button>
-            </div>
-          </form>
-        </Panel>
-      ) : null}
     </div>
   );
 }
