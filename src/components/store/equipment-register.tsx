@@ -1,5 +1,7 @@
 "use client";
 
+import { allStoreItems, holdingsOf } from "@/lib/store-ledger";
+
 import { useState } from "react";
 import { EmptyState, Panel, SectionHeader, StatusPill } from "@/components/shared/ui-bits";
 import { Button } from "@/components/ui/button";
@@ -231,6 +233,8 @@ export function SupervisorEquipment() {
   const mine = fullState.equipment.filter((e) => e.issuedTo === me && !e.scrapped);
   const kits = fullState.kitIssues.filter((k) => k.supervisorId === me && k.qty - (k.returned ?? 0) > 0);
   const waiting = fullState.equipmentReturns.filter((r) => r.by === me && (r.status === "with_store" || r.status === "with_sic"));
+  const ledgerItems = allStoreItems(fullState);
+  const withMe = me ? holdingsOf(fullState.storeMoves, me) : [];
 
   function send(key: string, input: { equipmentId?: string; kitIssueId?: string; qty: number }, label: string, siteId: string) {
     const c = cond[key] ?? "ok";
@@ -257,6 +261,24 @@ export function SupervisorEquipment() {
     <div className="space-y-4">
       <SectionHeader title="My equipment" subtitle="What the store issued to your crew. Return it as OK, damaged, expired or scrapped — the store confirms; a scrap also needs the SIC." />
       <Note m={msg} />
+      {/* 2026-10-27, store process: what the store's ledger says he holds, with any extra-issue flag */}
+      <Panel>
+        <h3 className="mb-2 font-heading text-sm font-bold">With me (from the store)</h3>
+        {withMe.length === 0 ? (
+          <p className="text-sm text-[var(--sge-ink-3)]">Nothing issued to you yet.</p>
+        ) : (
+          <div className="flex flex-wrap gap-1.5">
+            {withMe.map((h) => {
+              const it = ledgerItems.find((i) => i.id === h.itemId);
+              return (
+                <span key={h.itemId} className={h.flagged ? "rounded-sm border border-[var(--sge-warn)] bg-[var(--sge-warn-wash)] px-1.5 py-0.5 text-xs" : "rounded-sm border border-[var(--sge-line)] px-1.5 py-0.5 text-xs"}>
+                  {it?.name ?? h.itemId} · <b>{h.qty}</b> {it?.unit}{h.flagged ? " · extra issue" : ""}
+                </span>
+              );
+            })}
+          </div>
+        )}
+      </Panel>
       <Panel>
         {mine.length + kits.length === 0 ? <EmptyState title="Nothing issued to you" detail="The store issues equipment from its Equipment tab." /> : (
           <div className="space-y-2">

@@ -376,6 +376,63 @@ export interface MasterChangeRequest {
   seenByRequester?: boolean;
 }
 
+/** Store ledger (2026-10-27, docs/store process): one item list for everything the store holds */
+/** Groups the store keeper adds items under (2026-10-27); tagged machinery stays in the equipment register */
+export type StoreGroup = "paint" | "material" | "equipment" | "ppe" | "fuel" | "other";
+export interface StoreItem {
+  id: string;
+  group: StoreGroup;
+  category: string;
+  name: string;
+  /** SAP / item code, when it has one */
+  code?: string;
+  unit: string;
+  /** Batches + expiry are recorded (paint, some PPE) */
+  trackExpiry: boolean;
+  /** Reorder level per site id — set by Owner / Super Admin (stage 4) */
+  reorder: Record<string, number>;
+  active: boolean;
+}
+
+/** One in / out line of the store ledger; stock is the sum of these */
+export type StoreMoveKind = "opening" | "receive" | "issue" | "adjust";
+export interface StoreMoveStep {
+  at: string;
+  byName: string;
+  action: "created" | "edited";
+  note?: string;
+}
+export interface StoreMove {
+  id: string;
+  kind: StoreMoveKind;
+  /** Business date */
+  date: string;
+  itemId: string;
+  /** Positive, except an adjust (± after a count) */
+  qty: number;
+  /** The store (site) the line belongs to */
+  siteId: string;
+  /** Issue: who received it */
+  supervisorId?: string;
+  /** Issue: the plant it is for (paint is tracked per site and plant, 2026-10-27) */
+  plant?: string;
+  batch?: string;
+  expiry?: string;
+  pr?: string;
+  po?: string;
+  billNo?: string;
+  vendor?: string;
+  /** Vehicle that brought a receipt (2026-10-27) */
+  vehicleNo?: string;
+  note?: string;
+  /** Issued while he still held unused stock of this item — flagged for Owner / SA */
+  extraIssue?: { heldBefore: number };
+  enteredBy: string;
+  enteredByName: string;
+  enteredAt: string;
+  history: StoreMoveStep[];
+}
+
 /** Admin's change to a daily wage rate, waiting for Owner / Super Admin (owner, 2026-10-24) */
 export interface WageChangeRequest {
   id: string;
@@ -902,6 +959,9 @@ export interface AppState {
   leaves: LeaveEntry[];
   /** Admin's daily-wage changes waiting for Owner / SA (2026-10-24) */
   wageChangeRequests: WageChangeRequest[];
+  /** Store ledger (2026-10-27): items the store adds itself (paint comes from Master Data → Materials) */
+  storeItems: StoreItem[];
+  storeMoves: StoreMove[];
   masterChangeRequests: MasterChangeRequest[];
   /** One master store — load once, resolve site-then-company in memory. */
   masterCatalog: MasterCatalog;

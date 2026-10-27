@@ -44,7 +44,7 @@ interface WorkApi {
   /** Admin DPR (2026-10-27): a work line picked straight from the month's plan, no job needed; it counts as plan progress */
   /** The store marks a labourer's flagged PPE as dealt with (issued / replaced) */
   handlePpe: (reportId: string, labourerId: string) => Result;
-  addPlanEntry: (input: { date: string; planLineId: string; reportId: string; stage: Stage; members: DprEntry["members"]; paintSap?: string; litres: number; dft?: number; crew?: string[]; draft?: DprReport }) => Result;
+  addPlanEntry: (input: { date: string; planLineId: string; reportId: string; stage: Stage; members: DprEntry["members"]; paintSap?: string; litres: number; dft?: number; crew?: string[]; method?: "brush" | "spray"; draft?: DprReport }) => Result;
   /** Remove a job line while its report is still a draft or sent back */
   removeEntry: (id: string) => Result;
   /** Save a report (draft); a submitted or approved one is frozen */
@@ -474,7 +474,7 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
     const marked = new Set(report.labourMarks.map((m) => m.labourerId));
     const addMarks = (input.crew ?? []).filter((id) => !marked.has(id)).map((labourerId) => ({ labourerId, status: "present" as const, inTime: "08:00", outTime: "18:00" }));
     const nextReport: DprReport = { ...report, labourMarks: [...report.labourMarks, ...addMarks], updatedAt: new Date().toISOString() };
-    const entry: DprEntry = { id: uid("wd"), date: input.date, jobId: "", planLineId: line.id, reportId: report.id, stage: input.stage, members: checked.members, paintSap: input.litres > 0 ? input.paintSap : undefined, litres: input.litres, dft: input.dft, supervisorId: line.supervisorId, enteredBy, enteredByName: actor.current.name, crew: input.crew };
+    const entry: DprEntry = { id: uid("wd"), date: input.date, jobId: "", planLineId: line.id, reportId: report.id, stage: input.stage, members: checked.members, paintSap: input.litres > 0 ? input.paintSap : undefined, litres: input.litres, dft: input.dft, supervisorId: line.supervisorId, enteredBy, enteredByName: actor.current.name, crew: input.crew, method: input.method };
     setWork((s) => ({ ...s, reports: s.reports.some((r) => r.id === nextReport.id) ? s.reports.map((r) => (r.id === nextReport.id ? { ...r, labourMarks: nextReport.labourMarks, updatedAt: nextReport.updatedAt } : r)) : [...s.reports, nextReport], dprs: [...s.dprs, entry] }));
     log({ kind: "dpr_added", siteId: line.siteId, subjectStaffId: line.supervisorId, title: `${line.plant} · ${line.serviceCode} · ${STAGES.find((x) => x.id === entry.stage)?.label} ${round3(area)} m² (no job)`, detail: `From the plan · entered by ${actor.current.name}${entry.crew?.length ? ` · crew ${entry.crew.length}` : ""}`, tab: "plan", refId: line.id });
     return { ok: true, id: entry.id };
