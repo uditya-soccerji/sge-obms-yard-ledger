@@ -10,6 +10,7 @@ import { SEED_RATE_LINES } from "./rate-book-seed";
 import type { AppState, AttendanceStatus, DprSafetyBody, TradeDefinition } from "./types";
 import type { DprReport } from "./work/types";
 import { seedWageBands } from "./wages";
+import { seedStoreItems } from "./store-ledger";
 
 const SITE = "site-dta";
 const TODAY = "2026-10-05";
@@ -1053,6 +1054,8 @@ export function createSeedState(): AppState {
     advances: [],
     leaves: [],
     wageChangeRequests: [],
+    storeItems: seedStoreItems(),
+    storeMoves: [],
     masterChangeRequests: [],
     equipmentRequests: [
       {

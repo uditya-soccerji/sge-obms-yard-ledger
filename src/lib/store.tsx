@@ -38,7 +38,8 @@ import {
 import type { CatalogItem, Contractor, MasterCatalog, MaterialItem } from "./master/types";
 import { createSeedState, STORAGE_KEY } from "./seed";
 import type { DprReport } from "./work/types";
-import { ALL_SITES, canSeeAllSites, canSwitchSites, entrySiteId, landingSite, scopeState } from "./site-scope";
+import { ALL_SITES, canSeeAllSites, canSwitchSites, entrySiteId, isCentralStore, landingSite, scopeState } from "./site-scope";
+import { allStoreItems, GROUP_LABEL, heldBy, inStore as ledgerInStore, MOVE_LABEL, round, seedStoreItems } from "./store-ledger";
 import { checkPlantRps, checkSite } from "./sites";
 import { approveBlock, checkCrewRequest } from "./crew";
 import { normalizeEp } from "./ep";
@@ -60,6 +61,8 @@ import type {
   AdvanceGiven,
   LeaveEntry,
   WageChangeRequest,
+  StoreItem,
+  StoreMove,
   MasterChangeRequest,
   MasterRequestOp,
   MasterRequestSheet,
@@ -180,6 +183,12 @@ interface StoreApi {
   decideWageChange: (id: string, approve: boolean, note: string) => { ok: boolean; error?: string };
   /** The Admin takes a waiting request back (Undo) */
   withdrawWageChange: (id: string) => { ok: boolean; error?: string };
+  /** Store ledger (2026-10-27, stage 1) — store keeper, central store, Owner / SA */
+  addStoreItem: (input: Pick<StoreItem, "group" | "category" | "name" | "unit" | "trackExpiry"> & { code?: string }) => { ok: boolean; error?: string; id?: string };
+  recordStoreMove: (input: StoreMoveInput) => { ok: boolean; error?: string; id?: string; extraIssue?: { heldBefore: number } };
+  editStoreMove: (id: string, patch: Partial<StoreMoveInput>) => { ok: boolean; error?: string };
+  /** Opening stock for one store, all or nothing: any bad row stops the whole upload */
+  importOpeningStock: (siteId: string, date: string, rows: { itemId: string; qty: number; batch?: string; expiry?: string; note?: string }[]) => { ok: boolean; error?: string; count?: number };
   /**
    * 2026-10-27: a saved DPR's equipment status goes to the register. Fault / Due always;
    * OK too, except on kit the register shows as Fault (the store clears faults, docs §7).
@@ -333,6 +342,9 @@ function makeAudit(
  * Every write action checks this, so a page or button that slips through
  * still can't change data the role isn't allowed to touch.
  */
+/** What a store line is entered with (the store fills in who / when / history) */
+export type StoreMoveInput = Pick<StoreMove, "kind" | "date" | "itemId" | "qty" | "siteId" | "supervisorId" | "batch" | "expiry" | "pr" | "po" | "billNo" | "vendor" | "note">;
+
 function can(s: AppState, module: ModuleId, action: PermissionAction): boolean {
   const account = s.users.find((u) => u.id === s.currentAccountId);
   // A switched-off site is read-only; Master Data and users stay open so it can be switched back on
@@ -369,6 +381,8 @@ function migrateState(parsed: Partial<AppState>): AppState {
     advances: parsed.advances ?? [],
     leaves: parsed.leaves ?? [],
     wageChangeRequests: parsed.wageChangeRequests ?? [],
+    storeItems: parsed.storeItems ?? seedStoreItems(),
+    storeMoves: parsed.storeMoves ?? [],
     masterChangeRequests: parsed.masterChangeRequests ?? [],
     attendance: (parsed.attendance ?? seed.attendance).map((a) =>
       (a.status as string) === "off" ? { ...a, status: "weekly_off" as const } : a
@@ -1403,6 +1417,147 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       return { ...next, auditLog: [...changes.map((c) => makeAudit(next, "store", "update", `${c.eq.tag}: ${c.eq.status} → ${c.m.status} (from ${source})${c.m.note?.trim() ? ` · ${c.m.note.trim()}` : ""}`)), ...s.auditLog] };
     });
     return changes.filter((c) => c.m.status === "fault").map((c) => ({ tag: c.eq.tag, note: noteOf(c.m), siteId: c.eq.siteId }));
+  }, []);
+
+  // ─── Store ledger (2026-10-27, stage 1) ───────────────────────────────────
+  /** The store keeper works in their own sites; a central store login, Owner and SA in every site */
+  const storeDenied = (cur: AppState, siteId: string): string | null => {
+    const role = cur.currentRole;
+    if (role === "owner" || role === "super_admin") return null;
+    if (role !== "store") return "Only the store keeper (or Owner / Super Admin) records store stock";
+    const account = cur.users.find((u) => u.id === cur.currentAccountId);
+    if (isCentralStore(account) || account?.siteIds.includes(siteId)) return null;
+    return "That site's store isn't yours";
+  };
+  const whoAmI = (cur: AppState) => {
+    const a = cur.users.find((u) => u.id === cur.currentAccountId);
+    return { id: cur.currentUserId ?? cur.currentAccountId ?? "", name: a?.name || a?.username || "Store" };
+  };
+  /** Stock can never go below zero in a store, nor in a batch */
+  const stockProblem = (moves: StoreMove[], siteId: string, itemId: string, unit: string): string | null => {
+    const left = ledgerInStore(moves, siteId, itemId);
+    if (left < 0) return `That would leave ${round(-left)} ${unit} short in the store — stock can't go below zero`;
+    if (moves.some((m) => m.siteId === siteId && m.itemId === itemId && m.batch)) {
+      const by = new Map<string, number>();
+      for (const m of moves) if (m.siteId === siteId && m.itemId === itemId && m.batch) by.set(m.batch, (by.get(m.batch) ?? 0) + (m.kind === "issue" ? -m.qty : m.qty));
+      for (const [b, q] of by) if (round(q) < 0) return `Batch ${b} doesn't have that much`;
+    }
+    return null;
+  };
+  const checkMove = (cur: AppState, m: StoreMoveInput, item: StoreItem | undefined): string | null => {
+    if (!item) return "Pick the item";
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(m.date)) return "Pick the date";
+    if (m.date > todayDate()) return "The date can't be in the future";
+    if (!cur.sites.some((x) => x.id === m.siteId)) return "Pick the store's site";
+    if (m.kind === "adjust" ? !(m.qty !== 0 && Number.isFinite(m.qty)) : !(m.qty > 0)) return m.kind === "adjust" ? "Adjust by a number other than 0 (minus to take off)" : "Quantity must be above 0";
+    if (m.kind === "adjust" && !m.note?.trim()) return "Say why the count changed";
+    if (m.kind === "issue") {
+      const sup = cur.staff.find((x) => x.id === m.supervisorId);
+      if (!sup || sup.role !== "supervisor") return "Pick the supervisor it's issued to";
+    }
+    if ((m.kind === "receive" || m.kind === "opening") && item.trackExpiry && !m.batch?.trim()) return `${item.name} is tracked by batch — give the batch no.`;
+    return null;
+  };
+
+  const addStoreItem = useCallback((input: Pick<StoreItem, "group" | "category" | "name" | "unit" | "trackExpiry"> & { code?: string }) => {
+    const cur = stateRef.current;
+    const denied = storeDenied(cur, entrySiteId(cur));
+    if (denied) return { ok: false, error: denied };
+    const name = input.name.trim();
+    if (!name) return { ok: false, error: "Give the item a name" };
+    if (input.group === "paint") return { ok: false, error: "Paint is added in Master Data → Materials (by SAP code)" };
+    if (allStoreItems(cur).some((x) => x.category === input.category && x.name.toLowerCase() === name.toLowerCase())) return { ok: false, error: "That item is already on the list" };
+    const id = uid("si");
+    setState((s) => {
+      const next = { ...s, storeItems: [...s.storeItems, { id, group: input.group, category: input.category.trim() || GROUP_LABEL[input.group], name, code: input.code?.trim() || undefined, unit: input.unit.trim() || "nos", trackExpiry: input.trackExpiry, reorder: {}, active: true }] };
+      return { ...next, auditLog: [makeAudit(next, "store", "create", `Store item added: ${input.category} · ${name}`), ...s.auditLog] };
+    });
+    return { ok: true, id };
+  }, []);
+
+  const recordStoreMove = useCallback((input: StoreMoveInput) => {
+    const cur = stateRef.current;
+    const denied = storeDenied(cur, input.siteId);
+    if (denied) return { ok: false, error: denied };
+    const item = allStoreItems(cur).find((x) => x.id === input.itemId);
+    const bad = checkMove(cur, input, item);
+    if (bad) return { ok: false, error: bad };
+    const me = whoAmI(cur);
+    const id = uid("sm");
+    // Decided 2026-10-27: an issue while he still holds unused stock of the item is allowed, but flagged
+    const held = input.kind === "issue" && input.supervisorId ? heldBy(cur.storeMoves, input.supervisorId, input.itemId) : 0;
+    const move: StoreMove = {
+      ...input,
+      batch: input.batch?.trim() || undefined,
+      note: input.note?.trim() || undefined,
+      qty: round(input.qty),
+      extraIssue: held > 0 ? { heldBefore: held } : undefined,
+      id,
+      enteredBy: me.id,
+      enteredByName: me.name,
+      enteredAt: new Date().toISOString(),
+      history: [{ at: new Date().toISOString(), byName: me.name, action: "created" }],
+    };
+    if (input.kind === "issue") {
+      const have = ledgerInStore(cur.storeMoves, input.siteId, input.itemId);
+      if (move.qty > have) return { ok: false, error: `Only ${have} ${item!.unit} of ${item!.name} in store — can't issue ${move.qty}` };
+    }
+    const short = stockProblem([...cur.storeMoves, move], input.siteId, input.itemId, item!.unit);
+    if (short) return { ok: false, error: short };
+    setState((s) => {
+      const next = { ...s, storeMoves: [move, ...s.storeMoves] };
+      const who = move.supervisorId ? ` → ${s.staff.find((x) => x.id === move.supervisorId)?.name ?? move.supervisorId}` : "";
+      return { ...next, auditLog: [makeAudit(next, "store", input.kind, `${MOVE_LABEL[input.kind]}: ${item!.name} ${move.qty} ${item!.unit}${who}${move.extraIssue ? ` (already held ${held})` : ""}`), ...s.auditLog] };
+    });
+    return { ok: true, id, extraIssue: move.extraIssue };
+  }, []);
+
+  const editStoreMove = useCallback((id: string, patch: Partial<StoreMoveInput>) => {
+    const cur = stateRef.current;
+    const was = cur.storeMoves.find((m) => m.id === id);
+    if (!was) return { ok: false, error: "That line isn't there any more" };
+    const denied = storeDenied(cur, was.siteId);
+    if (denied) return { ok: false, error: denied };
+    const next: StoreMove = { ...was, ...patch, kind: was.kind, itemId: was.itemId, siteId: was.siteId };
+    const item = allStoreItems(cur).find((x) => x.id === was.itemId);
+    const bad = checkMove(cur, next, item);
+    if (bad) return { ok: false, error: bad };
+    const moves = cur.storeMoves.map((m) => (m.id === id ? next : m));
+    const short = stockProblem(moves, was.siteId, was.itemId, item!.unit);
+    if (short) return { ok: false, error: short };
+    const fields: (keyof StoreMoveInput)[] = ["date", "qty", "supervisorId", "batch", "expiry", "pr", "po", "billNo", "vendor", "note"];
+    const changed = fields.filter((k) => (was[k] ?? "") !== (next[k] ?? "")).map((k) => `${k} ${was[k] ?? "—"} → ${next[k] ?? "—"}`).join(", ");
+    if (!changed) return { ok: true };
+    const me = whoAmI(cur);
+    setState((s) => {
+      const stamped = { ...next, history: [...was.history, { at: new Date().toISOString(), byName: me.name, action: "edited" as const, note: changed }] };
+      const n = { ...s, storeMoves: s.storeMoves.map((m) => (m.id === id ? stamped : m)) };
+      return { ...n, auditLog: [makeAudit(n, "store", "update", `${MOVE_LABEL[was.kind]} ${item!.name} edited: ${changed}`), ...s.auditLog] };
+    });
+    return { ok: true };
+  }, []);
+
+  const importOpeningStock = useCallback((siteId: string, date: string, rows: { itemId: string; qty: number; batch?: string; expiry?: string; note?: string }[]) => {
+    const cur = stateRef.current;
+    const denied = storeDenied(cur, siteId);
+    if (denied) return { ok: false, error: denied };
+    if (!rows.length) return { ok: false, error: "The file has no rows" };
+    const items = allStoreItems(cur);
+    const me = whoAmI(cur);
+    const at = new Date().toISOString();
+    const moves: StoreMove[] = [];
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i];
+      const input: StoreMoveInput = { kind: "opening", date, itemId: r.itemId, qty: r.qty, siteId, batch: r.batch, expiry: r.expiry, note: r.note };
+      const bad = checkMove(cur, input, items.find((x) => x.id === r.itemId));
+      if (bad) return { ok: false, error: `Row ${i + 2}: ${bad}` };
+      moves.push({ ...input, qty: round(r.qty), id: uid("sm"), enteredBy: me.id, enteredByName: me.name, enteredAt: at, history: [{ at, byName: me.name, action: "created", note: "Opening stock upload" }] });
+    }
+    setState((s) => {
+      const next = { ...s, storeMoves: [...moves, ...s.storeMoves] };
+      return { ...next, auditLog: [makeAudit(next, "store", "import", `Opening stock: ${moves.length} item(s) for ${s.sites.find((x) => x.id === siteId)?.code ?? siteId}`), ...s.auditLog] };
+    });
+    return { ok: true, count: moves.length };
   }, []);
 
   const withdrawWageChange = useCallback((id: string) => {
@@ -2834,6 +2989,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       addLeave,
       decideWageChange,
       withdrawWageChange,
+      addStoreItem,
+      recordStoreMove,
+      editStoreMove,
+      importOpeningStock,
       applyDprEquipment,
       markWageChangesNotified,
       markWageDecisionsSeen,
@@ -2916,6 +3075,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       addLeave,
       decideWageChange,
       withdrawWageChange,
+      addStoreItem,
+      recordStoreMove,
+      editStoreMove,
+      importOpeningStock,
       applyDprEquipment,
       markWageChangesNotified,
       markWageDecisionsSeen,

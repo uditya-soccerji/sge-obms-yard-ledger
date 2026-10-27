@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input";
 import { PaintBoard } from "@/components/work/paint-board";
 import { OpsExcelTransfer } from "@/components/ops/ops-excel-transfer";
 import { PpeFromDprs } from "@/components/store/ppe-from-dprs";
+import { StoreWorkspace } from "@/components/store/store-workspace";
 import { useStore } from "@/lib/store";
 import { useSiteReports } from "@/lib/work/use-reports";
 import { useState } from "react";
@@ -25,12 +26,15 @@ function StoreHomePage() {
   const isStore = state.currentRole === "store" || state.currentRole === "super_admin";
 
   const storeDprs = reports.filter((d) => d.submitterType === "store");
+  // Tab counts: PPE flagged on submitted DPRs not yet handled; machinery at Fault
+  const ppeWaiting = reports.filter((r) => r.status === "submitted" || r.status === "sic_approved").reduce((t, r) => t + r.labourMarks.filter((m) => (m.ppe === "damaged" || m.ppe === "urgent") && !m.ppeHandledAt).length, 0);
+  const faults_n = state.equipment.filter((e) => e.status === "fault" && !e.scrapped).length;
 
   return (
     <div className="sge-enter space-y-6">
       <SectionHeader
-        title="Store Keeper"
-        subtitle="Store DPR, the paint board (PR → PO → RIL / SGE store → our 941 issue → DPR use → 942 reco → 261 post, RIL numbers for reference) and equipment."
+        title="Store"
+        subtitle="Every in and out of paint, consumables, PPE and machinery: receive, issue, stock and the ledger."
         action={
           <div className="flex gap-2">
             <Link href="/dpr/new">
@@ -45,44 +49,16 @@ function StoreHomePage() {
         }
       />
 
+      {/* 2026-10-27, store process stage 1: Home is the Store workspace; the old sections are its tabs */}
+      <StoreWorkspace
+        counts={{ ppe: ppeWaiting, machinery: faults_n }}
+        panels={{
+          ppe: <>
       <PpeFromDprs />
-
+</>,
+          machinery: (
+            <div className="space-y-4">
       <OpsExcelTransfer kind="equipment" />
-
-      <Panel>
-        <h3 className="mb-2 font-heading text-sm font-bold">Store DPRs</h3>
-        {storeDprs.length === 0 ? (
-          <EmptyState
-            title="No store DPR"
-            detail="Submit daily store sworn record for SIC."
-          />
-        ) : (
-          storeDprs.map((d) => (
-            <Link
-              key={d.id}
-              href={`/dpr/${d.id}`}
-              className="mb-2 flex items-center justify-between rounded-md border border-[var(--sge-line)] px-3 py-2 text-sm"
-            >
-              <span>
-                {d.date} · {d.plant} · {d.note.slice(0, 48)}
-              </span>
-              <StatusPill
-                tone={
-                  d.status === "sic_approved"
-                    ? "ok"
-                    : d.status === "submitted"
-                      ? "accent"
-                      : "default"
-                }
-              >
-                {d.status.replace("_", " ")}
-              </StatusPill>
-            </Link>
-          ))
-        )}
-      </Panel>
-
-      <PaintBoard />
 
       {boardMsg ? (
         <div className="rounded-md border border-[var(--sge-crit)]/30 bg-[var(--sge-crit-wash)] px-3 py-2 text-sm text-[var(--sge-crit)]">{boardMsg}</div>
@@ -161,6 +137,49 @@ function StoreHomePage() {
           ))}
         </div>
       </Panel>
+            </div>
+          ),
+          paint: <>
+      <PaintBoard />
+
+</>,
+          dprs: <>
+      <Panel>
+        <h3 className="mb-2 font-heading text-sm font-bold">Store DPRs</h3>
+        {storeDprs.length === 0 ? (
+          <EmptyState
+            title="No store DPR"
+            detail="Submit daily store sworn record for SIC."
+          />
+        ) : (
+          storeDprs.map((d) => (
+            <Link
+              key={d.id}
+              href={`/dpr/${d.id}`}
+              className="mb-2 flex items-center justify-between rounded-md border border-[var(--sge-line)] px-3 py-2 text-sm"
+            >
+              <span>
+                {d.date} · {d.plant} · {d.note.slice(0, 48)}
+              </span>
+              <StatusPill
+                tone={
+                  d.status === "sic_approved"
+                    ? "ok"
+                    : d.status === "submitted"
+                      ? "accent"
+                      : "default"
+                }
+              >
+                {d.status.replace("_", " ")}
+              </StatusPill>
+            </Link>
+          ))
+        )}
+      </Panel>
+
+</>,
+        }}
+      />
     </div>
   );
 }

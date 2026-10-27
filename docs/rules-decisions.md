@@ -381,3 +381,13 @@ The owner is reworking every role's access, starting at the labourer and moving 
 - **PPE to the store on every submit:** when a DPR goes to the SIC, Damaged / Urgent PPE alerts the store keeper and SIC ("PPE · n urgent, n damaged") and lists on the **Store Keeper dashboard → PPE from DPRs** (urgent first). The store marks each **Handled** once issued / replaced (name and time kept; audit log).
 - **Fix (2026-10-27):** "Submit to SIC" now checks the DPR exactly as on screen. Before, it checked the copy from the last save, so changes made since then were ignored by the check (this bug is also on the live site until this branch is deployed).
 
+## 31. Store ledger — stage 1 (2026-10-27)
+Process page: "Store module — process" (Claude doc). Decisions there: reorder levels per site set by Owner / SA (store keeper requests changes); diesel is a store item; extra issue allowed but flagged; month-end paint stays on the supervisor; opening stock by Excel + single entries; supervisor sees "With me"; one central login supplies every site; delete = SIC then Super Admin.
+- **One item list** (`src/lib/store-ledger.ts`): paint comes live from Master Data → Materials (by SAP code, tracked by batch + expiry); consumables and PPE from the owner's 7 categories; Diesel (L). The store keeper can **add items** (paint stays in Master Data).
+- **Every in / out is a ledger line** (`storeMoves`): Opening stock, Receive (vendor, PR, PO, bill, batch, expiry), Issue (supervisor, batch oldest-expiry first), Adjust (± with a reason). **Stock = the sum of the lines**; it can never go below zero, in total or in a batch.
+- **Extra issue**: issuing more of an item a supervisor still holds unused is allowed; the Issue form warns first; the line is flagged, the Owner / SA get a bell alert, and the flag shows on his holdings and his "With me".
+- **Store workspace** replaces the store keeper's dashboard: Stock · Receive · Issue · Ledger, plus the old PPE · Machinery · Paint board · Store DPRs as tabs. Ledger: 50 a page, search, **Edit** any line (re-checked so stock never goes negative), **History** on every line.
+- **Opening stock**: one line at a time (Receive tab, "Opening stock") or the Excel item list (download, fill Qty, upload) — all or nothing; rows at 0 skipped.
+- Site store keepers work their own sites; a central store login, Owner and SA pick the site (All sites → site picker on the workspace).
+- Later stages: DPR use + requests + PPE + machinery fed in (2), returns + transfers + central (3), reorder levels + To order (4), delete approval (5).
+
