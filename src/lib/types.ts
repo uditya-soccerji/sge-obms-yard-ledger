@@ -546,6 +546,11 @@ export interface DprLabourMark {
   inTime?: string;
   outTime?: string;
   note?: string;
+  /** PPE on the day (Admin DPR, 2026-10-27); damaged / urgent go to the store keeper on submit */
+  ppe?: "ok" | "damaged" | "urgent";
+  /** The store dealt with it (issued / replaced) */
+  ppeHandledBy?: string;
+  ppeHandledAt?: string;
 }
 
 export interface DprEquipmentMark {
@@ -553,11 +558,20 @@ export interface DprEquipmentMark {
   status: "ok" | "due" | "fault";
   expiryDate?: string;
   note?: string;
+  /** Machinery run for the day (2026-10-27): start / end time (HH:MM) and the meter reading */
+  startTime?: string;
+  endTime?: string;
+  meterReading?: number;
+  /** Diesel used, litres — compressors only */
+  dieselL?: number;
 }
 
 export interface DprRequest {
   id: string;
   kind: "spare" | "equipment" | "material" | "other";
+  /** Picked from the store list (lib/store-catalogue, 2026-10-27); the item name also fills the description */
+  category?: string;
+  item?: string;
   description: string;
   qty?: number;
   urgent?: boolean;

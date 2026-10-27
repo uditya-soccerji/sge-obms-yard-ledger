@@ -61,7 +61,13 @@ export function validMembers(members: Member[]): { members: Member[]; error?: st
   return { members: out };
 }
 
-const entryKey = (e: DprEntry) => `${e.jobId}|${e.date}|${e.stage}`;
+// A no-job line (Admin DPR) is keyed by its plan line, so it never merges with another line's figures
+const entryKey = (e: DprEntry) => `${e.jobId || `pl:${e.planLineId ?? e.id}`}|${e.date}|${e.stage}`;
+
+/** The plan line a work line counts against: its job's line, or its own (no-job Admin line) */
+export function entryPlanLineId(e: DprEntry, jobs: Job[]): string | undefined {
+  return e.jobId ? jobs.find((j) => j.id === e.jobId)?.planLineId : e.planLineId;
+}
 
 /**
  * Double entry (docs §5, §5b): Admin re-enters every DPR and Admin's figures
@@ -181,6 +187,10 @@ export function lineStatus(line: PlanLine, w: WorkState): LineStatus {
     if (job.planLineId !== line.id || job.status === "closed") continue;
     const a = jobStageAreas(job, w.dprs);
     for (const s of job.stages) inProgress[s] = round3(inProgress[s] + a[s]);
+  }
+  // 2026-10-27: the Admin's work lines taken straight from the plan (no job yet) count as progress too
+  for (const e of effectiveEntries(w.dprs)) {
+    if (!e.jobId && e.planLineId === line.id) inProgress[e.stage] = round3(inProgress[e.stage] + entryArea(e));
   }
   // A line with no plan left (carried at 0 m²) that still gets JMS is over by definition
   const variance = plan > 0 ? actual / plan - 1 : actual > 0 ? Infinity : 0;

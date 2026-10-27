@@ -6,7 +6,7 @@ import { useStore } from "@/lib/store";
 import { workedCount } from "@/lib/attendance";
 import type { AppState } from "@/lib/types";
 import type { WorkState } from "@/lib/work/types";
-import { entryArea } from "@/lib/work/logic";
+import { entryArea, entryPlanLineId } from "@/lib/work/logic";
 import { useWork } from "@/lib/work/store";
 import { spendOn } from "@/lib/work/money";
 
@@ -35,8 +35,8 @@ export function siteRows(s: AppState, w: WorkState): SiteRow[] {
     .map((site) => {
       const id = site.id;
       // Today's quantities come from the one DPR model in Work (job lines + scaffold lines)
-      const siteOfJob = (jobId: string) => w.planLines.find((l) => l.id === w.jobs.find((j) => j.id === jobId)?.planLineId)?.siteId;
-      const lines = w.dprs.filter((d) => d.date === day && siteOfJob(d.jobId) === id);
+      const siteOf = (d: WorkState["dprs"][number]) => w.planLines.find((l) => l.id === entryPlanLineId(d, w.jobs))?.siteId;
+      const lines = w.dprs.filter((d) => d.date === day && siteOf(d) === id);
       const reportsToday = w.reports.filter((r) => r.siteId === id && r.date === day);
       return {
         siteId: id,

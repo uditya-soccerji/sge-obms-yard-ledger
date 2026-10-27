@@ -8,7 +8,7 @@ import { OPEN_STATUSES } from "@/lib/requests";
 import { ALL_SITES } from "@/lib/site-scope";
 import { useStore } from "@/lib/store";
 import { daysAgo } from "@/lib/today";
-import { entryArea, round3 } from "@/lib/work/logic";
+import { entryArea, entryPlanLineId, round3 } from "@/lib/work/logic";
 import { useWork } from "@/lib/work/store";
 
 /**
@@ -26,7 +26,7 @@ export function OwnerDailySummary() {
   const reports = work.reports.filter((r) => r.date === day && inSite(r.siteId));
   const submitted = reports.filter((r) => r.status !== "draft").length;
   const approved = reports.filter((r) => r.status === "sic_approved").length;
-  const lines = work.dprs.filter((d) => d.date === day && inSite(lineSite(work.jobs.find((j) => j.id === d.jobId)?.planLineId ?? "")));
+  const lines = work.dprs.filter((d) => d.date === day && inSite(lineSite(entryPlanLineId(d, work.jobs) ?? "")));
   const area = round3(lines.reduce((t, e) => t + entryArea(e), 0));
   const litres = round3(lines.reduce((t, e) => t + (e.litres || 0), 0));
   const present = new Set(state.attendance.filter((a) => a.date === day && WORKING.includes(a.status)).map((a) => a.labourerId)).size;

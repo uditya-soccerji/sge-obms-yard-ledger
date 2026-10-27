@@ -16,11 +16,15 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { REQUEST_REASONS } from "@/lib/requests";
+import { STORE_CATALOGUE } from "@/lib/store-catalogue";
 import { SafetyDprForm } from "@/components/dpr/safety-dpr-form";
 import type {
   AttendanceStatus,
+  DprEquipmentMark,
+  DprLabourMark,
   DprRequest,
   DprScaffoldWorkLine,
+  EquipmentItem,
 } from "@/lib/types";
 import type { DprReport } from "@/lib/work/types";
 import { blankReport, reportOpen } from "@/lib/work/reports";
@@ -28,11 +32,30 @@ import { useWork } from "@/lib/work/store";
 import { entryArea, round3 } from "@/lib/work/logic";
 import { STAGES } from "@/lib/work/types";
 import { JobEntryForm } from "@/components/work/work-jobs";
+import { PlanWorkLineForm } from "@/components/dpr/plan-work-lines";
 import { useStore } from "@/lib/store";
+import { cn } from "@/lib/utils";
 import { ATTENDANCE_OPTIONS, otHours, timeProblem, WORKING } from "@/lib/attendance";
 
 function uid(prefix: string) {
   return `${prefix}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+/** PPE status on the Admin DPR (2026-10-27) */
+export const PPE_OPTIONS: { value: NonNullable<DprLabourMark["ppe"]>; label: string; on: string }[] = [
+  { value: "ok", label: "OK", on: "bg-[var(--sge-ok)] text-white" },
+  { value: "damaged", label: "Damaged", on: "bg-[var(--sge-warn)] text-white" },
+  { value: "urgent", label: "Urgent required", on: "bg-[var(--sge-crit)] text-white" },
+];
+
+/** Machinery whose run is logged on the DPR: start / end time and meter (diesel for compressors) */
+export const MACHINERY: EquipmentItem["type"][] = ["hopper", "compressor", "airless"];
+
+/** Hours between start and end (HH:MM), to 0.1 h; -1 when the end isn't after the start */
+export function runHours(start?: string, end?: string): number | null {
+  if (!start || !end) return null;
+  const [a, b] = [start, end].map((t) => Number(t.slice(0, 2)) * 60 + Number(t.slice(3, 5)));
+  return b > a ? Math.round(((b - a) / 60) * 10) / 10 : -1;
 }
 
 /** A new daily report (kept under the old name for the DPR desk pages). */
@@ -42,22 +65,29 @@ export function DprForm({
   value,
   onChange,
   readOnly,
+  ensureSaved,
 }: {
   value: DprReport;
   onChange: (next: DprReport) => void;
   readOnly?: boolean;
+  /** Admin DPR: save the draft (if new) before a work line is added */
+  ensureSaved?: () => { ok: boolean; error?: string; doc?: DprReport };
 }) {
   const { state } = useStore();
+  // 2026-10-27: the Admin's DPR opens every section at once, with the whole site's labourers
+  const all = !!value.allSections;
   const crew = useMemo(
     () =>
       state.labourers.filter(
         (l) =>
           l.active &&
-          (value.submitterType === "safety" ||
-            value.submitterType === "store" ||
-            l.supervisorId === value.submitterId)
+          (all
+            ? l.siteId === value.siteId
+            : value.submitterType === "safety" ||
+              value.submitterType === "store" ||
+              l.supervisorId === value.submitterId)
       ),
-    [state.labourers, value.submitterId, value.submitterType]
+    [state.labourers, value.submitterId, value.submitterType, value.siteId, all]
   );
 
   const equipment = state.equipment.filter((e) => e.siteId === value.siteId);
@@ -87,7 +117,18 @@ export function DprForm({
             outTime: WORKING.includes(status) ? (status === "half" ? "13:00" : "18:00") : undefined,
           },
         ];
-    onChange({ ...value, labourMarks });
+    // Admin DPR (2026-10-27): Present / Absent without times — times are typed only if wanted
+    onChange({ ...value, labourMarks: all ? labourMarks.map((m) => (m.labourerId === labourerId && !existing ? { ...m, inTime: undefined, outTime: undefined } : m)) : labourMarks });
+  }
+
+  function setPpe(labourerId: string, ppe: NonNullable<DprLabourMark["ppe"]>) {
+    const has = value.labourMarks.some((m) => m.labourerId === labourerId);
+    onChange({
+      ...value,
+      labourMarks: has
+        ? value.labourMarks.map((m) => (m.labourerId === labourerId ? { ...m, ppe } : m))
+        : [...value.labourMarks, { labourerId, status: "present", ppe }],
+    });
   }
 
   function setTime(labourerId: string, key: "inTime" | "outTime", v: string) {
@@ -122,6 +163,11 @@ export function DprForm({
         },
       ],
     });
+  }
+
+  /** Change a ticked item's day figures: status, run times, meter, diesel */
+  function setEquipment(equipmentId: string, patch: Partial<DprEquipmentMark>) {
+    onChange({ ...value, equipmentMarks: value.equipmentMarks.map((e) => (e.equipmentId === equipmentId ? { ...e, ...patch } : e)) });
   }
 
   function addRequest() {
@@ -205,7 +251,7 @@ export function DprForm({
             rows={2}
           />
         </div>
-        {value.submitterType === "painting_blasting" || value.submitterType === "scaffolding" ? (
+        {all || value.submitterType === "painting_blasting" || value.submitterType === "scaffolding" ? (
           <div className="mt-3 grid gap-3 sm:grid-cols-3">
             <label className="flex items-center gap-2 text-sm">
               <Checkbox
@@ -249,11 +295,11 @@ export function DprForm({
         ) : null}
       </Panel>
 
-      {value.submitterType !== "store" &&
-      value.submitterType !== "safety" ? (
+      {all || (value.submitterType !== "store" &&
+      value.submitterType !== "safety") ? (
         <Panel>
           <h3 className="mb-3 font-heading text-sm font-bold uppercase tracking-wide text-[var(--sge-ink-3)]">
-            Labour attendance
+            Labour attendance{all ? ` · whole site (${crew.length})` : ""}
           </h3>
           {crew.length === 0 ? (
             // B03: a new supervisor has no crew yet; say so instead of an empty panel
@@ -279,6 +325,58 @@ export function DprForm({
                       {state.tradeCatalogue.find((t) => t.id === l.trade)?.label ?? l.trade} · {l.epNumber}
                     </div>
                   </div>
+                  {all ? (
+                    // Admin DPR (2026-10-27): attendance as tabs, optional times, PPE status
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div role="group" aria-label={`Attendance ${l.name}`} className="inline-flex overflow-hidden rounded-md border border-[var(--sge-line)] text-xs">
+                        {(["present", "absent"] as const).map((st) => (
+                          <button
+                            key={st}
+                            type="button"
+                            disabled={readOnly}
+                            aria-pressed={mark?.status === st}
+                            onClick={() => setMark(l.id, st)}
+                            className={cn("px-2.5 py-1.5 font-semibold", mark?.status === st ? (st === "present" ? "bg-[var(--sge-ok)] text-white" : "bg-[var(--sge-crit)] text-white") : "bg-[var(--sge-paper)] text-[var(--sge-ink-2)] hover:bg-[var(--sge-paper-2)]")}
+                          >
+                            {st === "present" ? "Present" : "Absent"}
+                          </button>
+                        ))}
+                        <select
+                          aria-label={`Other attendance ${l.name}`}
+                          disabled={readOnly}
+                          className={cn("border-l border-[var(--sge-line)] px-1.5 text-xs", mark && mark.status !== "present" && mark.status !== "absent" ? "bg-[var(--sge-brass-wash)] font-semibold" : "bg-[var(--sge-paper)]")}
+                          value={mark && mark.status !== "present" && mark.status !== "absent" ? mark.status : ""}
+                          onChange={(e) => e.target.value && setMark(l.id, e.target.value as AttendanceStatus)}
+                        >
+                          <option value="">More…</option>
+                          {ATTENDANCE_OPTIONS.filter((o) => o.value !== "present" && o.value !== "absent").map((o) => (
+                            <option key={o.value} value={o.value}>{o.label}</option>
+                          ))}
+                        </select>
+                      </div>
+                      {mark && WORKING.includes(mark.status) ? (
+                        <>
+                          <Input aria-label={`In-time ${l.name}`} type="time" disabled={readOnly} className="h-8 w-[104px] text-xs" value={mark.inTime ?? ""} onChange={(e) => setTime(l.id, "inTime", e.target.value)} />
+                          <Input aria-label={`Out-time ${l.name}`} type="time" disabled={readOnly} className="h-8 w-[104px] text-xs" value={mark.outTime ?? ""} onChange={(e) => setTime(l.id, "outTime", e.target.value)} />
+                        </>
+                      ) : null}
+                      <div role="group" aria-label={`PPE ${l.name}`} className="inline-flex items-center overflow-hidden rounded-md border border-[var(--sge-line)] text-xs">
+                        <span className="bg-[var(--sge-paper-2)] px-2 py-1.5 font-semibold text-[var(--sge-ink-3)]">PPE</span>
+                        {PPE_OPTIONS.map((o) => (
+                          <button
+                            key={o.value}
+                            type="button"
+                            disabled={readOnly}
+                            aria-pressed={mark?.ppe === o.value}
+                            onClick={() => setPpe(l.id, o.value)}
+                            className={cn("px-2.5 py-1.5 font-semibold", mark?.ppe === o.value ? o.on : "bg-[var(--sge-paper)] text-[var(--sge-ink-2)] hover:bg-[var(--sge-paper-2)]")}
+                          >
+                            {o.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
                   <div className="flex flex-wrap items-center gap-2">
                     <Select
                       disabled={readOnly}
@@ -310,6 +408,7 @@ export function DprForm({
                       </>
                     ) : null}
                   </div>
+                  )}
                 </div>
               );
             })}
@@ -327,12 +426,15 @@ export function DprForm({
             const marked = value.equipmentMarks.find(
               (e) => e.equipmentId === eq.id
             );
+            const machine = MACHINERY.includes(eq.type);
+            const hours = marked ? runHours(marked.startTime, marked.endTime) : null;
             return (
-              <label
+              <div
                 key={eq.id}
-                className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-[var(--sge-line)] px-3 py-2 text-sm"
+                className="rounded-md border border-[var(--sge-line)] px-3 py-2 text-sm"
               >
-                <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <label className="flex items-center gap-2">
                   <Checkbox
                     disabled={readOnly}
                     checked={!!marked}
@@ -341,7 +443,7 @@ export function DprForm({
                   <span>
                     {eq.tag} · {eq.type}
                   </span>
-                </div>
+                </label>
                 <div className="flex items-center gap-2 text-xs">
                   <StatusPill
                     tone={
@@ -366,7 +468,56 @@ export function DprForm({
                     </span>
                   ) : null}
                 </div>
-              </label>
+              </div>
+              {marked ? (
+                // 2026-10-27: the day's figures for a ticked item — status for all, run time + meter for machinery, diesel for compressors
+                <div className="mt-2 flex flex-wrap items-end gap-3 border-t border-[var(--sge-line)] pt-2 text-xs">
+                  <div>
+                    <Label className="text-xs">Status today</Label>
+                    <select
+                      aria-label={`Status ${eq.tag}`}
+                      className="mt-1 h-8 rounded-md border border-[var(--sge-line)] bg-[var(--sge-paper)] px-2 text-xs"
+                      disabled={readOnly}
+                      value={marked.status}
+                      onChange={(e) => setEquipment(eq.id, { status: e.target.value as DprEquipmentMark["status"] })}
+                    >
+                      <option value="ok">OK</option>
+                      <option value="due">Due</option>
+                      <option value="fault">Fault</option>
+                    </select>
+                  </div>
+                  <div className="min-w-[180px] flex-1">
+                    <Label className="text-xs">Remark{marked.status === "fault" ? " — what's wrong" : ""}</Label>
+                    <Input aria-label={`Remark ${eq.tag}`} disabled={readOnly} className="mt-1 h-8 text-xs" placeholder={marked.status === "fault" ? "e.g. pressure drops, hose leaking" : "optional"} value={marked.note ?? ""} onChange={(e) => setEquipment(eq.id, { note: e.target.value || undefined })} />
+                  </div>
+                  {machine ? (
+                    <>
+                      <div>
+                        <Label className="text-xs">Start time</Label>
+                        <Input aria-label={`Start time ${eq.tag}`} type="time" disabled={readOnly} className="mt-1 h-8 w-[110px] text-xs" value={marked.startTime ?? ""} onChange={(e) => setEquipment(eq.id, { startTime: e.target.value || undefined })} />
+                      </div>
+                      <div>
+                        <Label className="text-xs">End time</Label>
+                        <Input aria-label={`End time ${eq.tag}`} type="time" disabled={readOnly} className="mt-1 h-8 w-[110px] text-xs" value={marked.endTime ?? ""} onChange={(e) => setEquipment(eq.id, { endTime: e.target.value || undefined })} />
+                      </div>
+                      <div>
+                        <Label className="text-xs">Meter reading</Label>
+                        <Input aria-label={`Meter reading ${eq.tag}`} type="number" min="0" step="any" disabled={readOnly} className="mt-1 h-8 w-[120px] text-xs" value={marked.meterReading ?? ""} onChange={(e) => setEquipment(eq.id, { meterReading: e.target.value === "" ? undefined : Number(e.target.value) })} />
+                      </div>
+                      {eq.type === "compressor" ? (
+                        <div>
+                          <Label className="text-xs">Diesel used (L)</Label>
+                          <Input aria-label={`Diesel litres ${eq.tag}`} type="number" min="0" step="any" disabled={readOnly} className="mt-1 h-8 w-[110px] text-xs" value={marked.dieselL ?? ""} onChange={(e) => setEquipment(eq.id, { dieselL: e.target.value === "" ? undefined : Number(e.target.value) })} />
+                        </div>
+                      ) : null}
+                      <span className={hours === -1 ? "pb-2 text-[var(--sge-crit)]" : "pb-2 text-[var(--sge-ink-3)]"}>
+                        {hours === -1 ? "End must be after start" : hours != null ? `Ran ${hours} h` : ""}
+                      </span>
+                    </>
+                  ) : null}
+                </div>
+              ) : null}
+              </div>
             );
           })}
         </div>
@@ -393,6 +544,40 @@ export function DprForm({
                 key={r.id}
                 className="grid gap-2 rounded-md border border-[var(--sge-line)] p-2 sm:grid-cols-6"
               >
+                {/* 2026-10-27: pick from the store list — category, then item (or "Other" and type it) */}
+                <select
+                  aria-label={`Category for request ${idx + 1}`}
+                  disabled={readOnly}
+                  className="h-8 rounded-md border border-[var(--sge-line)] bg-[var(--sge-paper)] px-2 text-xs sm:col-span-2"
+                  value={r.category ?? ""}
+                  onChange={(e) => {
+                    const cat = STORE_CATALOGUE.find((c) => c.name === e.target.value);
+                    const requests = value.requests.map((x, i) => (i === idx ? { ...x, category: cat?.name, item: undefined, kind: cat?.kind ?? x.kind, description: x.item && x.description === x.item ? "" : x.description } : x));
+                    onChange({ ...value, requests });
+                  }}
+                >
+                  <option value="">Category…</option>
+                  {STORE_CATALOGUE.map((c) => (
+                    <option key={c.name} value={c.name}>{c.name}</option>
+                  ))}
+                </select>
+                <select
+                  aria-label={`Item for request ${idx + 1}`}
+                  disabled={readOnly || !r.category}
+                  className="h-8 rounded-md border border-[var(--sge-line)] bg-[var(--sge-paper)] px-2 text-xs sm:col-span-2"
+                  value={r.item ?? ""}
+                  onChange={(e) => {
+                    const item = e.target.value || undefined;
+                    // The item name becomes the description the store reads; a hand-typed one is kept
+                    const requests = value.requests.map((x, i) => (i === idx ? { ...x, item, description: item && (!x.description || x.description === x.item) ? item : x.description } : x));
+                    onChange({ ...value, requests });
+                  }}
+                >
+                  <option value="">{r.category ? "Item… (or Other: type below)" : "Pick a category first"}</option>
+                  {(STORE_CATALOGUE.find((c) => c.name === r.category)?.items ?? []).map((it) => (
+                    <option key={it} value={it}>{it}</option>
+                  ))}
+                </select>
                 <Select
                   disabled={readOnly}
                   value={r.kind}
@@ -473,9 +658,9 @@ export function DprForm({
         )}
       </Panel>
 
-      {value.submitterType === "painting_blasting" ? <JobLines report={value} readOnly={readOnly} /> : null}
+      {all || value.submitterType === "painting_blasting" ? <JobLines report={value} readOnly={readOnly} ensureSaved={all ? ensureSaved : undefined} /> : null}
 
-      {value.submitterType === "scaffolding" && value.scaffoldWork ? (
+      {(all || value.submitterType === "scaffolding") && value.scaffoldWork ? (
         <ScaffoldWorkEditor
           lines={value.scaffoldWork}
           plants={plants}
@@ -484,7 +669,7 @@ export function DprForm({
         />
       ) : null}
 
-      {value.submitterType === "safety" && value.safetyBody ? (
+      {(all || value.submitterType === "safety") && value.safetyBody ? (
         <SafetyDprForm
           body={value.safetyBody}
           readOnly={readOnly}
@@ -492,7 +677,7 @@ export function DprForm({
         />
       ) : null}
 
-      {value.submitterType === "store" && value.storeBody ? (
+      {(all || value.submitterType === "store") && value.storeBody ? (
         <Panel>
           <h3 className="mb-3 font-heading text-sm font-bold uppercase tracking-wide text-[var(--sge-ink-3)]">
             Store body
@@ -582,9 +767,15 @@ export function DprForm({
  * each picks an open job on this plant and a stage, with measured members,
  * paint and crew — the same line the Work job card adds. They move the job on.
  */
-function JobLines({ report, readOnly }: { report: DprReport; readOnly?: boolean }) {
+function JobLines({ report, readOnly, ensureSaved }: { report: DprReport; readOnly?: boolean; ensureSaved?: () => { ok: boolean; error?: string; doc?: DprReport } }) {
+  const { state } = useStore();
   const { work, removeEntry } = useWork();
   const [adding, setAdding] = useState<string>("");
+  const [fromPlan, setFromPlan] = useState(false);
+  const planLabel = (id?: string) => {
+    const l = work.planLines.find((x) => x.id === id);
+    return l ? `Plan · ${l.plant} · ${l.serviceCode} · ${state.staff.find((x) => x.id === l.supervisorId)?.name ?? ""}` : "Plan";
+  };
   const [msg, setMsg] = useState<{ ok: boolean; msg: string } | null>(null);
   const saved = work.reports.some((r) => r.id === report.id);
   const lines = work.dprs.filter((d) => d.reportId === report.id);
@@ -594,11 +785,13 @@ function JobLines({ report, readOnly }: { report: DprReport; readOnly?: boolean 
   });
   const jobNo = (id: string) => work.jobs.find((j) => j.id === id)?.jobNo ?? id;
   const editable = !readOnly && saved && reportOpen(report);
+  // Admin DPR: the plan's work can be added before the draft is saved (it saves itself first)
+  const planOpen = !!ensureSaved && !readOnly && reportOpen(report);
   const job = jobs.find((j) => j.id === adding);
   return (
     <Panel>
       <h3 className="mb-3 font-heading text-sm font-bold uppercase tracking-wide text-[var(--sge-ink-3)]">
-        Painting / blasting — job lines
+        Painting / blasting — {ensureSaved ? "work lines" : "job lines"}
       </h3>
       {lines.length === 0 ? (
         <p className="text-sm text-[var(--sge-ink-3)]">No job lines yet.</p>
@@ -617,7 +810,7 @@ function JobLines({ report, readOnly }: { report: DprReport; readOnly?: boolean 
           <tbody>
             {lines.map((e) => (
               <tr key={e.id} className="border-t border-[var(--sge-line)]">
-                <td className="py-1.5 font-mono">{jobNo(e.jobId)}</td>
+                <td className="py-1.5 font-mono">{e.jobId ? jobNo(e.jobId) : <span className="font-sans">{planLabel(e.planLineId)} <span className="rounded-sm bg-[var(--sge-paper-2)] px-1 text-[10px] uppercase">no job</span></span>}</td>
                 <td>{STAGES.find((x) => x.id === e.stage)?.label}</td>
                 <td className="text-right font-mono">{round3(entryArea(e))}</td>
                 <td className="text-right font-mono">{e.litres || "—"}</td>
@@ -634,12 +827,23 @@ function JobLines({ report, readOnly }: { report: DprReport; readOnly?: boolean 
           </tbody>
         </table>
       )}
-      {!saved && !readOnly ? (
+      {planOpen ? (
+        <div className="mb-3">
+          {fromPlan ? (
+            <PlanWorkLineForm report={report} ensureSaved={ensureSaved!} onDone={(m) => setMsg(m)} />
+          ) : (
+            <Button type="button" size="sm" onClick={() => setFromPlan(true)}>
+              + Add work from the plan (no job needed)
+            </Button>
+          )}
+        </div>
+      ) : null}
+      {!saved && !readOnly && !planOpen ? (
         <p className="text-xs text-[var(--sge-ink-3)]">Pick the plant and save the draft, then add job lines here.</p>
       ) : null}
       {editable ? (
         jobs.length === 0 ? (
-          <p className="text-xs text-[var(--sge-ink-3)]">No open jobs for this supervisor on {report.plant || "this plant"}. Start one in Work → Jobs &amp; DPR.</p>
+          planOpen ? null : <p className="text-xs text-[var(--sge-ink-3)]">No open jobs for this supervisor on {report.plant || "this plant"}. Start one in Work → Jobs &amp; DPR.</p>
         ) : (
           <div className="space-y-2">
             <div className="flex flex-wrap items-end gap-2">

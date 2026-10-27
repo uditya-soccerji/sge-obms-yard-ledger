@@ -41,6 +41,10 @@ interface WorkApi {
   adminReturnJms: (jmsId: string, reason: string) => Result;
   /** Add a job line; it goes on the day's open report (made if none), or on `reportId` */
   addDpr: (input: Omit<DprEntry, "id" | "supervisorId">) => Result;
+  /** Admin DPR (2026-10-27): a work line picked straight from the month's plan, no job needed; it counts as plan progress */
+  /** The store marks a labourer's flagged PPE as dealt with (issued / replaced) */
+  handlePpe: (reportId: string, labourerId: string) => Result;
+  addPlanEntry: (input: { date: string; planLineId: string; reportId: string; stage: Stage; members: DprEntry["members"]; paintSap?: string; litres: number; dft?: number; crew?: string[]; draft?: DprReport }) => Result;
   /** Remove a job line while its report is still a draft or sent back */
   removeEntry: (id: string) => Result;
   /** Save a report (draft); a submitted or approved one is frozen */
@@ -114,7 +118,7 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
   ref.current = work;
 
   // Who is acting (the viewed-as account when Super Admin uses "View as")
-  const { currentAccount, state: appState, fullState, applyDprAttendance, clearDprAttendance, raiseRequestsFromDpr, markWageChangesNotified, markMasterChanges } = useStore();
+  const { currentAccount, state: appState, fullState, applyDprAttendance, clearDprAttendance, raiseRequestsFromDpr, applyDprEquipment, markWageChangesNotified, markMasterChanges } = useStore();
   const actor = React.useRef({ name: "System", role: null as RoleId | null, staffId: null as string | null, accountId: "", impersonatedBy: undefined as string | undefined });
   actor.current = {
     name: currentAccount?.name ?? "System",
@@ -138,8 +142,8 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
   const may = (module: ModuleId, action: PermissionAction) => effectivePermission(accountRef.current, actor.current.role, module, action);
   const labourersRef = React.useRef(fullState.labourers);
   labourersRef.current = fullState.labourers;
-  const mainActs = React.useRef({ applyDprAttendance, clearDprAttendance, raiseRequestsFromDpr });
-  mainActs.current = { applyDprAttendance, clearDprAttendance, raiseRequestsFromDpr };
+  const mainActs = React.useRef({ applyDprAttendance, clearDprAttendance, raiseRequestsFromDpr, applyDprEquipment });
+  mainActs.current = { applyDprAttendance, clearDprAttendance, raiseRequestsFromDpr, applyDprEquipment };
   /** A supervisor may only act on their own lines and jobs. */
   const notMine = (supervisorId: string) => actor.current.role === "supervisor" && supervisorId !== actor.current.staffId;
 
@@ -434,6 +438,48 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
     return { ok: true, id: entry.id };
   }, [log]);
 
+  const handlePpe = useCallback<WorkApi["handlePpe"]>((reportId, labourerId) => {
+    const role = actor.current.role;
+    if (role !== "store" && role !== "owner" && role !== "super_admin") return { ok: false, error: "The store keeper marks PPE handled" };
+    const at = new Date().toISOString();
+    setWork((s) => ({ ...s, reports: s.reports.map((r) => (r.id !== reportId ? r : { ...r, labourMarks: r.labourMarks.map((m) => (m.labourerId === labourerId ? { ...m, ppeHandledBy: actor.current.name, ppeHandledAt: at } : m)) })) }));
+    void remoteAudit({ userId: actor.current.accountId, username: actor.current.name, role: actor.current.role, siteId: ref.current.reports.find((r) => r.id === reportId)?.siteId || null, module: "work", action: "ppe_handled", detail: `PPE handled for ${labourersRef.current.find((l) => l.id === labourerId)?.name ?? labourerId} · DPR ${reportId}`, impersonatedBy: actor.current.impersonatedBy ?? null });
+    return { ok: true };
+  }, []);
+
+  const addPlanEntry = useCallback<WorkApi["addPlanEntry"]>((input) => {
+    const role = actor.current.role;
+    if (role !== "admin" && role !== "sic" && role !== "owner" && role !== "super_admin") return NOT_ALLOWED;
+    const w = ref.current;
+    const line = w.planLines.find((l) => l.id === input.planLineId);
+    if (!line) return { ok: false, error: "Pick the work from the plan" };
+    // The draft saved a moment ago may not be in state yet — the form hands it over
+    const report = w.reports.find((r) => r.id === input.reportId) ?? (input.draft?.id === input.reportId ? input.draft : undefined);
+    if (!report) return { ok: false, error: "Save the DPR first" };
+    if (!reportOpen(report)) return { ok: false, error: "That DPR is submitted — lines can't be added" };
+    if (report.siteId !== line.siteId) return { ok: false, error: "That plan line is on another site" };
+    // The same safety rules as any line: date, measured rows, DFT range, paint for litres
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date)) return { ok: false, error: "Pick the date" };
+    if (input.date > today()) return { ok: false, error: "A DPR can't be dated in the future" };
+    if (role !== "owner" && role !== "super_admin" && input.date < daysAgo(1)) return { ok: false, error: "Only today or yesterday can be entered — ask the Owner to back-date further" };
+    const checked = validMembers(input.members);
+    if (checked.error) return { ok: false, error: checked.error };
+    const area = checked.members.reduce((t, m) => t + m.nos * m.side * m.length * m.cf, 0);
+    if (area > 2000) return { ok: false, error: `Area ${round3(area)} m² is over the 2,000 m² per line limit` };
+    if (input.dft != null && (input.dft <= 0 || input.dft > 2000)) return { ok: false, error: "DFT must be between 1 and 2,000 µm" };
+    if (input.litres < 0) return { ok: false, error: "Litres can't be negative" };
+    if (input.litres > 0 && !input.paintSap) return { ok: false, error: "Pick which paint the litres are from" };
+    const enteredBy: DprEntry["enteredBy"] = role === "admin" || role === "sic" || role === "owner" || role === "super_admin" ? role : "supervisor";
+    // Crew on the line must be on the report as working; add anyone missing as present 08:00–18:00
+    const marked = new Set(report.labourMarks.map((m) => m.labourerId));
+    const addMarks = (input.crew ?? []).filter((id) => !marked.has(id)).map((labourerId) => ({ labourerId, status: "present" as const, inTime: "08:00", outTime: "18:00" }));
+    const nextReport: DprReport = { ...report, labourMarks: [...report.labourMarks, ...addMarks], updatedAt: new Date().toISOString() };
+    const entry: DprEntry = { id: uid("wd"), date: input.date, jobId: "", planLineId: line.id, reportId: report.id, stage: input.stage, members: checked.members, paintSap: input.litres > 0 ? input.paintSap : undefined, litres: input.litres, dft: input.dft, supervisorId: line.supervisorId, enteredBy, enteredByName: actor.current.name, crew: input.crew };
+    setWork((s) => ({ ...s, reports: s.reports.some((r) => r.id === nextReport.id) ? s.reports.map((r) => (r.id === nextReport.id ? { ...r, labourMarks: nextReport.labourMarks, updatedAt: nextReport.updatedAt } : r)) : [...s.reports, nextReport], dprs: [...s.dprs, entry] }));
+    log({ kind: "dpr_added", siteId: line.siteId, subjectStaffId: line.supervisorId, title: `${line.plant} · ${line.serviceCode} · ${STAGES.find((x) => x.id === entry.stage)?.label} ${round3(area)} m² (no job)`, detail: `From the plan · entered by ${actor.current.name}${entry.crew?.length ? ` · crew ${entry.crew.length}` : ""}`, tab: "plan", refId: line.id });
+    return { ok: true, id: entry.id };
+  }, [log]);
+
   const requestClose = useCallback<WorkApi["requestClose"]>((jobId, endDate) => {
     if (!rights().canEnter) return NOT_ALLOWED;
     const w = ref.current;
@@ -625,6 +671,14 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
       updatedAt: new Date().toISOString(),
     };
     setWork((s) => ({ ...s, reports: existing ? s.reports.map((r) => (r.id === doc.id ? saved : r)) : [...s.reports, saved] }));
+    // 2026-10-27: "Submit to SIC" (and a work line added right after) must see this save at once,
+    // not the copy from before the click — keep the live copy in step until the next render
+    ref.current = { ...w, reports: existing ? w.reports.map((r) => (r.id === doc.id ? saved : r)) : [...w.reports, saved] };
+    // 2026-10-27: the DPR's equipment status updates the register; a new Fault alerts the store (and SIC)
+    const faults = mainActs.current.applyDprEquipment(doc.equipmentMarks, `DPR ${doc.date}`);
+    for (const f of faults) {
+      log({ kind: "equipment_fault", problem: true, siteId: f.siteId || doc.siteId, title: `${f.tag} reported faulty`, detail: `${f.note} · DPR ${doc.date} · by ${actor.current.name}`, tab: "/operations?p=equipment", refId: doc.id });
+    }
     return { ok: true, id: doc.id };
   }, []);
 
@@ -654,6 +708,13 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
       log({ kind: "request_raised", problem: urgent, siteId: r.siteId, subjectStaffId: r.submitterId, title: urgent ? `URGENT · ${q.description}` : `${q.reason ? `${q.reason[0].toUpperCase()}${q.reason.slice(1)}: ` : ""}${q.description}`, detail: `${q.kind} · qty ${q.qty ?? "—"} · ${r.plant} · from DPR ${r.date}`, tab: "/requests", refId: id });
     }
     if (sent.issues?.trim()) log({ kind: "dpr_issue", problem: true, siteId: r.siteId, subjectStaffId: r.submitterId, title: `Issue on ${r.plant} · DPR ${r.date}`, detail: sent.issues.trim(), tab: `/dpr/${id}`, refId: id });
+    // 2026-10-27: PPE damaged / urgently needed goes to the store keeper with every submitted DPR
+    const ppe = r.labourMarks.filter((m) => m.ppe === "damaged" || m.ppe === "urgent");
+    if (ppe.length) {
+      const urgent = ppe.filter((m) => m.ppe === "urgent").length;
+      const ok = r.labourMarks.filter((m) => m.ppe === "ok").length;
+      log({ kind: "ppe_flag", problem: urgent > 0, siteId: r.siteId, subjectStaffId: r.submitterId, title: `PPE · ${urgent} urgent, ${ppe.length - urgent} damaged · DPR ${r.date}`, detail: `${ok} OK · ${r.plant || "site"} · Store Keeper dashboard`, tab: "/home", refId: id });
+    }
     return { ok: true };
   }, [log]);
 
@@ -1095,8 +1156,8 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const api = useMemo<WorkApi>(
-    () => ({ work, hydrated, importExcel, editExpense, receivePaint, advancePaintLifecycle, recoMonth, postMonth, setRilRef, uploadSubmission, linkSubmission, unlinkSubmission, addPlanLine, startJob, decideJobPlan, adminApproveJms, adminReturnJms, addDpr, removeEntry, saveReport, submitReport, reviewReport, unlockReport, telegramToReport, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork, notify: log }),
-    [work, hydrated, importExcel, editExpense, receivePaint, advancePaintLifecycle, recoMonth, postMonth, setRilRef, uploadSubmission, linkSubmission, unlinkSubmission, addPlanLine, startJob, decideJobPlan, adminApproveJms, adminReturnJms, addDpr, removeEntry, saveReport, submitReport, reviewReport, unlockReport, telegramToReport, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork, log]
+    () => ({ work, hydrated, importExcel, editExpense, receivePaint, advancePaintLifecycle, recoMonth, postMonth, setRilRef, uploadSubmission, linkSubmission, unlinkSubmission, addPlanLine, startJob, decideJobPlan, adminApproveJms, adminReturnJms, addDpr, addPlanEntry, handlePpe, removeEntry, saveReport, submitReport, reviewReport, unlockReport, telegramToReport, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork, notify: log }),
+    [work, hydrated, importExcel, editExpense, receivePaint, advancePaintLifecycle, recoMonth, postMonth, setRilRef, uploadSubmission, linkSubmission, unlinkSubmission, addPlanLine, startJob, decideJobPlan, adminApproveJms, adminReturnJms, addDpr, addPlanEntry, handlePpe, removeEntry, saveReport, submitReport, reviewReport, unlockReport, telegramToReport, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork, log]
   );
   return <WorkContext.Provider value={api}>{children}</WorkContext.Provider>;
 }

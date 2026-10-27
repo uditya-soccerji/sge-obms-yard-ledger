@@ -180,6 +180,12 @@ interface StoreApi {
   decideWageChange: (id: string, approve: boolean, note: string) => { ok: boolean; error?: string };
   /** The Admin takes a waiting request back (Undo) */
   withdrawWageChange: (id: string) => { ok: boolean; error?: string };
+  /**
+   * 2026-10-27: a saved DPR's equipment status goes to the register. Fault / Due always;
+   * OK too, except on kit the register shows as Fault (the store clears faults, docs §7).
+   * Returns the items newly at Fault, for the store's alert.
+   */
+  applyDprEquipment: (marks: { equipmentId: string; status: "ok" | "due" | "fault"; note?: string }[], source: string) => { tag: string; note: string; siteId: string }[];
   /** Owner / SA approve (runs the Admin's edit) or reject (reason needed) a Master Data request */
   decideMasterChange: (id: string, approve: boolean, note: string) => Promise<{ ok: boolean; error?: string }>;
   withdrawMasterChange: (id: string) => { ok: boolean; error?: string };
@@ -1378,6 +1384,25 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       return { ...next, auditLog: [makeAudit(next, "trades", approve ? "approve" : "reject", `Wage change ${r.tradeId} · ${r.skill} · ${r.experience} ${approve ? "approved" : "rejected"} (asked by ${r.requestedByName})${note.trim() ? ` · ${note.trim()}` : ""}`), ...s.auditLog] };
     });
     return { ok: true };
+  }, []);
+
+  const applyDprEquipment = useCallback((marks: { equipmentId: string; status: "ok" | "due" | "fault"; note?: string }[], source: string) => {
+    const cur = stateRef.current;
+    const changes = marks
+      .map((m) => ({ m, eq: cur.equipment.find((e) => e.id === m.equipmentId) }))
+      .filter((x): x is { m: (typeof marks)[number]; eq: EquipmentItem } => !!x.eq && x.eq.status !== x.m.status && !(x.eq.status === "fault" && x.m.status !== "fault"));
+    if (!changes.length) return [];
+    const noteOf = (m: (typeof marks)[number]) => m.note?.trim() || `Reported on ${source}`;
+    setState((s) => {
+      const byId = new Map(changes.map((c) => [c.eq.id, c.m]));
+      const equipment = s.equipment.map((e) => {
+        const m = byId.get(e.id);
+        return m ? { ...e, status: m.status, faultNote: m.status === "fault" ? noteOf(m) : undefined, lastCheck: todayDate() } : e;
+      });
+      const next = { ...s, equipment };
+      return { ...next, auditLog: [...changes.map((c) => makeAudit(next, "store", "update", `${c.eq.tag}: ${c.eq.status} → ${c.m.status} (from ${source})${c.m.note?.trim() ? ` · ${c.m.note.trim()}` : ""}`)), ...s.auditLog] };
+    });
+    return changes.filter((c) => c.m.status === "fault").map((c) => ({ tag: c.eq.tag, note: noteOf(c.m), siteId: c.eq.siteId }));
   }, []);
 
   const withdrawWageChange = useCallback((id: string) => {
@@ -2809,6 +2834,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       addLeave,
       decideWageChange,
       withdrawWageChange,
+      applyDprEquipment,
       markWageChangesNotified,
       markWageDecisionsSeen,
       decideMasterChange,
@@ -2890,6 +2916,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       addLeave,
       decideWageChange,
       withdrawWageChange,
+      applyDprEquipment,
       markWageChangesNotified,
       markWageDecisionsSeen,
       decideMasterChange,
