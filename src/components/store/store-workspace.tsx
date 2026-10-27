@@ -2,7 +2,7 @@
 
 import { useMemo, useState, type ReactNode } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { AlertTriangle, ArrowDownToLine, ArrowUpFromLine, BookOpen, Boxes, ClipboardList, PaintBucket, ShieldAlert, Wrench, type LucideIcon } from "lucide-react";
+import { AlertTriangle, ArrowDownToLine, Calculator, ArrowUpFromLine, BookOpen, Boxes, ClipboardList, PaintBucket, ShieldAlert, Wrench, type LucideIcon } from "lucide-react";
 import { EmptyState, Panel, StatusPill } from "@/components/shared/ui-bits";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,15 +13,17 @@ import { ALL_SITES, entrySiteId } from "@/lib/site-scope";
 import type { StoreGroup, StoreMove } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { AddItemForm, IssueForm, OpeningStockUpload, ReceiveForm } from "./store-forms";
+import { MpsAchievable } from "./mps-achievable";
 
 const stamp = (iso: string) => new Date(iso).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 
-export type StoreTabId = "stock" | "receive" | "issue" | "ledger" | "ppe" | "machinery" | "paint" | "dprs";
+export type StoreTabId = "stock" | "receive" | "issue" | "ledger" | "mps" | "ppe" | "machinery" | "paint" | "dprs";
 const TABS: { id: StoreTabId; label: string; icon: LucideIcon }[] = [
   { id: "stock", label: "Stock", icon: Boxes },
   { id: "receive", label: "Receive", icon: ArrowDownToLine },
   { id: "issue", label: "Issue", icon: ArrowUpFromLine },
   { id: "ledger", label: "Ledger", icon: BookOpen },
+  { id: "mps", label: "MPS achievable", icon: Calculator },
   { id: "ppe", label: "PPE", icon: ShieldAlert },
   { id: "machinery", label: "Machinery", icon: Wrench },
   { id: "paint", label: "Paint board", icon: PaintBucket },
@@ -90,7 +92,8 @@ export function StoreWorkspace({ panels, counts }: { panels: Partial<Record<Stor
         </div>
       ) : null}
       {tab === "ledger" ? <LedgerList siteId={siteId} title="Store ledger" /> : null}
-      {tab !== "stock" && tab !== "receive" && tab !== "issue" && tab !== "ledger" ? panels[tab] ?? null : null}
+      {tab === "mps" ? <MpsAchievable siteId={siteId} /> : null}
+      {tab !== "stock" && tab !== "receive" && tab !== "issue" && tab !== "ledger" && tab !== "mps" ? panels[tab] ?? null : null}
     </div>
   );
 }
@@ -252,7 +255,7 @@ function LedgerList({ siteId, kinds, title }: { siteId: string; kinds?: StoreMov
                   <StatusPill tone={m.kind === "issue" ? "warn" : m.kind === "adjust" ? "default" : "ok"}>{MOVE_LABEL[m.kind]}</StatusPill>
                   <span className="font-semibold">{it?.name ?? m.itemId}</span>
                   <span className="font-mono">{m.kind === "issue" ? "−" : m.qty > 0 ? "+" : ""}{m.qty} {it?.unit}</span>
-                  {m.supervisorId ? <span className="text-xs">→ {supName(m.supervisorId)}</span> : null}
+                  {m.supervisorId ? <span className="text-xs">→ {supName(m.supervisorId)}{m.plant ? ` · ${m.plant}` : ""}</span> : null}
                   {m.extraIssue ? <span className="inline-flex items-center gap-1 rounded-sm bg-[var(--sge-warn-wash)] px-1.5 text-[11px] font-semibold text-[var(--sge-warn)]"><AlertTriangle aria-hidden className="h-3 w-3" /> extra · held {m.extraIssue.heldBefore}</span> : null}
                   <span className="text-xs text-[var(--sge-ink-3)]">
                     {[m.batch && `batch ${m.batch}`, m.expiry && `exp ${m.expiry}`, m.vendor, m.vehicleNo && `vehicle ${m.vehicleNo}`, m.billNo && `bill ${m.billNo}`, m.po && `PO ${m.po}`, m.note].filter(Boolean).join(" · ")}

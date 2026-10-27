@@ -209,7 +209,8 @@ export function IssueForm({ siteId }: { siteId: string }) {
   const { notify } = useWork();
   const items = useMemo(() => allStoreItems(state), [state]);
   const supervisors = state.staff.filter((x) => x.role === "supervisor" && x.siteId === siteId);
-  const blank = { date: today(), supervisorId: "", itemId: "", qty: "", batch: "", note: "" };
+  const blank = { date: today(), supervisorId: "", plant: "", itemId: "", qty: "", batch: "", note: "" };
+  const plants = state.sites.find((x) => x.id === siteId)?.plants ?? [];
   const [f, setF] = useState(blank);
   const [msg, setMsg] = useState<Msg>(null);
   const item = items.find((i) => i.id === f.itemId);
@@ -225,13 +226,13 @@ export function IssueForm({ siteId }: { siteId: string }) {
         className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"
         onSubmit={(e) => {
           e.preventDefault();
-          const r = recordStoreMove({ kind: "issue", date: f.date, itemId: f.itemId, qty: Number(f.qty), siteId, supervisorId: f.supervisorId, batch: batches.length ? batch : undefined, expiry: batches.find((b) => b.batch === batch)?.expiry, note: f.note || undefined });
+          const r = recordStoreMove({ kind: "issue", date: f.date, itemId: f.itemId, qty: Number(f.qty), siteId, supervisorId: f.supervisorId, plant: f.plant || undefined, batch: batches.length ? batch : undefined, expiry: batches.find((b) => b.batch === batch)?.expiry, note: f.note || undefined });
           if (!r.ok) return setMsg({ ok: false, text: r.error ?? "Couldn't issue" });
           if (r.extraIssue) {
             notify({ kind: "store_extra_issue", problem: true, siteId, subjectStaffId: f.supervisorId, title: `Extra issue: ${item?.name} ${f.qty} ${item?.unit} to ${supName(f.supervisorId)}`, detail: `He already held ${r.extraIssue.heldBefore} ${item?.unit} unused`, tab: "/home?tab=stock", refId: r.id });
           }
-          setMsg({ ok: true, text: `Issued ${item?.name} ${f.qty} ${item?.unit} to ${supName(f.supervisorId)}.${r.extraIssue ? ` Flagged: he already held ${r.extraIssue.heldBefore} ${item?.unit} — Owner / Super Admin can see it.` : ""}` });
-          setF({ ...blank, supervisorId: f.supervisorId, date: f.date });
+          setMsg({ ok: true, text: `Issued ${item?.name} ${f.qty} ${item?.unit} to ${supName(f.supervisorId)}${f.plant ? ` for ${f.plant}` : ""}.${r.extraIssue ? ` Flagged: he already held ${r.extraIssue.heldBefore} ${item?.unit} — Owner / Super Admin can see it.` : ""}` });
+          setF({ ...blank, supervisorId: f.supervisorId, plant: f.plant, date: f.date });
         }}
       >
         <div>
@@ -239,6 +240,13 @@ export function IssueForm({ siteId }: { siteId: string }) {
           <select aria-label="Supervisor" className={selectCls + " mt-1"} value={f.supervisorId} onChange={(e) => setF({ ...f, supervisorId: e.target.value })}>
             <option value="">Pick the supervisor…</option>
             {supervisors.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}
+          </select>
+        </div>
+        <div>
+          <Label>Plant{item?.group === "paint" ? " *" : ""}</Label>
+          <select aria-label="Plant" className={selectCls + " mt-1"} value={f.plant} onChange={(e) => setF({ ...f, plant: e.target.value })}>
+            <option value="">{item?.group === "paint" ? "Pick the plant…" : "— (optional)"}</option>
+            {plants.map((p) => <option key={p} value={p}>{p}</option>)}
           </select>
         </div>
         <div>

@@ -343,7 +343,7 @@ function makeAudit(
  * still can't change data the role isn't allowed to touch.
  */
 /** What a store line is entered with (the store fills in who / when / history) */
-export type StoreMoveInput = Pick<StoreMove, "kind" | "date" | "itemId" | "qty" | "siteId" | "supervisorId" | "batch" | "expiry" | "pr" | "po" | "billNo" | "vendor" | "vehicleNo" | "note">;
+export type StoreMoveInput = Pick<StoreMove, "kind" | "date" | "itemId" | "qty" | "siteId" | "supervisorId" | "plant" | "batch" | "expiry" | "pr" | "po" | "billNo" | "vendor" | "vehicleNo" | "note">;
 
 function can(s: AppState, module: ModuleId, action: PermissionAction): boolean {
   const account = s.users.find((u) => u.id === s.currentAccountId);
@@ -1454,6 +1454,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     if (m.kind === "issue") {
       const sup = cur.staff.find((x) => x.id === m.supervisorId);
       if (!sup || sup.role !== "supervisor") return "Pick the supervisor it's issued to";
+      // Paint is issued to a plant, so the MPS it can achieve is known per site and plant
+      if (item.group === "paint" && !m.plant?.trim()) return "Pick the plant the paint is for";
     }
     // 2026-10-27: a batch is optional; when one is given its expiry is kept and issues go oldest-expiry first
     return null;
@@ -1528,7 +1530,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const moves = cur.storeMoves.map((m) => (m.id === id ? next : m));
     const short = stockProblem(moves, was.siteId, was.itemId, item!.unit);
     if (short) return { ok: false, error: short };
-    const fields: (keyof StoreMoveInput)[] = ["date", "qty", "supervisorId", "batch", "expiry", "pr", "po", "billNo", "vendor", "vehicleNo", "note"];
+    const fields: (keyof StoreMoveInput)[] = ["date", "qty", "supervisorId", "plant", "batch", "expiry", "pr", "po", "billNo", "vendor", "vehicleNo", "note"];
     const changed = fields.filter((k) => (was[k] ?? "") !== (next[k] ?? "")).map((k) => `${k} ${was[k] ?? "—"} → ${next[k] ?? "—"}`).join(", ");
     if (!changed) return { ok: true };
     const me = whoAmI(cur);

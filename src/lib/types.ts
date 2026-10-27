@@ -414,6 +414,8 @@ export interface StoreMove {
   siteId: string;
   /** Issue: who received it */
   supervisorId?: string;
+  /** Issue: the plant it is for (paint is tracked per site and plant, 2026-10-27) */
+  plant?: string;
   batch?: string;
   expiry?: string;
   pr?: string;

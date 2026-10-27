@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useStore } from "@/lib/store";
+import { mpsKey, normFor, NORM_TOLERANCE, type Method } from "@/lib/mps-norms";
 import { canCloseJob, effectiveEntries, entryArea, entryDiffs, finalStage, jobProgress, jobStageAreas, memberArea, monthLabel, round3, validMembers } from "@/lib/work/logic";
 import { daysAgo } from "@/lib/today";
 import { today } from "@/lib/today";
@@ -351,7 +352,10 @@ export function JobEntryForm({ job, onDone, reportId, fixedDate }: { job: Job; o
   // Total of the rows that will actually be saved (blank rows ignored) — same rule as the store
   const area = round3(validMembers(members).members.reduce((t, m) => t + m.nos * m.side * m.length * m.cf, 0));
   const canBackdate = s.role === "owner" || s.role === "super_admin";
-  const norm = it?.paints.find((p) => p.sap === paintSap)?.normL ?? 0;
+  // 2026-10-27: the norm comes from the RIL MPS sheet by MPS + coat + brush / spray; the old per-paint figure is the fallback
+  const [method, setMethod] = useState<Method>(/SPRAY/i.test(it?.description ?? "") ? "spray" : "brush");
+  const mpsNorm = normFor(it?.mps, stage, method);
+  const norm = mpsNorm?.norm ?? it?.paints.find((p) => p.sap === paintSap)?.normL ?? 0;
   const expected = round3(area * norm);
   const lit = Number(litres) || 0;
   const off = expected > 0 && lit > 0 ? lit / expected - 1 : 0;
@@ -366,7 +370,7 @@ export function JobEntryForm({ job, onDone, reportId, fixedDate }: { job: Job; o
         const rows = validMembers(members);
         if (rows.error) return setErr(rows.error);
         if (stage === fin && it?.paints.length && !(Number(dft) > 0)) return setErr("Actual DFT is required at final shade");
-        const r = addDpr({ date, jobId: job.id, reportId, stage, members, paintSap: lit > 0 ? paintSap : undefined, litres: lit, dft: Number(dft) || undefined, enteredBy: s.enteredBy, crew });
+        const r = addDpr({ date, jobId: job.id, reportId, stage, members, paintSap: lit > 0 ? paintSap : undefined, litres: lit, dft: Number(dft) || undefined, enteredBy: s.enteredBy, crew, method });
         if (!r.ok) return setErr(r.error);
         onDone({ ok: true, msg: `Saved: ${fmtM2(area)} m² ${STAGES.find((x) => x.id === stage)?.label} on ${job.jobNo}.${reportId ? "" : " It's on today's DPR — submit it to SIC from the DPR desk."}` });
       }}
@@ -479,10 +483,15 @@ export function JobEntryForm({ job, onDone, reportId, fixedDate }: { job: Job; o
           </div>
           <div>
             <Label>Litres used</Label>
-            <Input type="number" min="0" step="any" className="mt-1" value={litres} onChange={(e) => setLitres(e.target.value)} />
-            <p className={cn("mt-1 text-[11px]", Math.abs(off) > 0.2 ? "text-[var(--sge-crit)]" : "text-[var(--sge-ink-3)]")}>
-              Norm for {fmtM2(area)} m²: {fmtM2(expected)} L{lit > 0 && expected > 0 ? ` · ${off >= 0 ? "+" : ""}${(off * 100).toFixed(0)}% vs norm` : ""}
-            </p>
+            <Input aria-label="Litres used" type="number" min="0" step="any" className="mt-1" value={litres} onChange={(e) => setLitres(e.target.value)} />
+            <NormLine area={area} expected={expected} lit={lit} off={off} norm={norm} source={mpsNorm ? `${mpsKey(it?.mps)} ${mpsNorm.coat.coat} coat, ${method}` : "service item"} />
+          </div>
+          <div>
+            <Label>Applied by</Label>
+            <select aria-label="Applied by" className={selectCls + " mt-1"} value={method} onChange={(e) => setMethod(e.target.value as Method)}>
+              <option value="brush">Brush / roller</option>
+              <option value="spray">Spray</option>
+            </select>
           </div>
           {stage === fin ? (
             <div>
@@ -622,5 +631,16 @@ function Trail({ jobId, jmsId }: { jobId: string; jmsId?: string }) {
         </span>
       ))}
     </div>
+  );
+}
+
+/** Expected litres from the norm, and the gap flagged beyond ±10% (2026-10-27) */
+export function NormLine({ area, expected, lit, off, norm, source }: { area: number; expected: number; lit: number; off: number; norm: number; source: string }) {
+  const out = lit > 0 && expected > 0 && Math.abs(off) > NORM_TOLERANCE;
+  return (
+    <p className={cn("mt-1 text-[11px]", out ? "font-semibold text-[var(--sge-crit)]" : "text-[var(--sge-ink-3)]")}>
+      Expected for {fmtM2(area)} m²: {fmtM2(expected)} L ({norm} L/m², {source})
+      {lit > 0 && expected > 0 ? ` · ${off >= 0 ? "+" : ""}${(off * 100).toFixed(0)}% vs norm${out ? ` — outside ±${NORM_TOLERANCE * 100}%` : ""}` : ""}
+    </p>
   );
 }

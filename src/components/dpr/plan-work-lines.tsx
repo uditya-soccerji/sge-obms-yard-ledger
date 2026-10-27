@@ -9,6 +9,8 @@ import { fmtM2, selectCls } from "@/components/work/common";
 import { useStore } from "@/lib/store";
 import { memberArea, round3, validMembers } from "@/lib/work/logic";
 import { STAGES, type DprReport, type Member, type Stage } from "@/lib/work/types";
+import { mpsKey, normFor, type Method } from "@/lib/mps-norms";
+import { NormLine } from "@/components/work/work-jobs";
 import { useWork } from "@/lib/work/store";
 
 const blankMember = (): Member => ({ name: "", nos: 1, side: 1, length: 0, cf: 0 });
@@ -44,9 +46,16 @@ export function PlanWorkLineForm({
   const [litres, setLitres] = useState("");
   const [dft, setDft] = useState("");
   const [crew, setCrew] = useState<string[]>([]);
+  const [method, setMethod] = useState<Method>("brush");
   const [err, setErr] = useState<string | null>(null);
   const roster = line ? state.labourers.filter((l) => l.active && l.supervisorId === line.supervisorId) : [];
   const area = round3(validMembers(members).members.reduce((t, m) => t + m.nos * m.side * m.length * m.cf, 0));
+  // 2026-10-27: the RIL MPS norm for this work's MPS, the stage's coat and brush / spray
+  const mpsNorm = normFor(item?.mps, stage, method);
+  const norm = mpsNorm?.norm ?? item?.paints.find((p) => p.sap === (paintSap || item?.paints[0]?.sap))?.normL ?? 0;
+  const expected = round3(area * norm);
+  const lit = Number(litres) || 0;
+  const off = expected > 0 && lit > 0 ? lit / expected - 1 : 0;
   const set = (i: number, k: keyof Member, v: string) => setMembers((ms) => ms.map((m, j) => (j === i ? { ...m, [k]: k === "name" ? v : Number(v) } : m)));
 
   if (!lines.length) {
@@ -64,7 +73,7 @@ export function PlanWorkLineForm({
         const saved = ensureSaved();
         if (!saved.ok) return setErr(saved.error ?? "Couldn't save the DPR");
         const lit = Number(litres) || 0;
-        const r = addPlanEntry({ date: report.date, planLineId: line.id, reportId: report.id, stage, members, paintSap: lit > 0 ? paintSap || item?.paints[0]?.sap : undefined, litres: lit, dft: Number(dft) || undefined, crew, draft: saved.doc });
+        const r = addPlanEntry({ date: report.date, planLineId: line.id, reportId: report.id, stage, members, paintSap: lit > 0 ? paintSap || item?.paints[0]?.sap : undefined, litres: lit, dft: Number(dft) || undefined, crew, method, draft: saved.doc });
         if (!r.ok) return setErr(r.error);
         setErr(null);
         setMembers([blankMember()]);
@@ -153,7 +162,15 @@ export function PlanWorkLineForm({
         </div>
         <div>
           <Label>Litres</Label>
-          <Input className="mt-1" type="number" min="0" step="any" value={litres} onChange={(e) => setLitres(e.target.value)} />
+          <Input aria-label="Litres" className="mt-1" type="number" min="0" step="any" value={litres} onChange={(e) => setLitres(e.target.value)} />
+          {stage !== "prep" ? <NormLine area={area} expected={expected} lit={lit} off={off} norm={norm} source={mpsNorm ? `${mpsKey(item?.mps)} ${mpsNorm.coat.coat} coat, ${method}` : "service item"} /> : null}
+        </div>
+        <div>
+          <Label>Applied by</Label>
+          <select aria-label="Applied by" className={selectCls + " mt-1"} value={method} onChange={(e) => setMethod(e.target.value as Method)}>
+            <option value="brush">Brush / roller</option>
+            <option value="spray">Spray</option>
+          </select>
         </div>
         <div>
           <Label>Actual DFT (µm)</Label>

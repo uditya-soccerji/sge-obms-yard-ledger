@@ -1,5 +1,6 @@
 import type { AppState, StoreGroup, StoreItem, StoreMove } from "./types";
 import { STORE_CATALOGUE } from "./store-catalogue";
+import { MPS_SCHEMES, TYPE6_SHADES } from "./mps-norms";
 
 /**
  * Store ledger (2026-10-27, stage 1): one item list, every in / out a line,
@@ -52,8 +53,26 @@ export function allStoreItems(s: Pick<AppState, "storeItems" | "masterCatalog">)
     reorder: {},
     active: m.active,
   }));
-  return [...paints, ...s.storeItems];
+  // Every MPS paint (by SAP code) and every Type 6 shade is on the list, unless already there by code
+  const have = new Set([...paints, ...s.storeItems].map((i) => i.code).filter(Boolean));
+  return [...paints, ...s.storeItems, ...MPS_PAINTS.filter((p) => !have.has(p.code))];
 }
+
+/** The paints the MPS sheet names, one item per SAP code; Type 6 one per shade (2026-10-27) */
+const MPS_PAINTS: StoreItem[] = (() => {
+  const out = new Map<string, StoreItem>();
+  for (const s of MPS_SCHEMES) {
+    for (const c of s.coats) {
+      if (!c.sap || c.sap === "by shade" || out.has(c.sap)) continue;
+      const [type, name] = c.paint.includes(":") ? c.paint.split(":").map((x) => x.trim()) : ["MPS paint", c.paint];
+      out.set(c.sap, { id: `si-mps-${c.sap}`, group: "paint", category: type, name: `${type} · ${name}`, code: c.sap, unit: "L", trackExpiry: true, reorder: {}, active: true });
+    }
+  }
+  for (const sh of TYPE6_SHADES) {
+    out.set(sh.code, { id: `si-mps-${sh.code}`, group: "paint", category: "Type 6", name: `Type 6 · PU finish · ${sh.shade}`, code: sh.code, unit: "L", trackExpiry: true, reorder: {}, active: true });
+  }
+  return [...out.values()];
+})();
 
 const signedIn = (m: StoreMove) => (m.kind === "issue" ? -m.qty : m.qty);
 

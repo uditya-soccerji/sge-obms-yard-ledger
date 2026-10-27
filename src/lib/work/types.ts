@@ -189,6 +189,8 @@ export interface DprEntry {
   note?: string;
   /** Labourer ids who worked on this job this day (labour cost, docs §18) */
   crew?: string[];
+  /** Brush or spray — picks the MPS norm the litres are checked against (2026-10-27) */
+  method?: "brush" | "spray";
 }
 
 export type JmsStatus =
