@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PaintBoard } from "@/components/work/paint-board";
 import { OpsExcelTransfer } from "@/components/ops/ops-excel-transfer";
+import { PpeFromDprs } from "@/components/store/ppe-from-dprs";
 import { useStore } from "@/lib/store";
 import { useSiteReports } from "@/lib/work/use-reports";
 import { useState } from "react";
@@ -43,6 +44,8 @@ function StoreHomePage() {
           </div>
         }
       />
+
+      <PpeFromDprs />
 
       <OpsExcelTransfer kind="equipment" />
 

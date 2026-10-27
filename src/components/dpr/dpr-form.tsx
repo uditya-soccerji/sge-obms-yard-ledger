@@ -21,6 +21,7 @@ import { SafetyDprForm } from "@/components/dpr/safety-dpr-form";
 import type {
   AttendanceStatus,
   DprEquipmentMark,
+  DprLabourMark,
   DprRequest,
   DprScaffoldWorkLine,
   EquipmentItem,
@@ -33,11 +34,19 @@ import { STAGES } from "@/lib/work/types";
 import { JobEntryForm } from "@/components/work/work-jobs";
 import { PlanWorkLineForm } from "@/components/dpr/plan-work-lines";
 import { useStore } from "@/lib/store";
+import { cn } from "@/lib/utils";
 import { ATTENDANCE_OPTIONS, otHours, timeProblem, WORKING } from "@/lib/attendance";
 
 function uid(prefix: string) {
   return `${prefix}-${Math.random().toString(36).slice(2, 9)}`;
 }
+
+/** PPE status on the Admin DPR (2026-10-27) */
+export const PPE_OPTIONS: { value: NonNullable<DprLabourMark["ppe"]>; label: string; on: string }[] = [
+  { value: "ok", label: "OK", on: "bg-[var(--sge-ok)] text-white" },
+  { value: "damaged", label: "Damaged", on: "bg-[var(--sge-warn)] text-white" },
+  { value: "urgent", label: "Urgent required", on: "bg-[var(--sge-crit)] text-white" },
+];
 
 /** Machinery whose run is logged on the DPR: start / end time and meter (diesel for compressors) */
 export const MACHINERY: EquipmentItem["type"][] = ["hopper", "compressor", "airless"];
@@ -108,7 +117,18 @@ export function DprForm({
             outTime: WORKING.includes(status) ? (status === "half" ? "13:00" : "18:00") : undefined,
           },
         ];
-    onChange({ ...value, labourMarks });
+    // Admin DPR (2026-10-27): Present / Absent without times — times are typed only if wanted
+    onChange({ ...value, labourMarks: all ? labourMarks.map((m) => (m.labourerId === labourerId && !existing ? { ...m, inTime: undefined, outTime: undefined } : m)) : labourMarks });
+  }
+
+  function setPpe(labourerId: string, ppe: NonNullable<DprLabourMark["ppe"]>) {
+    const has = value.labourMarks.some((m) => m.labourerId === labourerId);
+    onChange({
+      ...value,
+      labourMarks: has
+        ? value.labourMarks.map((m) => (m.labourerId === labourerId ? { ...m, ppe } : m))
+        : [...value.labourMarks, { labourerId, status: "present", ppe }],
+    });
   }
 
   function setTime(labourerId: string, key: "inTime" | "outTime", v: string) {
@@ -305,6 +325,58 @@ export function DprForm({
                       {state.tradeCatalogue.find((t) => t.id === l.trade)?.label ?? l.trade} · {l.epNumber}
                     </div>
                   </div>
+                  {all ? (
+                    // Admin DPR (2026-10-27): attendance as tabs, optional times, PPE status
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div role="group" aria-label={`Attendance ${l.name}`} className="inline-flex overflow-hidden rounded-md border border-[var(--sge-line)] text-xs">
+                        {(["present", "absent"] as const).map((st) => (
+                          <button
+                            key={st}
+                            type="button"
+                            disabled={readOnly}
+                            aria-pressed={mark?.status === st}
+                            onClick={() => setMark(l.id, st)}
+                            className={cn("px-2.5 py-1.5 font-semibold", mark?.status === st ? (st === "present" ? "bg-[var(--sge-ok)] text-white" : "bg-[var(--sge-crit)] text-white") : "bg-[var(--sge-paper)] text-[var(--sge-ink-2)] hover:bg-[var(--sge-paper-2)]")}
+                          >
+                            {st === "present" ? "Present" : "Absent"}
+                          </button>
+                        ))}
+                        <select
+                          aria-label={`Other attendance ${l.name}`}
+                          disabled={readOnly}
+                          className={cn("border-l border-[var(--sge-line)] px-1.5 text-xs", mark && mark.status !== "present" && mark.status !== "absent" ? "bg-[var(--sge-brass-wash)] font-semibold" : "bg-[var(--sge-paper)]")}
+                          value={mark && mark.status !== "present" && mark.status !== "absent" ? mark.status : ""}
+                          onChange={(e) => e.target.value && setMark(l.id, e.target.value as AttendanceStatus)}
+                        >
+                          <option value="">More…</option>
+                          {ATTENDANCE_OPTIONS.filter((o) => o.value !== "present" && o.value !== "absent").map((o) => (
+                            <option key={o.value} value={o.value}>{o.label}</option>
+                          ))}
+                        </select>
+                      </div>
+                      {mark && WORKING.includes(mark.status) ? (
+                        <>
+                          <Input aria-label={`In-time ${l.name}`} type="time" disabled={readOnly} className="h-8 w-[104px] text-xs" value={mark.inTime ?? ""} onChange={(e) => setTime(l.id, "inTime", e.target.value)} />
+                          <Input aria-label={`Out-time ${l.name}`} type="time" disabled={readOnly} className="h-8 w-[104px] text-xs" value={mark.outTime ?? ""} onChange={(e) => setTime(l.id, "outTime", e.target.value)} />
+                        </>
+                      ) : null}
+                      <div role="group" aria-label={`PPE ${l.name}`} className="inline-flex items-center overflow-hidden rounded-md border border-[var(--sge-line)] text-xs">
+                        <span className="bg-[var(--sge-paper-2)] px-2 py-1.5 font-semibold text-[var(--sge-ink-3)]">PPE</span>
+                        {PPE_OPTIONS.map((o) => (
+                          <button
+                            key={o.value}
+                            type="button"
+                            disabled={readOnly}
+                            aria-pressed={mark?.ppe === o.value}
+                            onClick={() => setPpe(l.id, o.value)}
+                            className={cn("px-2.5 py-1.5 font-semibold", mark?.ppe === o.value ? o.on : "bg-[var(--sge-paper)] text-[var(--sge-ink-2)] hover:bg-[var(--sge-paper-2)]")}
+                          >
+                            {o.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
                   <div className="flex flex-wrap items-center gap-2">
                     <Select
                       disabled={readOnly}
@@ -336,6 +408,7 @@ export function DprForm({
                       </>
                     ) : null}
                   </div>
+                  )}
                 </div>
               );
             })}

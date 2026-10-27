@@ -546,6 +546,11 @@ export interface DprLabourMark {
   inTime?: string;
   outTime?: string;
   note?: string;
+  /** PPE on the day (Admin DPR, 2026-10-27); damaged / urgent go to the store keeper on submit */
+  ppe?: "ok" | "damaged" | "urgent";
+  /** The store dealt with it (issued / replaced) */
+  ppeHandledBy?: string;
+  ppeHandledAt?: string;
 }
 
 export interface DprEquipmentMark {

@@ -42,6 +42,8 @@ interface WorkApi {
   /** Add a job line; it goes on the day's open report (made if none), or on `reportId` */
   addDpr: (input: Omit<DprEntry, "id" | "supervisorId">) => Result;
   /** Admin DPR (2026-10-27): a work line picked straight from the month's plan, no job needed; it counts as plan progress */
+  /** The store marks a labourer's flagged PPE as dealt with (issued / replaced) */
+  handlePpe: (reportId: string, labourerId: string) => Result;
   addPlanEntry: (input: { date: string; planLineId: string; reportId: string; stage: Stage; members: DprEntry["members"]; paintSap?: string; litres: number; dft?: number; crew?: string[]; draft?: DprReport }) => Result;
   /** Remove a job line while its report is still a draft or sent back */
   removeEntry: (id: string) => Result;
@@ -436,6 +438,15 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
     return { ok: true, id: entry.id };
   }, [log]);
 
+  const handlePpe = useCallback<WorkApi["handlePpe"]>((reportId, labourerId) => {
+    const role = actor.current.role;
+    if (role !== "store" && role !== "owner" && role !== "super_admin") return { ok: false, error: "The store keeper marks PPE handled" };
+    const at = new Date().toISOString();
+    setWork((s) => ({ ...s, reports: s.reports.map((r) => (r.id !== reportId ? r : { ...r, labourMarks: r.labourMarks.map((m) => (m.labourerId === labourerId ? { ...m, ppeHandledBy: actor.current.name, ppeHandledAt: at } : m)) })) }));
+    void remoteAudit({ userId: actor.current.accountId, username: actor.current.name, role: actor.current.role, siteId: ref.current.reports.find((r) => r.id === reportId)?.siteId || null, module: "work", action: "ppe_handled", detail: `PPE handled for ${labourersRef.current.find((l) => l.id === labourerId)?.name ?? labourerId} · DPR ${reportId}`, impersonatedBy: actor.current.impersonatedBy ?? null });
+    return { ok: true };
+  }, []);
+
   const addPlanEntry = useCallback<WorkApi["addPlanEntry"]>((input) => {
     const role = actor.current.role;
     if (role !== "admin" && role !== "sic" && role !== "owner" && role !== "super_admin") return NOT_ALLOWED;
@@ -660,6 +671,9 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
       updatedAt: new Date().toISOString(),
     };
     setWork((s) => ({ ...s, reports: existing ? s.reports.map((r) => (r.id === doc.id ? saved : r)) : [...s.reports, saved] }));
+    // 2026-10-27: "Submit to SIC" (and a work line added right after) must see this save at once,
+    // not the copy from before the click — keep the live copy in step until the next render
+    ref.current = { ...w, reports: existing ? w.reports.map((r) => (r.id === doc.id ? saved : r)) : [...w.reports, saved] };
     // 2026-10-27: the DPR's equipment status updates the register; a new Fault alerts the store (and SIC)
     const faults = mainActs.current.applyDprEquipment(doc.equipmentMarks, `DPR ${doc.date}`);
     for (const f of faults) {
@@ -694,6 +708,13 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
       log({ kind: "request_raised", problem: urgent, siteId: r.siteId, subjectStaffId: r.submitterId, title: urgent ? `URGENT · ${q.description}` : `${q.reason ? `${q.reason[0].toUpperCase()}${q.reason.slice(1)}: ` : ""}${q.description}`, detail: `${q.kind} · qty ${q.qty ?? "—"} · ${r.plant} · from DPR ${r.date}`, tab: "/requests", refId: id });
     }
     if (sent.issues?.trim()) log({ kind: "dpr_issue", problem: true, siteId: r.siteId, subjectStaffId: r.submitterId, title: `Issue on ${r.plant} · DPR ${r.date}`, detail: sent.issues.trim(), tab: `/dpr/${id}`, refId: id });
+    // 2026-10-27: PPE damaged / urgently needed goes to the store keeper with every submitted DPR
+    const ppe = r.labourMarks.filter((m) => m.ppe === "damaged" || m.ppe === "urgent");
+    if (ppe.length) {
+      const urgent = ppe.filter((m) => m.ppe === "urgent").length;
+      const ok = r.labourMarks.filter((m) => m.ppe === "ok").length;
+      log({ kind: "ppe_flag", problem: urgent > 0, siteId: r.siteId, subjectStaffId: r.submitterId, title: `PPE · ${urgent} urgent, ${ppe.length - urgent} damaged · DPR ${r.date}`, detail: `${ok} OK · ${r.plant || "site"} · Store Keeper dashboard`, tab: "/home", refId: id });
+    }
     return { ok: true };
   }, [log]);
 
@@ -1135,8 +1156,8 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const api = useMemo<WorkApi>(
-    () => ({ work, hydrated, importExcel, editExpense, receivePaint, advancePaintLifecycle, recoMonth, postMonth, setRilRef, uploadSubmission, linkSubmission, unlinkSubmission, addPlanLine, startJob, decideJobPlan, adminApproveJms, adminReturnJms, addDpr, addPlanEntry, removeEntry, saveReport, submitReport, reviewReport, unlockReport, telegramToReport, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork, notify: log }),
-    [work, hydrated, importExcel, editExpense, receivePaint, advancePaintLifecycle, recoMonth, postMonth, setRilRef, uploadSubmission, linkSubmission, unlinkSubmission, addPlanLine, startJob, decideJobPlan, adminApproveJms, adminReturnJms, addDpr, addPlanEntry, removeEntry, saveReport, submitReport, reviewReport, unlockReport, telegramToReport, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork, log]
+    () => ({ work, hydrated, importExcel, editExpense, receivePaint, advancePaintLifecycle, recoMonth, postMonth, setRilRef, uploadSubmission, linkSubmission, unlinkSubmission, addPlanLine, startJob, decideJobPlan, adminApproveJms, adminReturnJms, addDpr, addPlanEntry, handlePpe, removeEntry, saveReport, submitReport, reviewReport, unlockReport, telegramToReport, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork, notify: log }),
+    [work, hydrated, importExcel, editExpense, receivePaint, advancePaintLifecycle, recoMonth, postMonth, setRilRef, uploadSubmission, linkSubmission, unlinkSubmission, addPlanLine, startJob, decideJobPlan, adminApproveJms, adminReturnJms, addDpr, addPlanEntry, handlePpe, removeEntry, saveReport, submitReport, reviewReport, unlockReport, telegramToReport, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork, log]
   );
   return <WorkContext.Provider value={api}>{children}</WorkContext.Provider>;
 }

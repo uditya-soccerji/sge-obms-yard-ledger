@@ -73,7 +73,9 @@ export type EventKind =
   | "change_requested"
   | "change_decided"
   // 2026-10-27: a DPR marked kit faulty — the store repairs it
-  | "equipment_fault";
+  | "equipment_fault"
+  // 2026-10-27: PPE damaged / urgently needed on a submitted DPR
+  | "ppe_flag";
 
 export interface WorkEvent {
   id: string;
@@ -111,7 +113,7 @@ export interface Viewer {
 }
 
 /** Events that need someone to act, or tell the submitter the outcome: instant. */
-export const INSTANT: EventKind[] = ["job_closed", "jms_confirmed", "job_sent_back", "dpr_submitted", "dpr_approved", "dpr_sent_back", "crew_requested", "crew_released", "crew_decided", "pass_expiring", "request_rejected", "request_overridden", "dpr_issue", "job_plan", "job_plan_decided", "jms_admin_pending", "jms_admin_approved", "jms_returned", "observation_raised", "stop_work", "wage_change_requested", "wage_change_decided", "change_requested", "change_decided", "equipment_fault"];
+export const INSTANT: EventKind[] = ["job_closed", "jms_confirmed", "job_sent_back", "dpr_submitted", "dpr_approved", "dpr_sent_back", "crew_requested", "crew_released", "crew_decided", "pass_expiring", "request_rejected", "request_overridden", "dpr_issue", "job_plan", "job_plan_decided", "jms_admin_pending", "jms_admin_approved", "jms_returned", "observation_raised", "stop_work", "wage_change_requested", "wage_change_decided", "change_requested", "change_decided", "equipment_fault", "ppe_flag"];
 
 export const KIND_LABEL: Record<EventKind, string> = {
   dpr_added: "DPR entry",
@@ -171,6 +173,7 @@ export const KIND_LABEL: Record<EventKind, string> = {
   change_requested: "Master Data change to approve",
   change_decided: "Master Data change decided",
   equipment_fault: "Equipment faulty",
+  ppe_flag: "PPE needed",
 };
 
 // Company-wide events (no site, e.g. the monthly pay upload) reach every viewer of the right role
@@ -278,6 +281,7 @@ export function isFor(e: WorkEvent, v: Viewer): boolean {
       return v.role === "safety" || v.role === "sic";
     // Returns (§27): the store confirms; a scrap goes on to the SIC; the supervisor hears the outcome
     case "equipment_fault":
+    case "ppe_flag":
       return v.role === "store" || v.role === "sic";
     case "return_raised":
       return v.role === "store";
