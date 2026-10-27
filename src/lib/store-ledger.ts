@@ -150,7 +150,10 @@ export function paintTypes(items: StoreItem[]): { type: string; label: string; i
   return [...by.entries()]
     .map(([type, its]) => {
       const name = its.map((i) => (i.code && TYPE_BY_SAP.get(i.code)?.name) || "").find(Boolean);
-      return { type, label: name ? `${type} · ${name}` : type, items: its.sort((a, b) => a.name.localeCompare(b.name)) };
+      // The SAP code goes with the type: one code → shown; several (Type 6 shades) → counted
+      const codes = [...new Set(its.map((i) => i.code).filter(Boolean))];
+      const sap = codes.length === 1 ? `SAP ${codes[0]}` : codes.length > 1 ? `${codes.length} SAP codes` : "";
+      return { type, label: [type, sap, name].filter(Boolean).join(" · "), items: its.sort((a, b) => a.name.localeCompare(b.name)) };
     })
     .sort((a, b) => {
       const [an, as] = typeOrder(a.type);

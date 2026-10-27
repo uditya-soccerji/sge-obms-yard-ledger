@@ -11,7 +11,7 @@ import { useStore } from "@/lib/store";
 import { allStoreItems, byPlant, GROUP_LABEL, holdingsOf, IDLE_DAYS, inScope, inStore, MOVE_LABEL, NEAR_EXPIRY_DAYS, paintTypeOf, paintTypes, stockStatus, type StockScope } from "@/lib/store-ledger";
 import { today } from "@/lib/today";
 import { ALL_SITES, entrySiteId } from "@/lib/site-scope";
-import type { StoreGroup, StoreMove } from "@/lib/types";
+import type { StoreGroup, StoreItem, StoreMove } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { AddItemForm, IssueForm, OpeningStockUpload, PaintReceiveList, ReceiveForm } from "./store-forms";
 import { MpsAchievable } from "./mps-achievable";
@@ -170,9 +170,9 @@ function StockTab({ siteId, scope }: { siteId: string; scope: StockScope }) {
   const [adding, setAdding] = useState(false);
   const day = today();
   const plants = state.sites.find((x) => x.id === siteId)?.plants ?? [];
-  const rows = allStoreItems(state)
-    .filter((i) => i.active && inScope(i, scope) && (!group || (scope === "paint" ? paintTypeOf(i) === group : i.group === group)) && (!q.trim() || `${i.category} ${i.name} ${i.code ?? ""}`.toLowerCase().includes(q.trim().toLowerCase())))
-    .map((i) => {
+  const [t6Pick, setT6Pick] = useState("");
+  const paint = scope === "paint";
+  const rowOf = (i: StoreItem) => {
       const store = inStore(state.storeMoves, siteId, i.id);
       const plantsQty = byPlant(state.storeMoves, siteId, i.id);
       const atPlants = plantsQty.reduce((t, p) => t + p.qty, 0);
@@ -186,12 +186,44 @@ function StockTab({ siteId, scope }: { siteId: string; scope: StockScope }) {
       if (st.idle) statuses.push("idle");
       if (!statuses.length) statuses.push("ok");
       const shown = plant ? plantsQty.find((p) => p.plant === plant)?.qty ?? 0 : store + atPlants;
-      return { i, store, plantsQty, atPlants, reorder, st, statuses, shown };
-    })
+      return { i, store, plantsQty, atPlants, reorder, st, statuses, shown, type6: false };
+  };
+  type Row = ReturnType<typeof rowOf>;
+  let base: Row[] = allStoreItems(state)
+    .filter((i) => i.active && inScope(i, scope) && (!group || (scope === "paint" ? paintTypeOf(i) === group : i.group === group)) && (!q.trim() || `${paintTypeOf(i)} ${i.category} ${i.name} ${i.code ?? ""}`.toLowerCase().includes(q.trim().toLowerCase())))
+    .map(rowOf);
+  // 2026-10-27: Type 6 is one row; its SAP codes (one per shade) are in a dropdown — all shades, or one
+  const t6Items = paint ? allStoreItems(state).filter((i) => i.active && i.group === "paint" && paintTypeOf(i) === "Type 6") : [];
+  const t6Rows = t6Items.map(rowOf);
+  const t6At = base.findIndex((r) => paintTypeOf(r.i) === "Type 6");
+  if (t6At >= 0) {
+    const picked = t6Rows.find((r) => r.i.id === t6Pick);
+    const sum = (f: (r: Row) => number) => t6Rows.reduce((t, r) => t + f(r), 0);
+    const plantsMap = new Map<string, number>();
+    for (const r of t6Rows) for (const pq of r.plantsQty) plantsMap.set(pq.plant, (plantsMap.get(pq.plant) ?? 0) + pq.qty);
+    const store = sum((r) => r.store);
+    const plantsQty = [...plantsMap.entries()].map(([pl, qty]) => ({ plant: pl, qty })).sort((a, b) => b.qty - a.qty);
+    const atPlants = plantsQty.reduce((t, x) => t + x.qty, 0);
+    const nexts = t6Rows.map((r) => r.st.next).filter((x): x is NonNullable<typeof x> => !!x).sort((a, b) => (a.expiry ?? "9999").localeCompare(b.expiry ?? "9999"));
+    const statuses = [...new Set(t6Rows.filter((r) => r.store > 0 || r.atPlants > 0).flatMap((r) => r.statuses).filter((k) => k !== "out" && k !== "ok"))] as StatusKey[];
+    const all: Row = {
+      i: { id: "type6-all", group: "paint", category: "Type 6", name: "All shades", unit: "L", trackExpiry: true, reorder: {}, active: true },
+      store,
+      plantsQty,
+      atPlants,
+      reorder: 0,
+      st: { expiredQty: sum((r) => r.st.expiredQty), nearQty: sum((r) => r.st.nearQty), idle: t6Rows.some((r) => r.st.idle), lastIssue: undefined, next: nexts[0] },
+      statuses: store <= 0 ? ["out", ...statuses] : statuses.length ? statuses : ["ok"],
+      shown: plant ? plantsQty.find((x) => x.plant === plant)?.qty ?? 0 : store + atPlants,
+      type6: true,
+    };
+    base = [...base.filter((r) => paintTypeOf(r.i) !== "Type 6")];
+    base.splice(t6At, 0, picked ? { ...picked, type6: true } : all);
+  }
+  const rows = base
     .filter((r) => !plant || r.plantsQty.some((p) => p.plant === plant))
     .filter((r) => !status || r.statuses.includes(status))
     .filter((r) => (qtyMode === "stock" ? r.shown > 0 : qtyMode === "zero" ? r.shown === 0 : qtyMode === "min" ? r.shown >= (Number(minQty) || 0) : true));
-  const paint = scope === "paint";
   return (
     <div className="space-y-4">
       {adding ? <AddItemForm scope={scope} /> : null}
@@ -252,12 +284,27 @@ function StockTab({ siteId, scope }: { siteId: string; scope: StockScope }) {
                 {rows.map((r) => (
                   <tr key={r.i.id} className="border-t border-[var(--sge-line)] align-top">
                     <td className="py-1.5">
-                      <div className="font-semibold">
-                        {paint ? paintTypeOf(r.i) : `${GROUP_LABEL[r.i.group]} · ${r.i.category}`}
-                        {r.i.code ? <span className="ml-1.5 font-mono text-xs font-normal">{r.i.code}</span> : null}
-                      </div>
-                      {/* The item's name is secondary: small and plain */}
-                      <div className="text-[11px] font-normal text-[var(--sge-ink-3)]">{r.i.name}</div>
+                      {r.type6 ? (
+                        // Type 6: every SAP code (shade) in one dropdown, with its litres here
+                        <div>
+                          <div className="font-semibold">Type 6 · PU finish</div>
+                          <select aria-label="Type 6 SAP code" className={selectCls + " mt-1 h-8 w-64 text-xs"} value={t6Pick} onChange={(e) => setT6Pick(e.target.value)}>
+                            <option value="">All {t6Rows.length} SAP codes · {t6Rows.reduce((t, x) => t + x.store + x.atPlants, 0)} L</option>
+                            {[...t6Rows].sort((a, b) => b.store + b.atPlants - (a.store + a.atPlants) || a.i.name.localeCompare(b.i.name)).map((x) => (
+                              <option key={x.i.id} value={x.i.id}>SAP {x.i.code} · {x.i.name.replace("Type 6 · PU finish · ", "")} · {x.store + x.atPlants} L</option>
+                            ))}
+                          </select>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="font-semibold">
+                            {paint ? paintTypeOf(r.i) : `${GROUP_LABEL[r.i.group]} · ${r.i.category}`}
+                            {r.i.code ? <span className="ml-1.5 font-mono text-xs font-normal">· SAP {r.i.code}</span> : null}
+                          </div>
+                          {/* The item's name is secondary: small and plain */}
+                          <div className="text-[11px] font-normal text-[var(--sge-ink-3)]">{r.i.name}</div>
+                        </>
+                      )}
                     </td>
                     <td className="text-right font-mono">{r.store} {r.i.unit}</td>
                     <td className="pl-3">
