@@ -136,6 +136,8 @@ export interface DprReport {
   enteredBy?: DprEntry["enteredBy"];
   enteredByName?: string;
   status: ReportStatus;
+  /** Admin's DPR (2026-10-27): every section open at once — whole-site attendance, plan work, scaffolding, safety, store */
+  allSections?: boolean;
   /** Every crew member's attendance for the day (docs §4, §5) */
   labourMarks: DprLabourMark[];
   equipmentMarks: DprEquipmentMark[];
@@ -165,7 +167,10 @@ export interface DprReport {
 export interface DprEntry {
   id: string;
   date: string;
+  /** "" for the Admin's work line taken straight from the plan, with no job (2026-10-27) */
   jobId: string;
+  /** The plan line a no-job work line counts against (Admin DPR, 2026-10-27) */
+  planLineId?: string;
   /** The day's report this line belongs to (history imported before reports has none) */
   reportId?: string;
   stage: Stage;

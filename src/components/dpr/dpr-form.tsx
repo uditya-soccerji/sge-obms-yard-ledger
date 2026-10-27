@@ -28,6 +28,7 @@ import { useWork } from "@/lib/work/store";
 import { entryArea, round3 } from "@/lib/work/logic";
 import { STAGES } from "@/lib/work/types";
 import { JobEntryForm } from "@/components/work/work-jobs";
+import { PlanWorkLineForm } from "@/components/dpr/plan-work-lines";
 import { useStore } from "@/lib/store";
 import { ATTENDANCE_OPTIONS, otHours, timeProblem, WORKING } from "@/lib/attendance";
 
@@ -42,22 +43,29 @@ export function DprForm({
   value,
   onChange,
   readOnly,
+  ensureSaved,
 }: {
   value: DprReport;
   onChange: (next: DprReport) => void;
   readOnly?: boolean;
+  /** Admin DPR: save the draft (if new) before a work line is added */
+  ensureSaved?: () => { ok: boolean; error?: string; doc?: DprReport };
 }) {
   const { state } = useStore();
+  // 2026-10-27: the Admin's DPR opens every section at once, with the whole site's labourers
+  const all = !!value.allSections;
   const crew = useMemo(
     () =>
       state.labourers.filter(
         (l) =>
           l.active &&
-          (value.submitterType === "safety" ||
-            value.submitterType === "store" ||
-            l.supervisorId === value.submitterId)
+          (all
+            ? l.siteId === value.siteId
+            : value.submitterType === "safety" ||
+              value.submitterType === "store" ||
+              l.supervisorId === value.submitterId)
       ),
-    [state.labourers, value.submitterId, value.submitterType]
+    [state.labourers, value.submitterId, value.submitterType, value.siteId, all]
   );
 
   const equipment = state.equipment.filter((e) => e.siteId === value.siteId);
@@ -205,7 +213,7 @@ export function DprForm({
             rows={2}
           />
         </div>
-        {value.submitterType === "painting_blasting" || value.submitterType === "scaffolding" ? (
+        {all || value.submitterType === "painting_blasting" || value.submitterType === "scaffolding" ? (
           <div className="mt-3 grid gap-3 sm:grid-cols-3">
             <label className="flex items-center gap-2 text-sm">
               <Checkbox
@@ -249,11 +257,11 @@ export function DprForm({
         ) : null}
       </Panel>
 
-      {value.submitterType !== "store" &&
-      value.submitterType !== "safety" ? (
+      {all || (value.submitterType !== "store" &&
+      value.submitterType !== "safety") ? (
         <Panel>
           <h3 className="mb-3 font-heading text-sm font-bold uppercase tracking-wide text-[var(--sge-ink-3)]">
-            Labour attendance
+            Labour attendance{all ? ` · whole site (${crew.length})` : ""}
           </h3>
           {crew.length === 0 ? (
             // B03: a new supervisor has no crew yet; say so instead of an empty panel
@@ -473,9 +481,9 @@ export function DprForm({
         )}
       </Panel>
 
-      {value.submitterType === "painting_blasting" ? <JobLines report={value} readOnly={readOnly} /> : null}
+      {all || value.submitterType === "painting_blasting" ? <JobLines report={value} readOnly={readOnly} ensureSaved={all ? ensureSaved : undefined} /> : null}
 
-      {value.submitterType === "scaffolding" && value.scaffoldWork ? (
+      {(all || value.submitterType === "scaffolding") && value.scaffoldWork ? (
         <ScaffoldWorkEditor
           lines={value.scaffoldWork}
           plants={plants}
@@ -484,7 +492,7 @@ export function DprForm({
         />
       ) : null}
 
-      {value.submitterType === "safety" && value.safetyBody ? (
+      {(all || value.submitterType === "safety") && value.safetyBody ? (
         <SafetyDprForm
           body={value.safetyBody}
           readOnly={readOnly}
@@ -492,7 +500,7 @@ export function DprForm({
         />
       ) : null}
 
-      {value.submitterType === "store" && value.storeBody ? (
+      {(all || value.submitterType === "store") && value.storeBody ? (
         <Panel>
           <h3 className="mb-3 font-heading text-sm font-bold uppercase tracking-wide text-[var(--sge-ink-3)]">
             Store body
@@ -582,9 +590,15 @@ export function DprForm({
  * each picks an open job on this plant and a stage, with measured members,
  * paint and crew — the same line the Work job card adds. They move the job on.
  */
-function JobLines({ report, readOnly }: { report: DprReport; readOnly?: boolean }) {
+function JobLines({ report, readOnly, ensureSaved }: { report: DprReport; readOnly?: boolean; ensureSaved?: () => { ok: boolean; error?: string; doc?: DprReport } }) {
+  const { state } = useStore();
   const { work, removeEntry } = useWork();
   const [adding, setAdding] = useState<string>("");
+  const [fromPlan, setFromPlan] = useState(false);
+  const planLabel = (id?: string) => {
+    const l = work.planLines.find((x) => x.id === id);
+    return l ? `Plan · ${l.plant} · ${l.serviceCode} · ${state.staff.find((x) => x.id === l.supervisorId)?.name ?? ""}` : "Plan";
+  };
   const [msg, setMsg] = useState<{ ok: boolean; msg: string } | null>(null);
   const saved = work.reports.some((r) => r.id === report.id);
   const lines = work.dprs.filter((d) => d.reportId === report.id);
@@ -594,11 +608,13 @@ function JobLines({ report, readOnly }: { report: DprReport; readOnly?: boolean 
   });
   const jobNo = (id: string) => work.jobs.find((j) => j.id === id)?.jobNo ?? id;
   const editable = !readOnly && saved && reportOpen(report);
+  // Admin DPR: the plan's work can be added before the draft is saved (it saves itself first)
+  const planOpen = !!ensureSaved && !readOnly && reportOpen(report);
   const job = jobs.find((j) => j.id === adding);
   return (
     <Panel>
       <h3 className="mb-3 font-heading text-sm font-bold uppercase tracking-wide text-[var(--sge-ink-3)]">
-        Painting / blasting — job lines
+        Painting / blasting — {ensureSaved ? "work lines" : "job lines"}
       </h3>
       {lines.length === 0 ? (
         <p className="text-sm text-[var(--sge-ink-3)]">No job lines yet.</p>
@@ -617,7 +633,7 @@ function JobLines({ report, readOnly }: { report: DprReport; readOnly?: boolean 
           <tbody>
             {lines.map((e) => (
               <tr key={e.id} className="border-t border-[var(--sge-line)]">
-                <td className="py-1.5 font-mono">{jobNo(e.jobId)}</td>
+                <td className="py-1.5 font-mono">{e.jobId ? jobNo(e.jobId) : <span className="font-sans">{planLabel(e.planLineId)} <span className="rounded-sm bg-[var(--sge-paper-2)] px-1 text-[10px] uppercase">no job</span></span>}</td>
                 <td>{STAGES.find((x) => x.id === e.stage)?.label}</td>
                 <td className="text-right font-mono">{round3(entryArea(e))}</td>
                 <td className="text-right font-mono">{e.litres || "—"}</td>
@@ -634,12 +650,23 @@ function JobLines({ report, readOnly }: { report: DprReport; readOnly?: boolean 
           </tbody>
         </table>
       )}
-      {!saved && !readOnly ? (
+      {planOpen ? (
+        <div className="mb-3">
+          {fromPlan ? (
+            <PlanWorkLineForm report={report} ensureSaved={ensureSaved!} onDone={(m) => setMsg(m)} />
+          ) : (
+            <Button type="button" size="sm" onClick={() => setFromPlan(true)}>
+              + Add work from the plan (no job needed)
+            </Button>
+          )}
+        </div>
+      ) : null}
+      {!saved && !readOnly && !planOpen ? (
         <p className="text-xs text-[var(--sge-ink-3)]">Pick the plant and save the draft, then add job lines here.</p>
       ) : null}
       {editable ? (
         jobs.length === 0 ? (
-          <p className="text-xs text-[var(--sge-ink-3)]">No open jobs for this supervisor on {report.plant || "this plant"}. Start one in Work → Jobs &amp; DPR.</p>
+          planOpen ? null : <p className="text-xs text-[var(--sge-ink-3)]">No open jobs for this supervisor on {report.plant || "this plant"}. Start one in Work → Jobs &amp; DPR.</p>
         ) : (
           <div className="space-y-2">
             <div className="flex flex-wrap items-end gap-2">

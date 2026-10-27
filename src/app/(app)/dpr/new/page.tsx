@@ -31,6 +31,19 @@ const TYPE_LABEL: Record<DprSubmitterType, string> = {
   store: "Store Keeper",
 };
 
+/** Open every section on a new DPR: scaffolding, safety and store bodies alongside the work lines */
+function withAllSections(d: DprReport, on: boolean): DprReport {
+  if (!on) return d;
+  const filled = (t: DprSubmitterType) => blankDpr({ submitterId: d.submitterId, submitterType: t, siteId: d.siteId });
+  return {
+    ...d,
+    allSections: true,
+    scaffoldWork: d.scaffoldWork ?? filled("scaffolding").scaffoldWork,
+    safetyBody: d.safetyBody ?? filled("safety").safetyBody,
+    storeBody: d.storeBody ?? filled("store").storeBody,
+  };
+}
+
 function NewDprPage() {
   const { state } = useStore();
   const { saveReport, submitReport } = useWork();
@@ -71,12 +84,17 @@ function NewDprPage() {
   const [submitterType, setSubmitterType] =
     useState<DprSubmitterType>(defaultType);
   const [submitterId, setSubmitterId] = useState(defaultSubmitter);
+  // 2026-10-27: the Admin's DPR has every section open (no type restrictions)
+  const allSections = state.currentRole === "admin";
   const [doc, setDoc] = useState<DprReport>(() =>
-    blankDpr({
-      submitterId: defaultSubmitter,
-      submitterType: defaultType,
-      siteId: entrySiteId(state),
-    })
+    withAllSections(
+      blankDpr({
+        submitterId: defaultSubmitter,
+        submitterType: defaultType,
+        siteId: entrySiteId(state),
+      }),
+      allSections
+    )
   );
 
   function changeType(t: DprSubmitterType) {
@@ -86,22 +104,41 @@ function NewDprPage() {
     setSubmitterType(t);
     const sid = fieldRole ? state.currentUserId ?? "" : submittersFor(t)[0]?.id ?? "";
     setSubmitterId(sid);
-    setDoc(
-      blankDpr({
-        submitterId: sid,
-        submitterType: t,
-        siteId: entrySiteId(state),
-      })
+    // Keep what the Admin already typed; only whose DPR it is changes
+    setDoc((d) =>
+      allSections
+        ? { ...d, submitterId: sid, submitterType: t }
+        : blankDpr({
+            submitterId: sid,
+            submitterType: t,
+            siteId: entrySiteId(state),
+          })
     );
   }
 
-  function handleSave(andSubmit: boolean) {
+  /** The DPR as it will be saved (an Admin DPR keeps every section) */
+  function prepared() {
     const next = { ...doc, submitterId, submitterType };
+    if (!allSections) {
+      // Keep only the body for this type
+      if (submitterType !== "scaffolding") next.scaffoldWork = undefined;
+      if (submitterType !== "safety") next.safetyBody = undefined;
+      if (submitterType !== "store") next.storeBody = undefined;
+    }
+    return next;
+  }
+
+  /** Admin DPR: a work line saves the draft first, so the plan's work can be added straight away */
+  function ensureSaved() {
+    if (!submitterId) return { ok: false, error: "Pick whose DPR this is first" };
+    const doc = prepared();
+    const r = saveReport(doc);
+    return r.ok ? { ok: true, doc } : { ok: false, error: r.error };
+  }
+
+  function handleSave(andSubmit: boolean) {
+    const next = prepared();
     if (!submitterId) return setProblems(["Pick whose DPR this is (no one on this site files this type yet)"]);
-    // Keep only the body for this type
-    if (submitterType !== "scaffolding") next.scaffoldWork = undefined;
-    if (submitterType !== "safety") next.safetyBody = undefined;
-    if (submitterType !== "store") next.storeBody = undefined;
     const r = saveReport(next);
     if (!r.ok) return setProblems([r.error]);
     if (andSubmit) {
@@ -189,7 +226,7 @@ function NewDprPage() {
         </div>
       </div>
 
-      <DprForm value={doc} onChange={setDoc} />
+      <DprForm value={doc} onChange={setDoc} ensureSaved={allSections ? ensureSaved : undefined} />
 
       {problems.length ? (
         <div className="rounded-md border border-[var(--sge-crit)]/30 bg-[var(--sge-crit-wash)] px-3 py-2 text-sm text-[var(--sge-crit)]">

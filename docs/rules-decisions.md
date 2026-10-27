@@ -368,3 +368,10 @@ The owner is reworking every role's access, starting at the labourer and moving 
 | Work (top) | JMS to confirm / job ready to close | SIC / supervisor |
 | Master Data (top) | change requests waiting (+ Admin: new decisions) | Owner / SA, Admin |
 
+## 30. Admin DPR — every section, work straight from the plan (2026-10-27)
+- The Admin's **New DPR** opens **every section at once**: header (permit, TBT, reason for no quantity), **attendance for the whole site**, equipment, requests, **painting / blasting work lines**, scaffolding, the full safety form and the store body. Changing whose DPR it is keeps what's typed.
+- **Work from the plan, no job needed:** "+ Add work from the plan" lists every plan line on the site for the DPR's month (any plant, any supervisor). The Admin enters stage, measured members, paint / litres, DFT and crew and saves the line. The first line saves the DPR draft by itself.
+- A no-job line **counts as progress on its plan line** (Plan vs actual → in progress by stage) and is marked "no job" on the DPR; a job can be attached later.
+- The usual line rules still hold (no future date; today / yesterday unless Owner / SA; measured rows; DFT 1–2,000 µm; paint for litres).
+- **Submit to SIC** is unchanged: plant, permit, TBT and the submitter's crew marked are checked; saving a draft is never blocked.
+

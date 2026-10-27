@@ -168,6 +168,8 @@ function DprDetailPage() {
         value={doc}
         onChange={persist}
         readOnly={!canEdit}
+        // Admin DPR (2026-10-27): adding work from the plan keeps what's typed so far
+        ensureSaved={doc.allSections ? () => { const r = saveReport(doc); return r.ok ? { ok: true, doc } : { ok: false, error: r.error }; } : undefined}
       />
 
       {problems.length ? (
