@@ -33,6 +33,13 @@ interface WorkApi {
   /** Owner / Super Admin Excel import for a Work sheet (after duplicate preview) */
   importExcel: (kind: WorkTransferId, rows: TransferPreviewRow[]) => { ok: boolean; error?: string; added?: number; updated?: number };
   addPlanLine: (input: Omit<PlanLine, "id" | "carriedM2" | "month"> & { month?: string }) => Result;
+  /**
+   * 2026-10-27: change a plan line (Admin / SIC / Owner / SA) while its month is open.
+   * Plant and service item lock once jobs, work lines or JMS hang off the line.
+   */
+  updatePlanLine: (id: string, patch: { plant?: string; serviceCode?: string; jobType?: string; planM2?: number; supervisorId?: string }) => Result;
+  /** Remove a plan line that has nothing on it yet */
+  removePlanLine: (id: string) => Result;
   startJob: (input: { planLineId: string; location: string; stages: Stage[]; startDate: string; plannedM2?: number; plannedEnd?: string }) => Result;
   /** SIC approves the supervisor's job plan or sends it back (docs §24) */
   decideJobPlan: (jobId: string, approve: boolean, note: string) => Result;
@@ -324,6 +331,52 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
     setWork((s) => ({ ...s, planLines: [...s.planLines, { ...input, id, month, carriedM2: 0 }] }));
     log({ kind: "plan_added", siteId: input.siteId, subjectStaffId: input.supervisorId, title: `New plan line · ${input.plant} · ${input.planM2} m²`, detail: `${input.serviceCode} · ${month}`, tab: "plan", refId: id });
     return { ok: true, id };
+  }, [log]);
+
+  /** Jobs, work lines or JMS that hang off a plan line (then its plant / service item are fixed) */
+  const planLineUsed = (w: WorkState, id: string) =>
+    w.jobs.some((j) => j.planLineId === id) || w.jms.some((j) => j.planLineId === id) || w.dprs.some((e) => !e.jobId && e.planLineId === id);
+
+  const updatePlanLine = useCallback<WorkApi["updatePlanLine"]>((id, patch) => {
+    if (!rights().canPlan) return NOT_ALLOWED;
+    const w = ref.current;
+    const line = w.planLines.find((l) => l.id === id);
+    if (!line) return { ok: false, error: "Plan line not found" };
+    if (isMonthClosed(w, line.siteId, line.month)) return { ok: false, error: "That month is closed" };
+    const next = { ...line, ...patch, plant: (patch.plant ?? line.plant).trim().toUpperCase() };
+    if (!(next.planM2 >= 0)) return { ok: false, error: "Plan m² can't be negative" };
+    if (next.planM2 + next.carriedM2 <= 0) return { ok: false, error: "Plan m² must be above zero" };
+    if ((next.plant !== line.plant || next.serviceCode !== line.serviceCode) && planLineUsed(w, id)) {
+      return { ok: false, error: "Jobs or work lines are already on this line — the plant and service item can't change" };
+    }
+    const sup = staffRef.current.find((x) => x.id === next.supervisorId);
+    if (!sup || sup.role !== "supervisor" || sup.siteId !== line.siteId) return { ok: false, error: "Pick a supervisor who works on this site" };
+    if (w.planLines.some((l) => l.id !== id && l.month === line.month && l.siteId === line.siteId && l.plant === next.plant && l.serviceCode === next.serviceCode && l.supervisorId === next.supervisorId)) {
+      return { ok: false, error: "There's already a line for that plant, service item and supervisor this month — change that one" };
+    }
+    const what = [
+      next.plant !== line.plant ? `plant ${line.plant} → ${next.plant}` : "",
+      next.serviceCode !== line.serviceCode ? `item ${line.serviceCode} → ${next.serviceCode}` : "",
+      next.planM2 !== line.planM2 ? `plan ${line.planM2} → ${next.planM2} m²` : "",
+      next.supervisorId !== line.supervisorId ? `supervisor → ${sup.name}` : "",
+    ].filter(Boolean).join(", ");
+    if (!what) return { ok: true, id };
+    setWork((s) => ({ ...s, planLines: s.planLines.map((l) => (l.id === id ? next : l)) }));
+    log({ kind: "plan_added", siteId: line.siteId, subjectStaffId: next.supervisorId, title: `Plan line changed · ${next.plant} · ${next.serviceCode}`, detail: `${what} · ${line.month}`, tab: "plan", refId: id });
+    return { ok: true, id };
+  }, [log]);
+
+  const removePlanLine = useCallback<WorkApi["removePlanLine"]>((id) => {
+    if (!rights().canPlan) return NOT_ALLOWED;
+    const w = ref.current;
+    const line = w.planLines.find((l) => l.id === id);
+    if (!line) return { ok: false, error: "Plan line not found" };
+    if (isMonthClosed(w, line.siteId, line.month)) return { ok: false, error: "That month is closed" };
+    if (planLineUsed(w, id)) return { ok: false, error: "Jobs or work lines are on this line — it can't be removed" };
+    if (line.carriedM2 > 0) return { ok: false, error: "This line carries work from last month — set its new plan to 0 instead" };
+    setWork((s) => ({ ...s, planLines: s.planLines.filter((l) => l.id !== id) }));
+    log({ kind: "plan_added", siteId: line.siteId, subjectStaffId: line.supervisorId, title: `Plan line removed · ${line.plant} · ${line.serviceCode}`, detail: `${line.planM2} m² · ${line.month}`, tab: "plan", refId: id });
+    return { ok: true };
   }, [log]);
 
   const startJob = useCallback<WorkApi["startJob"]>((input) => {
@@ -1156,8 +1209,8 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const api = useMemo<WorkApi>(
-    () => ({ work, hydrated, importExcel, editExpense, receivePaint, advancePaintLifecycle, recoMonth, postMonth, setRilRef, uploadSubmission, linkSubmission, unlinkSubmission, addPlanLine, startJob, decideJobPlan, adminApproveJms, adminReturnJms, addDpr, addPlanEntry, handlePpe, removeEntry, saveReport, submitReport, reviewReport, unlockReport, telegramToReport, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork, notify: log }),
-    [work, hydrated, importExcel, editExpense, receivePaint, advancePaintLifecycle, recoMonth, postMonth, setRilRef, uploadSubmission, linkSubmission, unlinkSubmission, addPlanLine, startJob, decideJobPlan, adminApproveJms, adminReturnJms, addDpr, addPlanEntry, handlePpe, removeEntry, saveReport, submitReport, reviewReport, unlockReport, telegramToReport, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork, log]
+    () => ({ work, hydrated, importExcel, editExpense, receivePaint, advancePaintLifecycle, recoMonth, postMonth, setRilRef, uploadSubmission, linkSubmission, unlinkSubmission, addPlanLine, updatePlanLine, removePlanLine, startJob, decideJobPlan, adminApproveJms, adminReturnJms, addDpr, addPlanEntry, handlePpe, removeEntry, saveReport, submitReport, reviewReport, unlockReport, telegramToReport, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork, notify: log }),
+    [work, hydrated, importExcel, editExpense, receivePaint, advancePaintLifecycle, recoMonth, postMonth, setRilRef, uploadSubmission, linkSubmission, unlinkSubmission, addPlanLine, updatePlanLine, removePlanLine, startJob, decideJobPlan, adminApproveJms, adminReturnJms, addDpr, addPlanEntry, handlePpe, removeEntry, saveReport, submitReport, reviewReport, unlockReport, telegramToReport, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork, log]
   );
   return <WorkContext.Provider value={api}>{children}</WorkContext.Provider>;
 }

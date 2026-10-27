@@ -1,6 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useState } from "react";
+import { Pencil } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { PlanLineEditor } from "./plan-line-editor";
 import { KpiTile, Panel, StatusPill } from "@/components/shared/ui-bits";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -56,6 +59,8 @@ export function WorkPlan() {
   const supervisorId = supervisors.some((x) => x.id === f.supervisorId) ? f.supervisorId : supervisors[0]?.id ?? "";
   // Master Data is the one plant list (rules §3)
   const sitePlants = plantsFor(formSite);
+  // The plan line open for editing (Edit link on its row)
+  const [editing, setEditing] = useState<string | null>(null);
 
   return (
     <div className="space-y-4">
@@ -128,10 +133,18 @@ export function WorkPlan() {
               {rows.map(({ l, st }) => {
                 const it = s.item(l.serviceCode);
                 const fl = FLAG[st.flag];
+                // 2026-10-27: every line on an open month has an Edit link for whoever plans (Admin / SIC / Owner / SA)
+                const canEdit = s.canPlan && !isMonthClosed(work, l.siteId, l.month);
                 return (
-                  <tr key={l.id} className="border-b border-[var(--sge-line)]">
+                  <Fragment key={l.id}>
+                  <tr className={cn("border-b border-[var(--sge-line)]", editing === l.id && "bg-[var(--sge-brass-wash)]/40")}>
                     <td className={tdCls}>
                       <div className="font-heading font-bold tracking-wide">{l.plant}</div>
+                      {canEdit ? (
+                        <button type="button" className="mt-0.5 inline-flex items-center gap-1 text-[11px] font-semibold text-[var(--sge-brass-ink)] underline" onClick={() => { setEditing(editing === l.id ? null : l.id); setMsg(null); }}>
+                          <Pencil aria-hidden className="h-3 w-3" /> {editing === l.id ? "Close" : "Edit"}
+                        </button>
+                      ) : null}
                       {s.allSites ? <div className="text-[10px] text-[var(--sge-ink-3)]">{s.siteCode(l.siteId)}</div> : null}
                     </td>
                     <td className={tdCls}>
@@ -151,8 +164,15 @@ export function WorkPlan() {
                     <td className={tdCls}>
                       <div className="flex flex-wrap gap-1">
                         {STAGES.filter((x) => st.inProgress[x.id] > 0).map((x) => (
-                          <span key={x.id} className="rounded-sm border border-[var(--sge-brass)]/50 bg-[var(--sge-brass-wash)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--sge-brass-ink)]">
-                            {x.short} {fmtM2(st.inProgress[x.id])}
+                          // Final shade in green: that much is complete
+                          <span
+                            key={x.id}
+                            className={cn(
+                              "rounded-sm border px-1.5 py-0.5 font-mono text-[10px]",
+                              x.id === "final" ? "border-[var(--sge-ok)]/50 bg-[var(--sge-ok-wash)] font-semibold text-[var(--sge-ok)]" : "border-[var(--sge-brass)]/50 bg-[var(--sge-brass-wash)] text-[var(--sge-brass-ink)]"
+                            )}
+                          >
+                            {x.id === "final" ? "✓ " : ""}{x.short} {fmtM2(st.inProgress[x.id])}
                           </span>
                         ))}
                         {STAGES.every((x) => st.inProgress[x.id] === 0) ? <span className="text-xs text-[var(--sge-ink-3)]">—</span> : null}
@@ -176,6 +196,23 @@ export function WorkPlan() {
                       ) : null}
                     </td>
                   </tr>
+                  {editing === l.id ? (
+                    <tr className="border-b border-[var(--sge-line)]">
+                      <td colSpan={9} className="px-3 py-3">
+                        <PlanLineEditor
+                          line={l}
+                          plants={plantsFor(l.siteId)}
+                          supervisors={s.staff.filter((x) => x.role === "supervisor" && x.siteId === l.siteId)}
+                          serviceItems={work.serviceItems}
+                          onDone={(m) => {
+                            setEditing(null);
+                            if (m) setMsg(m);
+                          }}
+                        />
+                      </td>
+                    </tr>
+                  ) : null}
+                  </Fragment>
                 );
               })}
             </tbody>
