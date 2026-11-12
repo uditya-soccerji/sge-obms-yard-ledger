@@ -1,6 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useState } from "react";
+import { Pencil } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { PlanLineEditor } from "./plan-line-editor";
 import { KpiTile, Panel, StatusPill } from "@/components/shared/ui-bits";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -56,6 +59,8 @@ export function WorkPlan() {
   const supervisorId = supervisors.some((x) => x.id === f.supervisorId) ? f.supervisorId : supervisors[0]?.id ?? "";
   // Master Data is the one plant list (rules §3)
   const sitePlants = plantsFor(formSite);
+  // The plan line open for editing (Edit link on its row)
+  const [editing, setEditing] = useState<string | null>(null);
 
   return (
     <div className="space-y-4">
@@ -101,89 +106,9 @@ export function WorkPlan() {
         <KpiTile label="Lines outside band" value={String(flagged)} hint={`Allowed −${UNDER_TOLERANCE * 100}% to +${OVER_TOLERANCE * 100}%`} tone={flagged ? "crit" : "default"} />
       </div>
 
-      <Panel>
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[980px] border-collapse text-sm">
-            <thead>
-              <tr className="border-b border-[var(--sge-line)]">
-                <th className={thCls}>Plant</th>
-                <th className={thCls}>Job (MPS · type)</th>
-                <th className={thCls}>Supervisor</th>
-                <th className={thCls + " text-right"}>Plan m²</th>
-                <th className={thCls + " text-right"}>Actual m²</th>
-                <th className={thCls}>In progress by stage (m²)</th>
-                <th className={thCls + " text-right"}>Remaining</th>
-                <th className={thCls + " text-right"}>%</th>
-                <th className={thCls}>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.length === 0 ? (
-                <tr>
-                  <td colSpan={9} className="px-3 py-8 text-center text-sm text-[var(--sge-ink-3)]">
-                    No plan for this month on this site.
-                  </td>
-                </tr>
-              ) : null}
-              {rows.map(({ l, st }) => {
-                const it = s.item(l.serviceCode);
-                const fl = FLAG[st.flag];
-                return (
-                  <tr key={l.id} className="border-b border-[var(--sge-line)]">
-                    <td className={tdCls}>
-                      <div className="font-heading font-bold tracking-wide">{l.plant}</div>
-                      {s.allSites ? <div className="text-[10px] text-[var(--sge-ink-3)]">{s.siteCode(l.siteId)}</div> : null}
-                    </td>
-                    <td className={tdCls}>
-                      <div className="font-medium">{it?.mps} · {l.jobType}</div>
-                      <div className="font-mono text-[10px] text-[var(--sge-ink-3)]">
-                        {l.serviceCode} · ₹{it?.rate}/m²{it?.ratePending ? " (rate pending)" : ""}
-                      </div>
-                    </td>
-                    <td className={tdCls + " text-xs"}>{s.staffName(l.supervisorId)}</td>
-                    <td className={tdCls + " text-right tabular-nums"}>
-                      {fmtM2(st.plan)}
-                      {l.carriedM2 > 0 ? (
-                        <div className="text-[10px] text-[var(--sge-brass-ink)]">incl. {fmtM2(l.carriedM2)} carried</div>
-                      ) : null}
-                    </td>
-                    <td className={tdCls + " text-right tabular-nums"}>{st.actual ? fmtM2(st.actual) : "—"}</td>
-                    <td className={tdCls}>
-                      <div className="flex flex-wrap gap-1">
-                        {STAGES.filter((x) => st.inProgress[x.id] > 0).map((x) => (
-                          <span key={x.id} className="rounded-sm border border-[var(--sge-brass)]/50 bg-[var(--sge-brass-wash)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--sge-brass-ink)]">
-                            {x.short} {fmtM2(st.inProgress[x.id])}
-                          </span>
-                        ))}
-                        {STAGES.every((x) => st.inProgress[x.id] === 0) ? <span className="text-xs text-[var(--sge-ink-3)]">—</span> : null}
-                      </div>
-                    </td>
-                    <td className={tdCls + " text-right font-semibold tabular-nums"}>{st.remaining ? fmtM2(st.remaining) : "—"}</td>
-                    <td className={tdCls + " text-right tabular-nums"}>{fmtPct(st.pct)}</td>
-                    <td className={tdCls}>
-                      <StatusPill tone={fl.tone}>{fl.label}</StatusPill>
-                      {st.flag !== "running" ? (
-                        <div className="mt-0.5 font-mono text-[10px] text-[var(--sge-ink-3)]">
-                          {Number.isFinite(st.variance) ? (
-                            <>
-                              {st.variance >= 0 ? "+" : ""}
-                              {(st.variance * 100).toFixed(1)}%
-                            </>
-                          ) : (
-                            "no plan left"
-                          )}
-                        </div>
-                      ) : null}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </Panel>
-
+      {/* 2026-10-27: the add form sits above the plan and stays in view while the list scrolls */}
       {(isCurrent || s.allSites) && s.canPlan ? (
+        <div className="sticky z-20 rounded-sm shadow-[var(--sge-shadow)]" style={{ top: "calc(var(--sge-header-h, 0px) + 8px)" }}>
         <Panel>
           <h3 className="mb-3 font-heading text-sm font-bold">Add to {monthLabel(s.monthOf(formSite))} plan · {s.siteCode(formSite)}</h3>
           <form
@@ -247,7 +172,123 @@ export function WorkPlan() {
             </div>
           </form>
         </Panel>
+        </div>
       ) : null}
+
+      <Panel>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[980px] border-collapse text-sm">
+            <thead>
+              <tr className="border-b border-[var(--sge-line)]">
+                <th className={thCls}>Plant</th>
+                <th className={thCls}>Job (MPS · type)</th>
+                <th className={thCls}>Supervisor</th>
+                <th className={thCls + " text-right"}>Plan m²</th>
+                <th className={thCls + " text-right"}>Actual m²</th>
+                <th className={thCls}>In progress by stage (m²)</th>
+                <th className={thCls + " text-right"}>Remaining</th>
+                <th className={thCls + " text-right"}>%</th>
+                <th className={thCls}>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.length === 0 ? (
+                <tr>
+                  <td colSpan={9} className="px-3 py-8 text-center text-sm text-[var(--sge-ink-3)]">
+                    No plan for this month on this site.
+                  </td>
+                </tr>
+              ) : null}
+              {rows.map(({ l, st }) => {
+                const it = s.item(l.serviceCode);
+                const fl = FLAG[st.flag];
+                // 2026-10-27: every line on an open month has an Edit link for whoever plans (Admin / SIC / Owner / SA)
+                const canEdit = s.canPlan && !isMonthClosed(work, l.siteId, l.month);
+                return (
+                  <Fragment key={l.id}>
+                  <tr className={cn("border-b border-[var(--sge-line)]", editing === l.id && "bg-[var(--sge-brass-wash)]/40")}>
+                    <td className={tdCls}>
+                      <div className="font-heading font-bold tracking-wide">{l.plant}</div>
+                      {canEdit ? (
+                        <button type="button" className="mt-0.5 inline-flex items-center gap-1 text-[11px] font-semibold text-[var(--sge-brass-ink)] underline" onClick={() => { setEditing(editing === l.id ? null : l.id); setMsg(null); }}>
+                          <Pencil aria-hidden className="h-3 w-3" /> {editing === l.id ? "Close" : "Edit"}
+                        </button>
+                      ) : null}
+                      {s.allSites ? <div className="text-[10px] text-[var(--sge-ink-3)]">{s.siteCode(l.siteId)}</div> : null}
+                    </td>
+                    <td className={tdCls}>
+                      <div className="font-medium">{it?.mps} · {l.jobType}</div>
+                      <div className="font-mono text-[10px] text-[var(--sge-ink-3)]">
+                        {l.serviceCode} · ₹{it?.rate}/m²{it?.ratePending ? " (rate pending)" : ""}
+                      </div>
+                    </td>
+                    <td className={tdCls + " text-xs"}>{s.staffName(l.supervisorId)}</td>
+                    <td className={tdCls + " text-right tabular-nums"}>
+                      {fmtM2(st.plan)}
+                      {l.carriedM2 > 0 ? (
+                        <div className="text-[10px] text-[var(--sge-brass-ink)]">incl. {fmtM2(l.carriedM2)} carried</div>
+                      ) : null}
+                    </td>
+                    <td className={tdCls + " text-right tabular-nums"}>{st.actual ? fmtM2(st.actual) : "—"}</td>
+                    <td className={tdCls}>
+                      <div className="flex flex-wrap gap-1">
+                        {STAGES.filter((x) => st.inProgress[x.id] > 0).map((x) => (
+                          // Final shade in green: that much is complete
+                          <span
+                            key={x.id}
+                            className={cn(
+                              "rounded-sm border px-1.5 py-0.5 font-mono text-[10px]",
+                              x.id === "final" ? "border-[var(--sge-ok)]/50 bg-[var(--sge-ok-wash)] font-semibold text-[var(--sge-ok)]" : "border-[var(--sge-brass)]/50 bg-[var(--sge-brass-wash)] text-[var(--sge-brass-ink)]"
+                            )}
+                          >
+                            {x.id === "final" ? "✓ " : ""}{x.short} {fmtM2(st.inProgress[x.id])}
+                          </span>
+                        ))}
+                        {STAGES.every((x) => st.inProgress[x.id] === 0) ? <span className="text-xs text-[var(--sge-ink-3)]">—</span> : null}
+                      </div>
+                    </td>
+                    <td className={tdCls + " text-right font-semibold tabular-nums"}>{st.remaining ? fmtM2(st.remaining) : "—"}</td>
+                    <td className={tdCls + " text-right tabular-nums"}>{fmtPct(st.pct)}</td>
+                    <td className={tdCls}>
+                      <StatusPill tone={fl.tone}>{fl.label}</StatusPill>
+                      {st.flag !== "running" ? (
+                        <div className="mt-0.5 font-mono text-[10px] text-[var(--sge-ink-3)]">
+                          {Number.isFinite(st.variance) ? (
+                            <>
+                              {st.variance >= 0 ? "+" : ""}
+                              {(st.variance * 100).toFixed(1)}%
+                            </>
+                          ) : (
+                            "no plan left"
+                          )}
+                        </div>
+                      ) : null}
+                    </td>
+                  </tr>
+                  {editing === l.id ? (
+                    <tr className="border-b border-[var(--sge-line)]">
+                      <td colSpan={9} className="px-3 py-3">
+                        <PlanLineEditor
+                          line={l}
+                          plants={plantsFor(l.siteId)}
+                          supervisors={s.staff.filter((x) => x.role === "supervisor" && x.siteId === l.siteId)}
+                          serviceItems={work.serviceItems}
+                          onDone={(m) => {
+                            setEditing(null);
+                            if (m) setMsg(m);
+                          }}
+                        />
+                      </td>
+                    </tr>
+                  ) : null}
+                  </Fragment>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
+
     </div>
   );
 }

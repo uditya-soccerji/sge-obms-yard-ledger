@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { LogOut, Menu, RefreshCw, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -127,6 +127,16 @@ function BrandMark() {
 }
 
 export function AppShell({ children }: { children: React.ReactNode }) {
+  // 2026-10-27: pinned bars (e.g. Work → Plan's add form) sit right under the header, whatever its height
+  const headerObs = useRef<ResizeObserver | null>(null);
+  const headerRef = useCallback((el: HTMLElement | null) => {
+    headerObs.current?.disconnect();
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const set = () => document.documentElement.style.setProperty("--sge-header-h", `${el.offsetHeight}px`);
+    set();
+    headerObs.current = new ResizeObserver(set);
+    headerObs.current.observe(el);
+  }, []);
   const {
     state,
     hydrated,
@@ -200,7 +210,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="flex min-h-dvh flex-col">
-      <header className="sticky top-0 z-40 bg-[var(--sge-night)] text-[#ffffff]">
+      <header ref={headerRef} className="sticky top-0 z-40 bg-[var(--sge-night)] text-[#ffffff]">
         {viewingAs ? (
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[rgba(232,133,30,0.35)] bg-[#5a3406] px-4 py-2 text-[#ffffff] md:px-6">
             <p className="min-w-0 flex-1 text-xs font-semibold leading-snug sm:text-sm">
