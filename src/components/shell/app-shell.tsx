@@ -149,6 +149,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     resetSeed,
     endImpersonation,
     labourerSync,
+    attendanceSync,
   } = useStore();
   const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -377,6 +378,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           // Shared labourer register (migration 006): say so when a change didn't reach the server
           <div role="alert" className="mb-3 rounded-sm border border-[var(--sge-crit)]/40 bg-[var(--sge-crit-wash)] px-3 py-2 text-sm text-[var(--sge-crit)]">
             {labourerSync.error}. Your change is kept on this device and will be sent again — check your connection.
+          </div>
+        ) : null}
+        {attendanceSync.error ? (
+          // Shared attendance (migration 008)
+          <div role="alert" className="mb-3 rounded-sm border border-[var(--sge-crit)]/40 bg-[var(--sge-crit-wash)] px-3 py-2 text-sm text-[var(--sge-crit)]">
+            {attendanceSync.error}. Marks made here are kept on this device and sent again — check your connection.
           </div>
         ) : null}
         {children}

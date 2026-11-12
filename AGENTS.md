@@ -21,7 +21,7 @@ Actual = Σ JMS on the plan line · Remaining = Plan − Actual · unfinished wo
 ```
 
 ## 2. Status (2026-10-11)
-- **Backend started (Supabase project `sge-obms`, Mumbai).** Live in Supabase: logins (username + password; hidden email `<username>@obms.internal`), `profiles` (roles, sites), `sites`, `master_items` (Master Data catalog) and `audit_log`, all with RLS. Owner/Super Admin user management goes through the `admin-users` edge function (`supabase/functions/admin-users`). **Everything else** (Work module, DPRs, labourers, attendance, finance…) is still browser `localStorage`. Without the env vars the app falls back to the old local mock login.
+- **Backend started (Supabase project `sge-obms`, Mumbai).** Live in Supabase: logins (username + password; hidden email `<username>@obms.internal`), `profiles` (roles, sites), `sites`, `master_items` (Master Data catalog) and `audit_log`, all with RLS. Owner/Super Admin user management goes through the `admin-users` edge function (`supabase/functions/admin-users`). **Labourers** (migration 006, `src/lib/supabase/labourers.ts`) and **attendance** (migration 008, `src/lib/supabase/attendance.ts`; the browser holds only the last 3 months + this one and never saves attendance to `localStorage`) are shared too. **Everything else** (Work module, DPRs, finance…) is still browser `localStorage`. Without the env vars the app falls back to the old local mock login.
 - Demo logins are in `README.md` (e.g. `uditya` / `password` = Super Admin). They are demo seed values, not secrets.
 - The **Work** module (`/work`) implements the flow above with real DTA Aug-2026 figures, plus **Payments** (SIC-approved vs received per JMS), **P&L** (cash basis; labour from DPR crews, fixed costs shared by labour-days) and **Test tools** (View as, scenarios, reset — Owner/Super Admin), a header **notification bell** ("Waiting for me", instant approvals/problems, daily summary, 24 h escalation) and an **Activity log** tab (Owner/Super Admin). Every Work action writes an event via `log()` in `work/store.tsx`; who sees it is decided in `work/events.ts` (`isFor`). The Owner home and Finance show the same "Approved vs received" card.
 - **One data model (merge plan built, PRs #15–#20):** DPRs, JMS, paint and money live once, in Work (`lib/work/*`). The DPR desk, approvals, JMS, Store, Finance, Owner / SIC / Supervisor homes all read and write Work. The main store keeps people, sites, attendance, ACPL, requests, equipment, safety days, payroll (wage ledger), Master Data and the audit log. Work starts empty on the current month; the DTA Aug–Sep demo loads from Test tools.
@@ -32,7 +32,7 @@ Actual = Σ JMS on the plan line · Remaining = Plan − Actual · unfinished wo
 - Next.js **15.5** (App Router, Turbopack dev) · React **19.1** · TypeScript (strict)
 - Tailwind CSS **v4** (`@import "tailwindcss"` in `src/app/globals.css`) + shadcn/ui on Radix (`src/components/ui/*`) · lucide-react icons
 - Fonts via `next/font`: Barlow Semi Condensed (headings, numbers), Inter (body), JetBrains Mono (codes)
-- Supabase (`@supabase/supabase-js`; client in `src/lib/supabase/`) for logins + users + master data; rest is still React context + `localStorage`
+- Supabase (`@supabase/supabase-js`; client in `src/lib/supabase/`) for logins + users + master data + labourers + attendance; rest is still React context + `localStorage`
 
 ## 4. Run / check
 ```bash

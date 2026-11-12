@@ -3,6 +3,7 @@
 import { useWork } from "@/lib/work/store";
 import { PayUploadPanel } from "@/components/hr/pay-upload";
 import { PassExpiryPanel } from "@/components/hr/pass-expiry-panel";
+import { SharedAttendancePanel } from "@/components/hr/shared-attendance-panel";
 import { guarded } from "@/components/shared/require-module";
 import { today as todayDate } from "@/lib/today";
 import Link from "next/link";
@@ -69,6 +70,7 @@ function HrHomePage() {
         }
       />
 
+      <SharedAttendancePanel />
       <OpsExcelTransferStack kinds={["attendance", "wageLedger"]} />
 
       {/* docs §24: RIL passes expiring within 10 days */}

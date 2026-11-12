@@ -409,6 +409,13 @@ Process page: "Store module — process" (Claude doc). Decisions there: reorder 
 - **Work → Plan layout (2026-10-27):** the **Add to plan** form sits **above** the plan table and stays **pinned** under the header while the list scrolls (the header publishes its height as `--sge-header-h`). Every plan line has **Edit** (plant, service item, plan m², supervisor; plant + item lock once work is on it; Remove when empty) for Admin / SIC / Owner / SA.
 - **Every plan change is in the audit log:** add → `plan_added`, correction → `plan_changed` (what changed: plant / item / plan m² before → after / supervisor), removal → `plan_removed`; each with who and when, shown on the Audit page (and the shared audit log on the live site).
 
+
+## 32. Attendance in the shared database (decided 2026-11-12)
+- **Why:** attendance lived in each browser, so HR, the SIC and the Owner saw different registers, and a browser filled up after about two months of DTA attendance (the WhatsApp import for 5 Oct – 11 Nov alone was ~2.4 MB of a ~5 MB limit).
+- **Table** `attendance` (migration 008): one row per labourer per day, the app's own ids, linked to `labourers` and `sites`. No unique (labourer, day) rule in the database — the app keeps one mark per day, and a clash between two browsers must not block later saves.
+- **Who:** every staff role reads; a labourer login reads only its own days. HR, Admin, SIC, supervisors (DPR submit), Owner and SA write and delete.
+- **In the browser:** only the last 3 months + this month are loaded (pay and the profile month picker look back that far). Changes are fetched every minute (and on focus), a full reload every 10 minutes also catches deletions. Attendance is no longer written to `localStorage`; marks not yet sent are kept in a small separate slot and sent again after a reload.
+- **Moving old marks:** each browser's attendance from before is set aside on first load. On the HR page the Owner, SA or HR clicks **Move to shared register** once: only labourers in the shared register, and a day the shared register already has is kept as it is. The move is in the audit log.
 ## 33. Site list with RIL plant codes (decided 2026-11-13)
 - The header site pickers read **plant code - site - server (RP)**, e.g. `3611 - DTA - RP2`, after **All sites**: 3611 DTA RP2 · 3611 MTF RP2 · 3622 MTF RP5 · 3611 SWRO RP2 · 3622 Jetty Mech RP5 · 3622 Marine Ops RP5 · 36AG CPP RP5 · 36KK PCG RP2 · ---- PCG (PCCS) RP2 · 36IY HPIB RP2.
 - Existing sites keep their ids (DTA, MTF = 3611 RP2, Marine → Marine Ops, Jetty → Jetty Mech, PCG); new: MTF5 (3622 MTF RP5), SWRO, CPP, PCCS, HPIB. Gagva isn't on the list: switched off (data kept, Master Data → Sites). The header lists only active sites.
