@@ -84,6 +84,8 @@ export type QueueCounts = {
   /** Waiting on this role, per Operations tab — the same rows that tab lists as needing action */
   ops: Partial<Record<OpsPanelId, number>>;
   nav: Partial<Record<TopNavId, number>>;
+  /** Plan line requests for Work → Plan */
+  plan: number;
 };
 
 /**
@@ -140,10 +142,16 @@ export function useQueueCounts(): QueueCounts {
   const mine = new Set(opsPillsFor(currentAccount, role).map((p) => p.id));
   for (const k of Object.keys(ops) as OpsPanelId[]) if (!mine.has(k)) delete ops[k];
 
+  // Plan lines the Admin asked for: the site's SIC (and Owner / SA) decide; the Admin sees new decisions
+  const planWaiting = work.planRequests.filter((r) => r.status === "pending" && inSite(r.siteId) && (boss || (role === "sic" && (currentAccount?.siteIds ?? []).includes(r.siteId)))).length;
+  const planNew = role === "admin" ? work.planRequests.filter((r) => (r.status === "approved" || r.status === "rejected") && !r.seenByRequester && r.requestedBy === (me ?? state.currentAccountId)).length : 0;
+  const plan = planWaiting + planNew;
+
   const nav: QueueCounts["nav"] = {};
+  if (plan) nav.work = plan;
   const opsTotal = Object.values(ops).reduce((s, n) => s + (n ?? 0), 0);
   if (opsTotal) nav.operations = opsTotal;
   const master = changeBadgeCount(fullState);
   if (master) nav.master = master;
-  return { ops, nav };
+  return { ops, nav, plan };
 }

@@ -3,6 +3,7 @@
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
 import { EmptyState, SectionHeader } from "@/components/shared/ui-bits";
+import { useWaitingForMe } from "@/components/work/notifications";
 import { TestTools } from "@/components/work/test-tools";
 import { WorkActivity } from "@/components/work/work-activity";
 import { WorkJms, WorkOrders } from "@/components/work/work-jms";
@@ -16,6 +17,7 @@ import { workTabsFor } from "@/lib/work/permissions";
 import { ALL_SITES } from "@/lib/site-scope";
 import { useStore } from "@/lib/store";
 import { useWork } from "@/lib/work/store";
+import { useQueueCounts } from "@/lib/queues";
 import { cn } from "@/lib/utils";
 
 const TABS = [
@@ -42,6 +44,10 @@ function WorkInner() {
   const tabs = TABS.filter((t) => (!t.money || canMoney) && (!t.boss || isBoss) && (only === "all" || only.includes(t.id)));
   const fallback: TabId = role === "finance" ? "payments" : (tabs[0]?.id ?? "plan");
   const tab = (tabs.find((t) => t.id === params.get("t"))?.id ?? fallback) as TabId;
+  // 2026-10-24: what waits for this role on each Work tab (plan-line requests, jobs to confirm / close)
+  const { plan: planCount } = useQueueCounts();
+  const waitingItems = useWaitingForMe();
+  const tabCount = (id: string) => (id === "plan" ? planCount : 0) + waitingItems.filter((w) => w.tab === id).length;
   const siteName = state.currentSiteId === ALL_SITES ? "All sites" : state.sites.find((s) => s.id === state.currentSiteId)?.name;
 
   if (!canAccessWork(role)) {
@@ -68,6 +74,11 @@ function WorkInner() {
             )}
           >
             {t.label}
+            {tabCount(t.id) ? (
+              <span aria-label={`${tabCount(t.id)} waiting`} className="ml-1.5 inline-flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--sge-brass)] px-1 align-middle text-[10px] font-bold leading-none tracking-normal text-white">
+                {tabCount(t.id)}
+              </span>
+            ) : null}
           </button>
         ))}
       </div>

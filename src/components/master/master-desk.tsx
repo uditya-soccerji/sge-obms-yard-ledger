@@ -2,6 +2,7 @@
 
 import { changeBadgeCount, sheetBadgeCount, unseenWageDecisions, WAGE_REQUESTS_TAB, WAGE_UNDO_MS, wageBadgeCount } from "@/lib/wage-requests";
 import { ChangeRequestsPanel } from "./change-requests";
+import { RequestList } from "@/components/shared/request-list";
 import { Building2, BookOpen, CalendarCheck, Check, ClipboardList, Clock, HardHat, Hourglass, IndianRupee, Layers, ListChecks, MapPin, PaintBucket, Power, ReceiptIndianRupee, Ruler, Save, Send, ShieldCheck, Undo2, Users, Wrench, X, type LucideIcon } from "lucide-react";
 import { CENTRAL_STORE, isCentralStore } from "@/lib/site-scope";
 import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
@@ -1697,7 +1698,6 @@ function WageBandsSheet({ showInactive }: { showInactive: boolean }) {
   // Owner rule (2026-10-24): the Admin's changes are requests; Owner / SA approve before a rate changes
   const isAdmin = state.currentRole === "admin";
   const isBoss = state.currentRole === "owner" || state.currentRole === "super_admin";
-  const [decideNote, setDecideNote] = useState<Record<string, string>>({});
   const [info, setInfo] = useState<string | null>(null);
   // The Request button turns green for a few seconds after each request is sent
   const [sentAt, setSentAt] = useState(0);
@@ -1707,33 +1707,6 @@ function WageBandsSheet({ showInactive }: { showInactive: boolean }) {
   const describe = (r: WageChangeRequest) =>
     `${tradeLabel(r.tradeId)} · ${skillLabelOf(r.skill)} · ${experienceLabel(r.experience)}: ${r.active !== undefined ? (r.active ? "switch on" : "switch off") : r.fromWage != null ? `₹${r.fromWage} → ₹${r.toWage}` : `new rate ₹${r.toWage}`}`;
   const pending = state.wageChangeRequests.filter((r) => r.status === "pending");
-  // Waiting first (newest first), then everything decided, newest first — 50 per page
-  const PAGE = 50;
-  const allRequests = [
-    ...[...pending].sort((a, b) => b.requestedAt.localeCompare(a.requestedAt)),
-    ...state.wageChangeRequests.filter((r) => r.status !== "pending").sort((a, b) => (b.decidedAt ?? b.requestedAt).localeCompare(a.decidedAt ?? a.requestedAt)),
-  ];
-  // A bell alert opens the list (...&requests=open)
-  const askedOpen = params.get("requests") === "open";
-  const [listOpen, setListOpen] = useState(askedOpen);
-  useEffect(() => {
-    if (askedOpen) setListOpen(true);
-  }, [askedOpen]);
-  // The Admin's decisions not yet looked at: counted on the button, highlighted while the list is open
-  const unseen = unseenWageDecisions(state);
-  const [fresh, setFresh] = useState<Set<string>>(new Set());
-  const unseenKey = unseen.map((r) => r.id).join(",");
-  useEffect(() => {
-    if (!listOpen || !unseenKey) return;
-    const ids = unseenKey.split(",");
-    setFresh((f) => new Set([...f, ...ids]));
-    markWageDecisionsSeen(ids);
-  }, [listOpen, unseenKey, markWageDecisionsSeen]);
-  const [pageNo, setPage] = useState(0);
-  const pages = Math.max(1, Math.ceil(allRequests.length / PAGE));
-  const page = Math.min(pageNo, pages - 1);
-  const pageRows = allRequests.slice(page * PAGE, page * PAGE + PAGE);
-  const stamp = (iso: string) => new Date(iso).toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
   const waitingFor = (bandId: string) => pending.find((r) => r.bandId === bandId);
   /** Save, or — for the Admin — send the change for approval */
   function send(r: { ok: boolean; error?: string; requested?: boolean; id?: string }, what: string) {
@@ -1763,11 +1736,11 @@ function WageBandsSheet({ showInactive }: { showInactive: boolean }) {
     return () => clearInterval(t);
   }, [inWindow]);
   const secondsLeft = (r: WageChangeRequest) => Math.max(0, Math.ceil((Date.parse(r.requestedAt) + WAGE_UNDO_MS - Date.now()) / 1000));
-  function decide(r: WageChangeRequest, approve: boolean) {
-    const res = decideWageChange(r.id, approve, decideNote[r.id] ?? "");
-    report(res);
-    if (res.ok) setInfo(approve ? "Approved — the rate is updated." : "Rejected — the Admin is told.");
-    if (res.ok) notify({ kind: "wage_change_decided", problem: !approve, siteId: "", subjectStaffId: r.requestedBy, title: `Wage change ${approve ? "approved" : "rejected"}: ${describe(r)}`, detail: decideNote[r.id]?.trim() || (approve ? "Rate updated" : ""), tab: WAGE_REQUESTS_TAB, refId: r.id });
+  function decide(id: string, approve: boolean, note: string) {
+    const r = state.wageChangeRequests.find((x) => x.id === id);
+    const res = decideWageChange(id, approve, note);
+    if (res.ok && r) notify({ kind: "wage_change_decided", problem: !approve, siteId: "", subjectStaffId: r.requestedBy, title: `Wage change ${approve ? "approved" : "rejected"}: ${describe(r)}`, detail: note.trim() || (approve ? "Rate updated" : ""), tab: WAGE_REQUESTS_TAB, refId: r.id });
+    return res;
   }
   const trades = state.tradeCatalogue.filter((t) => t.active);
   const [tradeId, setTradeId] = useState(trades[0]?.id ?? "");
@@ -1790,97 +1763,20 @@ function WageBandsSheet({ showInactive }: { showInactive: boolean }) {
         </p>
       ) : null}
       {info ? <p className="mb-3 text-sm text-[var(--sge-ok)]">{info}</p> : null}
-      {/* 2026-10-24: the list grows — a button with the waiting count opens it, 50 per page, with date and time */}
-      <div className="mb-4">
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          aria-expanded={listOpen}
-          className={cn("gap-2", pending.length ? "border-[var(--sge-brass)] text-[var(--sge-brass-ink)]" : "")}
-          onClick={() => setListOpen((v) => !v)}
-        >
-          <ListChecks aria-hidden className="h-4 w-4" />
-          Wage change requests
-          {pending.length ? (
-            <span aria-label={`${pending.length} waiting`} className="inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-[var(--sge-brass)] px-1.5 text-[11px] font-bold text-white">
-              {pending.length}
-            </span>
-          ) : null}
-          {unseen.length ? (
-            <span className="inline-flex h-5 items-center justify-center rounded-full bg-[var(--sge-ok)] px-1.5 text-[11px] font-bold text-white">{unseen.length} new</span>
-          ) : null}
-          <span className="text-xs font-normal text-[var(--sge-ink-3)]">{listOpen ? "Hide" : `Show (${allRequests.length})`}</span>
-        </Button>
-        {listOpen ? (
-          <div className="mt-2 rounded-sm border border-[var(--sge-line)] p-3">
-            {allRequests.length === 0 ? (
-              <p className="text-sm text-[var(--sge-ink-3)]">No requests yet.</p>
-            ) : (
-              <>
-                <div className="divide-y divide-[var(--sge-line)]">
-                  {pageRows.map((r) => (
-                    <div
-                      key={r.id}
-                      className={cn(
-                        "flex flex-wrap items-center gap-2 py-1.5 text-sm",
-                        // Just decided, not seen before: highlight it in its result colour
-                        fresh.has(r.id) && "-mx-2 rounded-sm border-l-4 px-2",
-                        fresh.has(r.id) && (r.status === "approved" ? "border-[var(--sge-ok)] bg-[var(--sge-ok-wash)]" : "border-[var(--sge-crit)] bg-[var(--sge-crit-wash)]")
-                      )}
-                    >
-                      {fresh.has(r.id) ? <span className="rounded-sm bg-[var(--sge-night)] px-1.5 text-[10px] font-bold uppercase text-white">New</span> : null}
-                      <span
-                        className={cn(
-                          "inline-flex items-center gap-1 rounded-sm px-1.5 text-[11px] font-semibold uppercase",
-                          r.status === "pending" ? "bg-[var(--sge-warn-wash)] text-[var(--sge-warn)]" : r.status === "approved" ? "bg-[var(--sge-ok-wash)] text-[var(--sge-ok)]" : r.status === "withdrawn" ? "bg-[var(--sge-paper-2)] text-[var(--sge-ink-3)]" : "bg-[var(--sge-crit-wash)] text-[var(--sge-crit)]"
-                        )}
-                      >
-                        {r.status === "pending" ? <Hourglass aria-hidden className="h-3 w-3" /> : null}
-                        {r.status === "pending" ? "waiting" : r.status === "withdrawn" ? "undone" : r.status}
-                      </span>
-                      <span className={r.status === "pending" ? "font-semibold" : ""}>{describe(r)}</span>
-                      <span className="text-xs text-[var(--sge-ink-3)]">
-                        asked by {r.requestedByName} · {stamp(r.requestedAt)}
-                        {r.decidedAt ? ` · ${r.status === "withdrawn" ? "undone" : r.status} ${stamp(r.decidedAt)}` : ""}
-                        {r.decidedNote ? ` · ${r.decidedNote}` : ""}
-                      </span>
-                      {r.status === "pending" && isAdmin && mine(r) ? (
-                        <span className="ml-auto flex items-center gap-2">
-                          <span className="text-xs text-[var(--sge-ink-3)]">{r.notified || secondsLeft(r) === 0 ? "Owner / SA told" : `Owner / SA told in ${secondsLeft(r)} s`}</span>
-                          <Button size="sm" variant="outline" className="gap-1 border-[var(--sge-warn)] text-[var(--sge-warn)]" onClick={() => undo(r)}>
-                            <Undo2 aria-hidden className="h-3.5 w-3.5" /> Undo
-                          </Button>
-                        </span>
-                      ) : null}
-                      {r.status === "pending" && isBoss ? (
-                        <span className="ml-auto flex items-center gap-1">
-                          <Input aria-label="Reason" className="h-8 w-44" placeholder="Reason (to reject)" value={decideNote[r.id] ?? ""} onChange={(e) => setDecideNote({ ...decideNote, [r.id]: e.target.value })} />
-                          <Button size="sm" className="gap-1 bg-[var(--sge-crit)] text-white hover:bg-[var(--sge-crit)]/90" onClick={() => decide(r, false)}>
-                            <X aria-hidden className="h-3.5 w-3.5" /> Reject
-                          </Button>
-                          <Button size="sm" className="gap-1 bg-[var(--sge-ok)] text-white hover:bg-[var(--sge-ok)]/90" onClick={() => decide(r, true)}>
-                            <Check aria-hidden className="h-3.5 w-3.5" /> Approve
-                          </Button>
-                        </span>
-                      ) : null}
-                    </div>
-                  ))}
-                </div>
-                {pages > 1 ? (
-                  <div className="mt-2 flex items-center justify-end gap-2 text-xs">
-                    <Button size="sm" variant="outline" disabled={page === 0} onClick={() => setPage((n) => n - 1)}>Previous</Button>
-                    <span>
-                      Page {page + 1} of {pages} · {allRequests.length} requests
-                    </span>
-                    <Button size="sm" variant="outline" disabled={page >= pages - 1} onClick={() => setPage((n) => n + 1)}>Next</Button>
-                  </div>
-                ) : null}
-              </>
-            )}
-          </div>
-        ) : null}
-      </div>
+      {/* 2026-10-24: one shared list (counted button, 50 a page, Undo, decide, NEW highlight, history thread) */}
+      <RequestList
+        title="Wage change requests"
+        rows={state.wageChangeRequests.map((r) => ({ ...r, summary: describe(r) }))}
+        me={state.currentUserId ?? state.currentAccountId}
+        asker={isAdmin}
+        decider={() => isBoss}
+        deciderLabel="Owner / Super Admin"
+        unseenIds={unseenWageDecisions(state).map((r) => r.id)}
+        onSeen={markWageDecisionsSeen}
+        onUndo={(r) => withdrawWageChange(r.id)}
+        onDecide={(r, approve, note) => decide(r.id, approve, note)}
+        startOpen={params.get("requests") === "open"}
+      />
       <form
         className="mb-4 grid gap-2 rounded-sm border border-[var(--sge-line)] bg-[var(--sge-linen)] p-3 sm:grid-cols-5"
         onSubmit={(e) => {
