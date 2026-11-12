@@ -2,7 +2,6 @@
 
 import { PayUploadPanel } from "@/components/hr/pay-upload";
 import { JmsAdminQueue } from "@/components/work/jms-admin-queue";
-import { PassExpiryPanel } from "@/components/hr/pass-expiry-panel";
 import { guarded } from "@/components/shared/require-module";
 import Link from "next/link";
 import {
@@ -37,10 +36,9 @@ function AdminHomePage() {
         subtitle="Excel / paste upload and data entry across ACPL, JMS, rate cards, and master labour. Creates verification packages for SIC."
       />
 
-      {/* docs §24: RIL passes expiring within 10 days */}
       {/* docs §24: JMS waiting for the Admin's number and amount */}
       <JmsAdminQueue />
-      <PassExpiryPanel />
+      {/* 2026-10-27: RIL gate passes to renew are HR's — on the HR page, not here */}
       {/* docs §24: monthly pay upload (Admin / HR); Finance is told */}
       <PayUploadPanel />
 
