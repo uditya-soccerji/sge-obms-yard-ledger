@@ -424,3 +424,8 @@ Process page: "Store module — process" (Claude doc). Decisions there: reorder 
 - **Employment** (supervisors): **On payroll** or **Sub contractor** + the firm from Master Data → Contractors (`StaffMember.engagement`, `contractorId`; unset = payroll). Picking Painting & blasting suggests payroll, Scaffolding suggests sub contractor; Rope access keeps whatever was chosen (it is both). Changeable on each supervisor's row in Users / seats.
 - **Rope access** is a supervisor type of its own; its DPR is the painting & blasting DPR (rope access jobs are painting and blasting).
 - Before this goes live: the `admin-users` edge function must be redeployed (it still refuses a supervisor with two sites), and staff records aren't in the shared database yet, so employment lives in each browser like the rest of the staff list.
+
+## 35. Labour upload updates contractor and site of people already registered (decided 2026-11-13)
+- The labour CSV upload (Master Data → Labourers → Upload CSV) now also changes **contractor** and **site** for someone already registered (same EP), when the file gives them; a blank cell keeps what's there. Before, only RIL details (EIC, pass status, area, pass dates) were refreshed.
+- An unknown contractor or a switched-off / unknown site is noted on the row and left as it is. A labourer moved to a site where their supervisor doesn't work loses that supervisor (they're picked again on the crew screen).
+- Every change is listed on the row ("contractor → Prasenjit Mahato, site → MTF") under **Updates** before anything is saved.

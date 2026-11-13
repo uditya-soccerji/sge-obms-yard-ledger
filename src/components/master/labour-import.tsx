@@ -65,7 +65,7 @@ export function LabourImport({ onClose, title = "Upload labourers (CSV)" }: { on
     if (!res.ok) return setMsg({ ok: false, text: res.error ?? "Not added" });
     const parts = [
       res.added ? `Added ${res.added} labourer${res.added === 1 ? "" : "s"} (${Object.entries(bySite).map(([k, v]) => `${k} ${v}`).join(", ")})` : "",
-      res.updated ? `updated ${res.updated} (RIL details)` : "",
+      res.updated ? `updated ${res.updated} (contractor, site, RIL details)` : "",
       newTrades.length ? `${newTrades.length} new trade${newTrades.length === 1 ? "" : "s"}` : "",
       already ? `${already} not uploaded — already in the system` : "",
     ].filter(Boolean);
@@ -92,7 +92,7 @@ export function LabourImport({ onClose, title = "Upload labourers (CSV)" }: { on
       <p className="mb-2 text-xs text-[var(--sge-ink-3)]">
         Our template, or RIL&apos;s Employee Details export as it is — in Excel: File → Save As → CSV. Name, EP and Trade are needed.
         Site comes from the Site column, else RIL&apos;s area (DTA / PCG / SOLAR), else {site?.code ?? "the site you're on"}. No contractor = SGE (own).
-        Someone already registered (same EP) gets their RIL pass status, EIC, area and pass dates (Valid From / Valid To) updated; if nothing changed the row is
+        Someone already registered (same EP) gets their contractor and site (when the file gives them), RIL pass status, EIC, area and pass dates (Valid From / Valid To) updated; if nothing changed the row is
         not uploaded and shows who uploaded it before. An old EP is refused; the same Name + Trade + Skill as someone registered needs your tick.
       </p>
       <div className="flex flex-wrap items-center gap-3 text-sm">

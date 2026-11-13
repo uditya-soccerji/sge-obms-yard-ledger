@@ -186,22 +186,40 @@ export function checkImport(table: string[][], ctx: ImportContext): { rows: Impo
     const existing = ep && !r.errors.length ? byCurrentEp.get(ep) : undefined;
     if (existing) {
       const status = get("status");
+      // Owner, 2026-11-13: the file's contractor and site also update someone already registered
+      // (only when the file gives them; a blank keeps what's there)
+      const conRaw = get("contractor");
+      const con = conRaw ? ctx.contractors.find((c) => c.active && (norm(c.name) === norm(conRaw) || norm(c.code) === norm(conRaw))) : undefined;
+      if (conRaw && !con) r.notes.push(`contractor "${conRaw}" isn't in Master Data → Contractors — kept as it is`);
+      const siteRaw = get("site").toUpperCase();
+      const newSite = siteRaw ? ctx.sites.find((s) => s.code === siteRaw) : undefined;
+      if (siteRaw && (!newSite || !newSite.enabled)) r.notes.push(`site "${siteRaw}" isn't an active site — kept as it is`);
+      const moveSite = newSite && newSite.enabled && newSite.id !== existing.siteId ? newSite : undefined;
+      // A supervisor who doesn't work on the new site can't keep the crew
+      const supStays = moveSite && existing.supervisorId ? ctx.staff.some((s) => s.id === existing.supervisorId && worksAt(s, moveSite.id)) : true;
       const fresh: Partial<Labourer> = {
+        ...(con ? { contractorId: con.id } : {}),
+        ...(moveSite ? { siteId: moveSite.id, ...(supStays ? {} : { supervisorId: "" }) } : {}),
         ...(get("eic") ? { eic: get("eic") } : {}),
         ...(status ? { rilStatus: status, ...(activeFromRilStatus(status) ? {} : { active: false }) } : {}),
         ...(get("area") ? { rilArea: get("area") } : {}),
         ...(validFrom ? { passValidFrom: validFrom } : {}),
         ...(validTo ? { passExpiry: validTo } : {}),
       };
-      const names: Record<string, string> = { eic: "EIC", rilStatus: "pass status", rilArea: "area", passValidFrom: "valid-from", passExpiry: "expiry", active: "inactive (Terminated)" };
+      const names: Record<string, string> = { contractorId: "contractor", siteId: "site", supervisorId: "supervisor", eic: "EIC", rilStatus: "pass status", rilArea: "area", passValidFrom: "valid-from", passExpiry: "expiry", active: "inactive (Terminated)" };
       const patch = Object.fromEntries(Object.entries(fresh).filter(([k, v]) => existing[k as keyof Labourer] !== v)) as Partial<Labourer>;
-      const changes = Object.entries(patch).map(([k, v]) => (k === "active" ? names[k] : `${names[k]} → ${k.startsWith("pass") ? showDate(String(v)) : v}`));
+      const shown = (k: string, v: unknown) =>
+        k === "contractorId" ? ctx.contractors.find((c) => c.id === v)?.name ?? String(v)
+        : k === "siteId" ? ctx.sites.find((x) => x.id === v)?.code ?? String(v)
+        : k === "supervisorId" ? "cleared (not on the new site)"
+        : k.startsWith("pass") ? showDate(String(v)) : String(v);
+      const changes = Object.entries(patch).map(([k, v]) => (k === "active" ? names[k] : k === "supervisorId" ? `${names[k]} ${shown(k, v)}` : `${names[k]} → ${shown(k, v)}`));
       if (changes.length) r.update = { id: existing.id, patch, changes };
       else
         r.alreadyIn = existing.upload
           ? `Not uploaded — already uploaded by ${existing.upload.by} on ${showDate(realToday(new Date(existing.upload.at)))}`
           : "Not uploaded — already in the register (added by hand)";
-      r.siteCode = ctx.sites.find((s) => s.id === existing.siteId)?.code ?? "";
+      r.siteCode = ctx.sites.find((s) => s.id === (moveSite?.id ?? existing.siteId))?.code ?? "";
       return r;
     }
 
