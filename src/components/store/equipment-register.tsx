@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { fefo, inStore, KITS, kitLabel, RETURN_CONDITIONS, TAGGED, taggedLabel, type KitType, type TaggedType } from "@/lib/equipment-register";
 import { daysUntil, showDate } from "@/lib/gate-pass";
-import { entrySiteId } from "@/lib/site-scope";
+import { entrySiteId, worksAt } from "@/lib/site-scope";
 import { useStore } from "@/lib/store";
 import { today } from "@/lib/today";
 import type { EquipmentReturn } from "@/lib/types";
@@ -89,7 +89,7 @@ export function ReturnsQueue({ stage }: { stage: "with_store" | "with_sic" }) {
 export function StoreEquipmentDesk() {
   const { state, fullState, addTagged, receiveKit, issueTagged, issueKit } = useStore();
   const siteId = entrySiteId(state);
-  const sups = fullState.staff.filter((s) => s.role === "supervisor" && s.siteId === siteId && s.active !== false);
+  const sups = fullState.staff.filter((s) => s.role === "supervisor" && worksAt(s, siteId) && s.active !== false);
   const name = (id?: string) => fullState.staff.find((s) => s.id === id)?.name ?? id ?? "";
   const [msg, setMsg] = useState<Msg>(null);
   const [tType, setTType] = useState<TaggedType>("harness");

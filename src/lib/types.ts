@@ -133,7 +133,12 @@ export interface EquipmentRequest {
 export type SupervisorType =
   | "painting_blasting"
   | "scaffolding"
+  /** Rope access (owner, 2026-11-13): painting & blasting work done on ropes; payroll or sub contract */
+  | "rope_access"
   | "safety";
+
+/** On our payroll or with a sub contractor (owner, 2026-11-13) */
+export type Engagement = "payroll" | "subcontract";
 
 /** Legacy trade codes — prefer TradeDefinition.id from catalogue. */
 export type Trade =
@@ -236,8 +241,10 @@ export interface Site {
   name: string;
   client: string;
   enabled: boolean;
-  /** Rate package / commercial tags e.g. RP2, RP5 */
+  /** Rate package / commercial tags e.g. RP2, RP5 (the owner calls it the server: RP2 / RP5) */
   rpTags: string[];
+  /** RIL plant code, e.g. 3611 / 3622 / 36AG (owner, 2026-11-13); empty when there is none */
+  plantCode?: string;
   /** Plants / work areas within the site */
   plants: string[];
   /**
@@ -289,6 +296,15 @@ export interface StaffMember {
   phone?: string;
   designation?: string;
   supervisorType?: SupervisorType;
+  /** On payroll or sub contractor (owner, 2026-11-13); unset = payroll */
+  engagement?: Engagement;
+  /** The sub contractor's firm (Master Data → Contractors) when engagement is "subcontract" */
+  contractorId?: string;
+  /**
+   * Every site this person works on, as the Owner / SA gave the login (owner, 2026-11-13).
+   * `siteId` stays the home site; unset = the home site only. Use worksAt().
+   */
+  siteIds?: string[];
   /** HR's staff record (round 2, §27) */
   employeeCode?: string;
   joinedOn?: string;

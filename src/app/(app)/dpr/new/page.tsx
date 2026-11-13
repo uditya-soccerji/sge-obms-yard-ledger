@@ -71,7 +71,7 @@ function NewDprPage() {
       if (t === "store") return x.role === "store";
       if (t === "safety") return x.role === "safety" || x.supervisorType === "safety";
       if (t === "scaffolding") return x.supervisorType === "scaffolding";
-      return x.supervisorType === "painting_blasting";
+      return x.supervisorType === "painting_blasting" || x.supervisorType === "rope_access";
     });
   // Field roles file their own DPR; Admin / Owner pick whose DPR it is (first on this site by default)
   const defaultSubmitter = useMemo(

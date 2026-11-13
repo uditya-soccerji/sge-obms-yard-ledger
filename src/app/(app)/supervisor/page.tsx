@@ -36,7 +36,7 @@ function SupervisorHomePage() {
     [state.labourers, supervisorId]
   );
 
-  const isPaintSup = staff?.supervisorType === "painting_blasting";
+  const isPaintSup = staff?.supervisorType === "painting_blasting" || staff?.supervisorType === "rope_access";
   const isScaffoldSup = staff?.supervisorType === "scaffolding";
   const myDprType =
     staff?.supervisorType === "scaffolding"

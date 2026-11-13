@@ -36,6 +36,7 @@ import { PlanWorkLineForm } from "@/components/dpr/plan-work-lines";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { ATTENDANCE_OPTIONS, otHours, timeProblem, WORKING } from "@/lib/attendance";
+import { worksAt } from "@/lib/site-scope";
 
 function uid(prefix: string) {
   return `${prefix}-${Math.random().toString(36).slice(2, 9)}`;
@@ -93,7 +94,7 @@ export function DprForm({
   const equipment = state.equipment.filter((e) => e.siteId === value.siteId);
   // The DPR's site plants (docs §3: every DPR picks one of its site's plants)
   const plants = state.sites.find((x) => x.id === value.siteId)?.plants ?? [];
-  const supervisors = state.staff.filter((x) => x.role === "supervisor" && x.siteId === value.siteId);
+  const supervisors = state.staff.filter((x) => x.role === "supervisor" && worksAt(x, value.siteId));
 
   function setMark(labourerId: string, status: AttendanceStatus) {
     const existing = value.labourMarks.find((m) => m.labourerId === labourerId);

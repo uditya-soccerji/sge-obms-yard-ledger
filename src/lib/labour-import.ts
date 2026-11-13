@@ -12,6 +12,7 @@ import { realToday } from "./today";
 import { normalizeEp } from "./ep";
 import type { Labourer, Site, SkillLevel, StaffMember, TradeDefinition } from "./types";
 import type { Contractor } from "./master/types";
+import { worksAt } from "./site-scope";
 
 export const SKILL_LEVELS: { id: SkillLevel; label: string }[] = [
   { id: "highly_skilled", label: "Highly skilled" },
@@ -233,7 +234,7 @@ export function checkImport(table: string[][], ctx: ImportContext): { rows: Impo
     if (!contractor) r.errors.push(`Contractor "${contractorRaw}" isn't in Master Data → Contractors`);
 
     const supRaw = get("supervisor");
-    const sup = supRaw && site ? ctx.staff.find((s) => s.role === "supervisor" && s.siteId === site.id && norm(s.name) === norm(supRaw)) : undefined;
+    const sup = supRaw && site ? ctx.staff.find((s) => s.role === "supervisor" && worksAt(s, site.id) && norm(s.name) === norm(supRaw)) : undefined;
     if (supRaw && !sup) r.errors.push(`Supervisor "${supRaw}" isn't a supervisor on ${site?.code ?? "that site"}`);
 
     const wageRaw = get("wage");

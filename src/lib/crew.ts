@@ -7,6 +7,7 @@
  */
 import { effectivePermission } from "./permissions";
 import type { CrewRequest, Labourer, PermissionOverride, RoleId, StaffMember, UserAccount } from "./types";
+import { worksAt } from "./site-scope";
 
 /** The per-person right Owner / Super Admin switch on for a supervisor. */
 export const PICK_OWN_CREW: PermissionOverride = { module: "crew", action: "create", allow: true };
@@ -37,7 +38,7 @@ export function crewOf(labourers: Labourer[], supervisorId: string): Labourer[] 
 
 /** Supervisors of a site, for picking whose crew to work on. */
 export function siteSupervisors(staff: StaffMember[], siteId: string): StaffMember[] {
-  return staff.filter((s) => s.role === "supervisor" && s.siteId === siteId);
+  return staff.filter((s) => s.role === "supervisor" && worksAt(s, siteId));
 }
 
 export const isOpenRequest = (r: CrewRequest) => r.status === "requested" || r.status === "released";

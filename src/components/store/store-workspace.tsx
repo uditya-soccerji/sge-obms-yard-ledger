@@ -12,7 +12,7 @@ import { allStoreItems, byPlant, GROUP_LABEL, holdingsOf, IDLE_DAYS, inScope, in
 import { today } from "@/lib/today";
 import { plannedPaintNeed, TYPE6_KEY } from "@/lib/paint-need";
 import { useWork } from "@/lib/work/store";
-import { ALL_SITES, entrySiteId } from "@/lib/site-scope";
+import { ALL_SITES, entrySiteId, worksAt } from "@/lib/site-scope";
 import type { StoreGroup, StoreItem, StoreMove } from "@/lib/types";
 import { cn } from "@/lib/utils";
 import { AddItemForm, IssueForm, OpeningStockUpload, PaintReceiveList, ReceiveForm } from "./store-forms";
@@ -395,7 +395,7 @@ function StockTab({ siteId, scope }: { siteId: string; scope: StockScope }) {
 function Holdings({ siteId, scope }: { siteId: string; scope: StockScope }) {
   const { fullState: state } = useStore();
   const items = allStoreItems(state);
-  const sups = state.staff.filter((x) => x.role === "supervisor" && x.siteId === siteId);
+  const sups = state.staff.filter((x) => x.role === "supervisor" && worksAt(x, siteId));
   const rows = sups.map((s) => ({ s, held: holdingsOf(state.storeMoves.filter((m) => m.siteId === siteId && inScope(items.find((i) => i.id === m.itemId), scope)), s.id) })).filter((r) => r.held.length);
   return (
     <Panel>

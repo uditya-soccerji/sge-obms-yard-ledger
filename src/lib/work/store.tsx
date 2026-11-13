@@ -1,5 +1,6 @@
 "use client";
 
+import { renamedPlant } from "../sites";
 import { masterRequestsTab, PLAN_REQUESTS_TAB, SHEET_NAME, WAGE_REQUESTS_TAB, WAGE_UNDO_MS } from "../wage-requests";
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { canCloseJob, canVoidExpense, JMS_FLOW, currentMonthOf, EXPENSE_CATEGORIES, entryDiffs, finalStage, isMonthClosed, jobJmsQty, lineStatus, nextJmsStatuses, nextJobNo, nextMonth, pickWorkOrder, round3, validMembers, woUsage } from "./logic";
@@ -24,6 +25,7 @@ import { STAGES } from "./types";
 import { passesNeedingAction, showDate } from "../gate-pass";
 import { workTransferSpec, type WorkTransferId } from "../work-transfer";
 import type { TransferPreviewRow } from "../transfer-types";
+import { worksAt } from "../site-scope";
 
 type Result = { ok: true; id?: string; requested?: boolean } | { ok: false; error: string };
 
@@ -123,6 +125,24 @@ function uid(prefix: string) {
 
 const NOT_ALLOWED: Result = { ok: false, error: "Your role can't do this" };
 
+/** DTA's "PRU & HPIB" became "PRU" (owner, 2026-11-13): rename it where Work keeps the plant by name */
+function renameWorkPlants(w: WorkState): WorkState {
+  const r = <T extends { siteId: string; plant: string }>(x: T): T => {
+    const plant = renamedPlant(x.siteId, x.plant);
+    return plant === x.plant ? x : { ...x, plant };
+  };
+  return {
+    ...w,
+    planLines: w.planLines.map(r),
+    reports: w.reports.map(r),
+    submissions: w.submissions.map(r),
+    planRequests: w.planRequests.map((q) => {
+      const plant = renamedPlant(q.input.siteId, q.input.plant);
+      return plant === q.input.plant ? q : { ...q, input: { ...q.input, plant } };
+    }),
+  };
+}
+
 export function WorkProvider({ children }: { children: React.ReactNode }) {
   const [work, setWork] = useState<WorkState>(() => createEmptyWork(today().slice(0, 7)));
   const [hydrated, setHydrated] = useState(false);
@@ -196,7 +216,7 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
       const raw = localStorage.getItem(WORK_STORAGE_KEY);
       if (raw) {
         const saved = JSON.parse(raw) as WorkState;
-        setWork({ ...saved, reports: saved.reports ?? [], submissions: saved.submissions ?? [], paintSteps: saved.paintSteps ?? [], planRequests: saved.planRequests ?? [] });
+        setWork(renameWorkPlants({ ...saved, reports: saved.reports ?? [], submissions: saved.submissions ?? [], paintSteps: saved.paintSteps ?? [], planRequests: saved.planRequests ?? [] }));
       }
     } catch {
       /* keep seed */
@@ -212,7 +232,7 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
       try {
         const saved = JSON.parse(e.newValue) as WorkState;
         fromOtherTab.current = true;
-        setWork({ ...saved, reports: saved.reports ?? [], submissions: saved.submissions ?? [], paintSteps: saved.paintSteps ?? [], planRequests: saved.planRequests ?? [] });
+        setWork(renameWorkPlants({ ...saved, reports: saved.reports ?? [], submissions: saved.submissions ?? [], paintSteps: saved.paintSteps ?? [], planRequests: saved.planRequests ?? [] }));
       } catch {
         /* unreadable copy — keep ours */
       }
@@ -342,7 +362,7 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
     if (isMonthClosed(w, input.siteId, month)) return { ok: false, error: "That month is closed" };
     if (!(input.planM2 > 0)) return { ok: false, error: "Plan m² must be above zero" };
     const sup = staffRef.current.find((x) => x.id === input.supervisorId);
-    if (!sup || sup.role !== "supervisor" || sup.siteId !== input.siteId) {
+    if (!sup || sup.role !== "supervisor" || !worksAt(sup, input.siteId)) {
       return { ok: false, error: "Pick a supervisor who works on this site" };
     }
     // 2026-10-24: the Admin's plan line waits for the SIC / Owner / Super Admin; approval adds it
@@ -390,7 +410,7 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
       return { ok: false, error: "Jobs or work lines are already on this line — the plant and service item can't change" };
     }
     const sup = staffRef.current.find((x) => x.id === next.supervisorId);
-    if (!sup || sup.role !== "supervisor" || sup.siteId !== line.siteId) return { ok: false, error: "Pick a supervisor who works on this site" };
+    if (!sup || sup.role !== "supervisor" || !worksAt(sup, line.siteId)) return { ok: false, error: "Pick a supervisor who works on this site" };
     if (w.planLines.some((l) => l.id !== id && l.month === line.month && l.siteId === line.siteId && l.plant === next.plant && l.serviceCode === next.serviceCode && l.supervisorId === next.supervisorId)) {
       return { ok: false, error: "There's already a line for that plant, service item and supervisor this month — change that one" };
     }
@@ -1074,7 +1094,7 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
     if (qtyL > b.qtyL) return { ok: false, error: `Only ${b.qtyL} L in this batch` };
     const sup = staffRef.current.find((x) => x.id === supervisorId);
     if (!sup || sup.role !== "supervisor") return { ok: false, error: "Pick a supervisor" };
-    if (sup.siteId !== b.siteId) return { ok: false, error: `${sup.name} doesn't work on this batch's site` };
+    if (!worksAt(sup, b.siteId)) return { ok: false, error: `${sup.name} doesn't work on this batch's site` };
     const issued = { ...b, id: uid("pb"), qtyL, supervisorId, issuedOn: today() };
     // Our 941: the issue in the supervisor's name (RIL's 941 no. is added later for reference)
     const step941: PaintStep = { id: uid("ps"), step: "941", batchId: issued.id, supervisorId, sap: b.sap, month: today().slice(0, 7), litres: qtyL, date: today(), by: actor.current.name };

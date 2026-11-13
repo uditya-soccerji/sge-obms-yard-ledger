@@ -6,6 +6,7 @@ import {
 } from "./safety-dpr";
 import { seedMasterCatalog } from "./master/seed-catalog";
 import { seedOtherSites } from "./seed-sites";
+import { applySiteList } from "./sites";
 import { SEED_RATE_LINES } from "./rate-book-seed";
 import type { AppState, AttendanceStatus, DprSafetyBody, TradeDefinition } from "./types";
 import type { DprReport } from "./work/types";
@@ -461,6 +462,7 @@ export function createSeedState(): AppState {
     impersonatorAccountId: null,
     impersonatorSnapshot: null,
     currentSiteId: SITE,
+    // Owner's list with plant codes (2026-11-13) is applied on top in the return below
     sites: [
       {
         id: "site-dta",
@@ -470,7 +472,7 @@ export function createSeedState(): AppState {
         enabled: true,
         rpTags: ["RP2"],
         // Same spelling as the Work plan (docs/merge-plan.md "one plant list per site")
-        plants: ["AROMATIC", "CES", "COKER", "CRUDE", "FCCU", "HYDROGEN", "HYDROTREATER", "PP", "PRU & HPIB", "RTF", "SULPHUR", "UTILITY & ETP"],
+        plants: ["AROMATIC", "CES", "COKER", "CRUDE", "FCCU", "HYDROGEN", "HYDROTREATER", "PP", "PRU", "RTF", "SULPHUR", "UTILITY & ETP"],
       },
       {
         id: "site-mtf",
@@ -1152,6 +1154,7 @@ function withOtherSites(base: AppState): AppState {
     }));
   return {
     ...base,
+    sites: applySiteList(base.sites),
     staff: [...base.staff, ...more.staff],
     labourers: [...base.labourers, ...more.labourers],
     attendance: [...base.attendance, ...dtaRoster, ...more.attendance],

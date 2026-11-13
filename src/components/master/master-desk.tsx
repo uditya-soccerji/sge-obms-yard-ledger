@@ -4,7 +4,7 @@ import { changeBadgeCount, sheetBadgeCount, unseenWageDecisions, WAGE_REQUESTS_T
 import { ChangeRequestsPanel } from "./change-requests";
 import { RequestList } from "@/components/shared/request-list";
 import { Building2, BookOpen, CalendarCheck, Check, ClipboardList, Clock, HardHat, Hourglass, IndianRupee, Layers, ListChecks, MapPin, PaintBucket, Power, ReceiptIndianRupee, Ruler, Save, Send, ShieldCheck, Undo2, Users, Wrench, X, type LucideIcon } from "lucide-react";
-import { CENTRAL_STORE, isCentralStore } from "@/lib/site-scope";
+import { CENTRAL_STORE, isCentralStore, worksAt } from "@/lib/site-scope";
 import React, { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { BlurInput } from "@/components/shared/blur-input";
 import { normalizeEp } from "@/lib/ep";
@@ -30,14 +30,14 @@ import { missingFields } from "@/lib/labourers";
 import { rilStatusProblem, SKILL_LEVELS } from "@/lib/labour-import";
 import { LabourImport } from "./labour-import";
 import { buildPlantDetails, parseRpTags, plantRp, sitePlantDetails } from "@/lib/sites";
-import type { CatalogItem, MasterCatalog, MaterialItem } from "@/lib/master/types";
+import type { CatalogItem, Contractor, MasterCatalog, MaterialItem } from "@/lib/master/types";
 import type { ExperienceLevel, Labourer, PlantDetail, RoleId, Site, SkillLevel, UserAccount } from "@/lib/types";
 import { EXPERIENCE_LEVELS, experienceLabel, suggestedWage } from "@/lib/wages";
 import { ExcelTransfer } from "./excel-transfer";
 import { canExcelTransfer } from "@/lib/excel-io";
 import { entrySiteId } from "@/lib/site-scope";
 import { checkSeat, checkSites, MIN_PASSWORD } from "@/lib/users";
-import type { StaffMember, WageChangeRequest } from "@/lib/types";
+import type { Engagement, StaffMember, WageChangeRequest } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 type ScopeFilter = "site" | "company" | "all";
@@ -253,6 +253,7 @@ function SitesSheet({ showInactive }: { showInactive: boolean }) {
               client: "Reliance Industries Limited",
               enabled: true,
               rpTags: [],
+              plantCode: "",
               plants: [],
               plantDetails: [],
             })
@@ -286,8 +287,9 @@ function SitesSheet({ showInactive }: { showInactive: boolean }) {
         <thead>
           <tr className="text-left text-[10px] uppercase tracking-wider text-[var(--sge-ink-3)]">
             <th className="py-2">Code</th>
+            <th>Plant code</th>
             <th>Name</th>
-            <th>RP</th>
+            <th>RP (server)</th>
             <th>Plants · RP · locations</th>
             <th>State</th>
             <th />
@@ -297,6 +299,7 @@ function SitesSheet({ showInactive }: { showInactive: boolean }) {
           {rows.map((s) => (
             <tr key={s.id} className="border-t border-[var(--sge-line)] align-top">
               <td className="py-2 pr-3 font-mono text-xs">{s.code}</td>
+              <td className="py-2 pr-3 font-mono text-xs">{s.plantCode || "—"}</td>
               <td className="py-2 pr-3">{s.name}</td>
               <td className="whitespace-nowrap py-2 pr-3 text-xs">{s.rpTags.join(" / ") || "—"}</td>
               <td className="py-2 pr-3 text-xs">
@@ -360,8 +363,17 @@ function SiteForm({
         <Input
           className="mt-1"
           value={value.code}
-          placeholder="2–6 capitals, e.g. DTA"
-          onChange={(e) => onChange({ ...value, code: e.target.value.toUpperCase().replace(/[^A-Z]/g, "") })}
+          placeholder="2–6 capitals or digits, e.g. DTA, MTF5"
+          onChange={(e) => onChange({ ...value, code: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6) })}
+        />
+      </div>
+      <div>
+        <Label>Plant code (RIL)</Label>
+        <Input
+          className="mt-1"
+          value={value.plantCode ?? ""}
+          placeholder="e.g. 3611, 36AG — leave empty if none"
+          onChange={(e) => onChange({ ...value, plantCode: e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6) })}
         />
       </div>
       <div>
@@ -532,6 +544,93 @@ function PlantDetailsEditor({
   );
 }
 
+/** Staff designation by supervisor type (owner, 2026-11-13: rope access added) */
+const SUPERVISOR_DESIGNATION: Record<NonNullable<StaffMember["supervisorType"]>, string> = {
+  painting_blasting: "Painting & Blasting Supervisor",
+  scaffolding: "Scaffolding Supervisor",
+  rope_access: "Rope Access Supervisor",
+  safety: "Safety Supervisor",
+};
+
+/**
+ * On payroll or sub contractor (owner, 2026-11-13). Painting & blasting supervisors are
+ * mostly on our payroll, scaffolding mostly sub contract, rope access either. A sub
+ * contractor names the firm from Master Data → Contractors.
+ */
+function EngagementPicker({
+  value,
+  contractorId,
+  contractors,
+  onChange,
+  disabled,
+  compact,
+  className,
+}: {
+  value: Engagement;
+  contractorId: string;
+  contractors: Contractor[];
+  onChange: (engagement: Engagement, contractorId: string) => void;
+  disabled?: boolean;
+  compact?: boolean;
+  className?: string;
+}) {
+  const chip = (on: boolean) =>
+    cn(
+      "rounded-sm border font-semibold",
+      compact ? "px-1.5 py-0.5 text-[10px]" : "px-2.5 py-1 text-xs",
+      on
+        ? "border-[var(--sge-night)] bg-[var(--sge-night)] text-white"
+        : "border-[var(--sge-line)] bg-[var(--sge-paper)] text-[var(--sge-ink-2)] hover:border-[var(--sge-brass)]"
+    );
+  return (
+    <div className={cn("flex flex-wrap items-center gap-1.5", className)}>
+      <div role="radiogroup" aria-label="Employment" className="flex gap-1">
+        {(
+          [
+            ["payroll", "On payroll"],
+            ["subcontract", "Sub contractor"],
+          ] as const
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            role="radio"
+            aria-checked={value === id}
+            disabled={disabled}
+            className={chip(value === id)}
+            onClick={() => onChange(id, id === "subcontract" ? contractorId : "")}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      {value === "subcontract" ? (
+        <select
+          aria-label="Sub contractor"
+          disabled={disabled}
+          className={cn(
+            "rounded-sm border bg-[var(--sge-paper)] px-2",
+            compact ? "h-6 text-[11px]" : "h-8 text-sm",
+            contractorId ? "border-[var(--sge-line)]" : "border-[var(--sge-crit)]/60 text-[var(--sge-crit)]"
+          )}
+          value={contractorId}
+          onChange={(e) => onChange("subcontract", e.target.value)}
+        >
+          <option value="">Pick the sub contractor…</option>
+          {contractors.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+      ) : null}
+      {!compact && value === "subcontract" && !contractors.length ? (
+        <span className="text-[11px] text-[var(--sge-crit)]">No sub contractor on these sites yet — add one in Master Data → Contractors</span>
+      ) : null}
+    </div>
+  );
+}
+
 function UsersSheet({ showInactive }: { showInactive: boolean }) {
   const {
     fullState: state,
@@ -540,6 +639,7 @@ function UsersSheet({ showInactive }: { showInactive: boolean }) {
     setUserPassword,
     startImpersonation,
     addStaff,
+    updateStaff,
   } = useStore();
   const router = useRouter();
   const isSa =
@@ -558,6 +658,12 @@ function UsersSheet({ showInactive }: { showInactive: boolean }) {
   // Who this login belongs to: an existing staff record / labourer, or "new" to create the staff record
   const [link, setLink] = useState<string>("new");
   const [supType, setSupType] = useState<NonNullable<StaffMember["supervisorType"]>>("painting_blasting");
+  // Owner, 2026-11-13: on our payroll or with a sub contractor (scaffolding mostly sub contract)
+  const [engagement, setEngagement] = useState<Engagement>("payroll");
+  const [contractorId, setContractorId] = useState("");
+  const subContractors = state.masterCatalog.contractors.filter(
+    (c) => c.active && !/shree gayatri/i.test(c.name) && (!c.siteId || siteIds.includes(c.siteId))
+  );
   const linkedStaff = new Set(state.users.map((u) => u.staffId).filter(Boolean));
   const linkedLabourers = new Set(state.users.map((u) => u.labourerId).filter(Boolean));
   const staffChoices = state.staff.filter(
@@ -572,10 +678,13 @@ function UsersSheet({ showInactive }: { showInactive: boolean }) {
     ? labourerChoices.some((l) => l.id === link) ? link : ""
     : link === "new" || staffChoices.some((x) => x.id === link) ? link : "new";
 
-  // Supervisors work on one site: picking a role trims the selection to fit
-  const pickRole = (r: RoleId) => {
-    setRole(r);
-    if (r === "supervisor" && siteIds.length > 1) setSiteIds(siteIds.slice(0, 1));
+  // Any role may have several sites (owner, 2026-11-13); the person switches among them in the header
+  const pickRole = (r: RoleId) => setRole(r);
+  const pickSupType = (t: NonNullable<StaffMember["supervisorType"]>) => {
+    setSupType(t);
+    // Usual arrangement as a starting point; rope access is both, so it keeps the current choice
+    if (t === "painting_blasting") setEngagement("payroll");
+    if (t === "scaffolding") setEngagement("subcontract");
   };
 
   return (
@@ -626,12 +735,10 @@ function UsersSheet({ showInactive }: { showInactive: boolean }) {
         </div>
         <div className="sm:col-span-4">
           <Label>Sites</Label>
-          <SitePicker
-            className="mt-1"
-            value={siteIds}
-            single={role === "supervisor"}
-            onChange={setSiteIds}
-          />
+          <SitePicker className="mt-1" value={siteIds} onChange={setSiteIds} />
+          <p className="mt-1 text-[11px] text-[var(--sge-ink-3)]">
+            The sites this person may use. With more than one, they pick the site they&apos;re working on from the header.
+          </p>
         </div>
         <div className="sm:col-span-2">
           <Label>{isLabourerRole ? "Labourer" : "Staff record"}</Label>
@@ -666,11 +773,27 @@ function UsersSheet({ showInactive }: { showInactive: boolean }) {
             <select
               className="mt-1 h-9 w-full rounded-sm border border-[var(--sge-line)] bg-[var(--sge-paper)] px-2 text-sm"
               value={supType}
-              onChange={(e) => setSupType(e.target.value as NonNullable<StaffMember["supervisorType"]>)}
+              onChange={(e) => pickSupType(e.target.value as NonNullable<StaffMember["supervisorType"]>)}
             >
               <option value="painting_blasting">Painting &amp; blasting</option>
               <option value="scaffolding">Scaffolding</option>
+              <option value="rope_access">Rope access</option>
             </select>
+          </div>
+        ) : null}
+        {role === "supervisor" && linkValue === "new" ? (
+          <div className="sm:col-span-4">
+            <Label>Employment</Label>
+            <EngagementPicker
+              className="mt-1"
+              value={engagement}
+              contractorId={contractorId}
+              contractors={subContractors}
+              onChange={(e, c) => {
+                setEngagement(e);
+                setContractorId(c);
+              }}
+            />
           </div>
         ) : null}
         <div className="sm:col-span-4">
@@ -695,14 +818,19 @@ function UsersSheet({ showInactive }: { showInactive: boolean }) {
               // Check here too: the store's result isn't known until React applies the update
               const invalid = checkSeat(input, state.users);
               if (invalid) return setMsg({ ok: false, text: invalid });
+              if (newStaff && role === "supervisor" && engagement === "subcontract" && !contractorId) {
+                return setMsg({ ok: false, text: "Pick the sub contractor this person comes from" });
+              }
               if (newStaff) {
                 const meta = ROLES.find((r) => r.id === role);
                 const staffId = addStaff({
                   name: input.name,
                   role,
                   siteId: siteIds[0],
-                  designation: role === "supervisor" ? (supType === "scaffolding" ? "Scaffolding Supervisor" : "Painting & Blasting Supervisor") : meta?.label ?? role,
+                  ...(siteIds.length > 1 ? { siteIds } : {}),
+                  designation: role === "supervisor" ? SUPERVISOR_DESIGNATION[supType] : meta?.label ?? role,
                   ...(role === "supervisor" ? { supervisorType: supType } : {}),
+                  ...(role === "supervisor" ? { engagement, ...(engagement === "subcontract" ? { contractorId } : {}) } : {}),
                 });
                 if (!staffId) return setMsg({ ok: false, text: "Your role can't create staff records" });
                 input.staffId = staffId;
@@ -714,6 +842,7 @@ function UsersSheet({ showInactive }: { showInactive: boolean }) {
               setName("");
               setPassword("");
               setLink("new");
+              setContractorId("");
             }}
           >
             Add seat
@@ -761,6 +890,9 @@ function UsersSheet({ showInactive }: { showInactive: boolean }) {
                 void updateUser(u.id, { siteIds: ids }).then((r) => {
                   if (!r.ok) setMsg({ ok: false, text: r.error ?? "Failed" });
                 });
+                // The staff record works on the same sites (home site kept when still given)
+                const st = u.staffId ? state.staff.find((x) => x.id === u.staffId) : undefined;
+                if (st) updateStaff(st.id, { siteId: ids.includes(st.siteId) ? st.siteId : ids[0], siteIds: ids.length > 1 ? ids : undefined });
                 return null;
               }}
               onViewAs={() => {
@@ -864,7 +996,7 @@ function UserRow({
   onLink: (staffId: string) => void;
   onCentral: (on: boolean) => void;
 }) {
-  const { fullState: state } = useStore();
+  const { fullState: state, updateStaff } = useStore();
   const linked = user.staffId
     ? state.staff.find((x) => x.id === user.staffId)
     : undefined;
@@ -925,11 +1057,28 @@ function UserRow({
             Central store (all sites)
           </label>
         ) : null}
+        {linked && user.roles.includes("supervisor") ? (
+          <div className="mt-1">
+            {linked.supervisorType ? (
+              <div className="text-[11px] text-[var(--sge-ink-3)]">{SUPERVISOR_DESIGNATION[linked.supervisorType]}</div>
+            ) : null}
+            <EngagementPicker
+              compact
+              disabled={!canEdit}
+              value={linked.engagement ?? "payroll"}
+              contractorId={linked.contractorId ?? ""}
+              contractors={state.masterCatalog.contractors.filter(
+                (c) => c.active && !/shree gayatri/i.test(c.name) && (!c.siteId || user.siteIds.includes(c.siteId))
+              )}
+              onChange={(e, c) => updateStaff(linked.id, { engagement: e, contractorId: e === "subcontract" && c ? c : undefined })}
+            />
+          </div>
+        ) : null}
       </td>
       <td className="py-2 text-xs">
         {editing ? (
           <div className="space-y-1.5">
-            <SitePicker value={ids} single={user.roles.includes("supervisor")} onChange={setIds} />
+            <SitePicker value={ids} onChange={setIds} />
             <div className="flex items-center gap-2">
               <Button
                 size="sm"
@@ -1081,7 +1230,7 @@ function LabourSheet({
   const canDelete = state.currentRole === "owner" || state.currentRole === "super_admin";
   // A supervisor change is a crew change: SIC / Owner / SA only (HR edits everything else)
   const movesCrew = ["sic", "owner", "super_admin"].includes(state.currentRole ?? "");
-  const supervisorsOn = (siteId: string) => state.staff.filter((x) => x.role === "supervisor" && x.siteId === siteId);
+  const supervisorsOn = (siteId: string) => state.staff.filter((x) => x.role === "supervisor" && worksAt(x, siteId));
   const siteCode = (id: string) => state.sites.find((s) => s.id === id)?.code ?? id;
   const rows = useMemo(() => {
     return state.labourers.filter((l) => {

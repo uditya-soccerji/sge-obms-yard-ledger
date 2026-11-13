@@ -13,6 +13,7 @@ import { allStoreItems, batchesFor, GROUP_LABEL, heldBy, inScope, inStore, paint
 import { today } from "@/lib/today";
 import type { EquipmentItem, StoreItem } from "@/lib/types";
 import { useWork } from "@/lib/work/store";
+import { worksAt } from "@/lib/site-scope";
 
 type Msg = { ok: boolean; text: string } | null;
 const show = (m: Msg) => (m ? <p className={m.ok ? "text-sm text-[var(--sge-ok)]" : "text-sm text-[var(--sge-crit)]"}>{m.text}</p> : null);
@@ -235,7 +236,7 @@ export function IssueForm({ siteId, scope }: { siteId: string; scope: StockScope
   const { fullState: state, recordStoreMove } = useStore();
   const { notify } = useWork();
   const items = useMemo(() => allStoreItems(state).filter((i) => inScope(i, scope)), [state, scope]);
-  const supervisors = state.staff.filter((x) => x.role === "supervisor" && x.siteId === siteId);
+  const supervisors = state.staff.filter((x) => x.role === "supervisor" && worksAt(x, siteId));
   const blank = { date: today(), supervisorId: "", plant: "", itemId: "", qty: "", batch: "", note: "" };
   const plants = state.sites.find((x) => x.id === siteId)?.plants ?? [];
   const [f, setF] = useState(blank);

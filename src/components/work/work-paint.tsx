@@ -11,6 +11,7 @@ import { useWork } from "@/lib/work/store";
 import { inStock } from "@/lib/work/paint-steps";
 import { fmtM2, Msg, selectCls, tdCls, thCls, useWorkScope } from "./common";
 import { WorkExcelTransferStack } from "./work-excel-transfer";
+import { worksAt } from "@/lib/site-scope";
 
 const SLICES = [
   { key: "expired", label: "Expired", color: "var(--sge-crit)" },
@@ -46,7 +47,7 @@ export function WorkPaint() {
   const [msg, setMsg] = useState<{ ok: boolean; msg: string } | null>(null);
   const pick = store.find((b) => b.id === batchId);
   // Paint goes only to a supervisor on the batch's own site
-  const supervisors = s.staff.filter((x) => x.role === "supervisor" && (pick ? x.siteId === pick.siteId : s.inSite(x.siteId)));
+  const supervisors = s.staff.filter((x) => x.role === "supervisor" && (pick ? worksAt(x, pick.siteId) : s.inSite(x.siteId) || !!x.siteIds?.some(s.inSite)));
   const sup = supervisors.some((x) => x.id === supPick) ? supPick : supervisors[0]?.id ?? "";
 
   return (

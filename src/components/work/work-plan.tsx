@@ -16,6 +16,7 @@ import { fmtM2, fmtPct, Msg, selectCls, tdCls, thCls, useWorkScope } from "./com
 import { WorkExcelTransferStack } from "./work-excel-transfer";
 import { PlanRequestsPanel } from "./plan-requests";
 import { useStore } from "@/lib/store";
+import { worksAt } from "@/lib/site-scope";
 
 const FLAG = {
   ok: { tone: "ok", label: "Within band" },
@@ -58,7 +59,7 @@ export function WorkPlan() {
   const [f, setF] = useState({ siteId: "", plant: "", serviceCode: work.serviceItems[0]?.code ?? "", planM2: "", supervisorId: "" });
   const formSite = s.allSites ? f.siteId || s.entrySite : s.currentSiteId;
   const [msg, setMsg] = useState<{ ok: boolean; msg: string } | null>(null);
-  const supervisors = s.staff.filter((x) => x.role === "supervisor" && x.siteId === formSite);
+  const supervisors = s.staff.filter((x) => x.role === "supervisor" && worksAt(x, formSite));
   // Keep the pick only while it belongs to this site, else the first supervisor shown
   const supervisorId = supervisors.some((x) => x.id === f.supervisorId) ? f.supervisorId : supervisors[0]?.id ?? "";
   // Master Data is the one plant list (rules §3)
@@ -277,7 +278,7 @@ export function WorkPlan() {
                         <PlanLineEditor
                           line={l}
                           plants={plantsFor(l.siteId)}
-                          supervisors={s.staff.filter((x) => x.role === "supervisor" && x.siteId === l.siteId)}
+                          supervisors={s.staff.filter((x) => x.role === "supervisor" && worksAt(x, l.siteId))}
                           serviceItems={work.serviceItems}
                           onDone={(m) => {
                             setEditing(null);

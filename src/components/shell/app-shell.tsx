@@ -23,6 +23,7 @@ import { useWork } from "@/lib/work/store";
 import { NAV_ICON, useQueueCounts } from "@/lib/queues";
 import type { RoleId } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { siteLabel } from "@/lib/sites";
 
 /** The waiting count on a phone-width tab (same numbers as the desktop bar) */
 function MobileCount({ id }: { id: string }) {
@@ -170,7 +171,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const currentSite = state.sites.find((s) => s.id === state.currentSiteId);
   const siteOff = !!currentSite && !currentSite.enabled;
 
-  const canSwitchSite = canSwitchSites(role);
+  // Owner, 2026-11-13: a login given several sites by the Owner / SA switches among them, whatever its role
+  const canSwitchSite = canSwitchSites(role) || (currentAccount?.siteIds.length ?? 0) > 1;
   // Switched-off sites stay listed (read only there) so nobody is stuck on one (M5)
   const central = role === "store" && isCentralStore(currentAccount);
   const switchableSites = state.sites.filter(
@@ -180,6 +182,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         central ||
         currentAccount?.siteIds.includes(s.id))
   );
+  // Owner, 2026-11-13: the header lists only sites in use; a switched-off site is in Master Data → Sites
+  const pickerSites = switchableSites.filter((s) => s.enabled || s.id === state.currentSiteId);
 
   useEffect(() => {
     if (hydrated && (!role || !currentAccount)) {
@@ -247,22 +251,21 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </div>
           </div>
           <div className="ml-auto flex items-center gap-2 md:ml-0">
-            {canSwitchSite && switchableSites.length > 1 ? (
+            {canSwitchSite && pickerSites.length > 1 ? (
               <Select
                 value={state.currentSiteId}
                 onValueChange={(v) => switchSite(v)}
               >
-                <SelectTrigger className="h-8 w-[9.5rem] rounded-sm border-[rgba(232,133,30,0.35)] bg-[var(--sge-night-2)] text-xs text-[#ffffff]">
+                <SelectTrigger className="h-8 w-[9.5rem] rounded-sm lg:w-[12.5rem] border-[rgba(232,133,30,0.35)] bg-[var(--sge-night-2)] text-xs text-[#ffffff]">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent position="popper">
                   {showAllOption ? (
                     <SelectItem value={ALL_SITES}>All sites</SelectItem>
                   ) : null}
-                  {switchableSites.map((s) => (
+                  {pickerSites.map((s) => (
                     <SelectItem key={s.id} value={s.id}>
-                      {s.code}
-                      {s.rpTags.length ? ` · ${s.rpTags.join("/")}` : ""}
+                      {siteLabel(s)}
                       {s.enabled ? "" : " (off)"}
                     </SelectItem>
                   ))}
@@ -270,24 +273,22 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               </Select>
             ) : (
               <div className="hidden rounded-sm border border-[rgba(232,133,30,0.28)] px-2 py-1.5 font-mono text-[11px] text-[#ffffff] sm:block">
-                {site?.code ?? "—"}
-                {site?.rpTags?.length ? ` · ${site.rpTags.join("/")}` : ""}
+                {site ? siteLabel(site) : "—"}
               </div>
             )}
             {allSites ? (
               <Select value={entrySite?.id} onValueChange={(v) => setEntrySite(v)}>
                 <SelectTrigger
                   title="Site that new entries are saved to while viewing All sites"
-                  className="hidden h-8 w-[10.5rem] rounded-sm border-dashed border-[rgba(232,133,30,0.5)] bg-transparent text-xs text-[#ffffff] md:flex"
+                  className="hidden h-8 w-[11rem] rounded-sm border-dashed lg:w-[15rem] border-[rgba(232,133,30,0.5)] bg-transparent text-xs text-[#ffffff] md:flex"
                 >
                   <span className="mr-1 text-[#b8c0c8]">New →</span>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent position="popper">
-                  {switchableSites.map((s) => (
+                  {switchableSites.filter((s) => s.enabled).map((s) => (
                     <SelectItem key={s.id} value={s.id}>
-                      {s.code}
-                      {s.enabled ? "" : " (off)"}
+                      {siteLabel(s)}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -391,7 +392,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <SheetTitle className="font-heading">SGE Operations Hub</SheetTitle>
           </SheetHeader>
           <div className="space-y-3 p-3">
-            {canSwitchSite && switchableSites.length > 1 ? (
+            {canSwitchSite && pickerSites.length > 1 ? (
               <Select
                 value={state.currentSiteId}
                 onValueChange={(v) => switchSite(v)}
@@ -403,9 +404,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                   {showAllOption ? (
                     <SelectItem value={ALL_SITES}>All sites</SelectItem>
                   ) : null}
-                  {switchableSites.map((s) => (
+                  {pickerSites.map((s) => (
                     <SelectItem key={s.id} value={s.id}>
-                      {s.code} — {s.name}
+                      {siteLabel(s)}
                     </SelectItem>
                   ))}
                 </SelectContent>

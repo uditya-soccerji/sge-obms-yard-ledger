@@ -4,7 +4,7 @@ import { useState } from "react";
 import { EmptyState, Panel, SectionHeader, StatusPill } from "@/components/shared/ui-bits";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { entrySiteId } from "@/lib/site-scope";
+import { entrySiteId, worksAt } from "@/lib/site-scope";
 import { useStore } from "@/lib/store";
 import type { SiteObservation } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -97,7 +97,7 @@ export function SafetyObservationsDesk() {
   const { notify } = useWork();
   const siteId = entrySiteId(state);
   const site = fullState.sites.find((s) => s.id === siteId);
-  const sups = fullState.staff.filter((s) => s.role === "supervisor" && s.siteId === siteId && s.active !== false);
+  const sups = fullState.staff.filter((s) => s.role === "supervisor" && worksAt(s, siteId) && s.active !== false);
   const [plant, setPlant] = useState("");
   const [location, setLocation] = useState("");
   const [text, setText] = useState("");

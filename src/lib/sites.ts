@@ -1,7 +1,76 @@
 import type { PlantDetail, Site } from "./types";
 
-/** Site code: 2–6 capital letters (docs/rules-decisions.md §3). */
-export const SITE_CODE_RE = /^[A-Z]{2,6}$/;
+/** Site code: 2–6 capitals, digits allowed after the first letter, e.g. DTA, MTF5 (docs §3, §33). */
+export const SITE_CODE_RE = /^[A-Z][A-Z0-9]{1,5}$/;
+
+/** How a site reads in the header pickers (owner, 2026-11-13): plant code - site - server, e.g. "3611 - DTA - RP2" */
+export function siteLabel(s: Pick<Site, "name" | "rpTags" | "plantCode">): string {
+  return `${s.plantCode?.trim() || "----"} - ${s.name} - ${s.rpTags.join("/") || "—"}`;
+}
+
+/**
+ * The owner's site list (2026-11-13). Existing sites keep their id so their data stays;
+ * the rest are new. Applied once to saved data by migrateState (a site without a plant
+ * code yet takes these values; anything edited later in Master Data is kept).
+ */
+export const SITE_LIST_2026_11: Pick<Site, "id" | "code" | "name" | "plantCode" | "rpTags" | "client" | "plants">[] = [
+  { id: "site-dta", code: "DTA", name: "DTA", plantCode: "3611", rpTags: ["RP2"], client: "Reliance Industries Limited", plants: [] },
+  { id: "site-mtf", code: "MTF", name: "MTF", plantCode: "3611", rpTags: ["RP2"], client: "Sikka Ports & Terminals Limited", plants: [] },
+  { id: "site-mtf-rp5", code: "MTF5", name: "MTF", plantCode: "3622", rpTags: ["RP5"], client: "Sikka Ports & Terminals Limited", plants: ["MTF"] },
+  { id: "site-swro", code: "SWRO", name: "SWRO", plantCode: "3611", rpTags: ["RP2"], client: "Reliance Industries Limited", plants: ["SWRO"] },
+  { id: "site-jetty", code: "JETTY", name: "Jetty Mech", plantCode: "3622", rpTags: ["RP5"], client: "Sikka Ports & Terminals Limited", plants: [] },
+  { id: "site-marine", code: "MARINE", name: "Marine Ops", plantCode: "3622", rpTags: ["RP5"], client: "Sikka Ports & Terminals Limited", plants: [] },
+  { id: "site-cpp", code: "CPP", name: "CPP", plantCode: "36AG", rpTags: ["RP5"], client: "Reliance Industries Limited", plants: ["CPP"] },
+  { id: "site-pcg", code: "PCG", name: "PCG", plantCode: "36KK", rpTags: ["RP2"], client: "Reliance Syngas Limited", plants: [] },
+  { id: "site-pccs", code: "PCCS", name: "PCG (PCCS)", plantCode: "", rpTags: ["RP2"], client: "Reliance Syngas Limited", plants: ["PCCS"] },
+  { id: "site-hpib", code: "HPIB", name: "HPIB", plantCode: "36IY", rpTags: ["RP2"], client: "Reliance Industries Limited", plants: ["HPIB"] },
+];
+/**
+ * Plants renamed when CPP and HPIB became sites of their own (owner, 2026-11-13): DTA's
+ * "PRU & HPIB" is now "PRU". Plan lines, DPRs and JMS hold the plant by name, so the Work
+ * store renames those too (renameWorkPlants). Safe to run again: the old name never returns.
+ */
+export const PLANT_RENAMES_2026_11: { siteId: string; from: string; to: string }[] = [
+  { siteId: "site-dta", from: "PRU & HPIB", to: "PRU" },
+];
+export function renamedPlant(siteId: string, plant: string): string {
+  const r = PLANT_RENAMES_2026_11.find((x) => x.siteId === siteId && x.from.toUpperCase() === plant.trim().toUpperCase());
+  return r ? r.to : plant;
+}
+
+/** Sites not on the owner's list: switched off (read only, data kept) */
+export const SITES_OFF_2026_11 = ["site-gagva"];
+
+/** Bring saved sites in line with the owner's list, once per site (see SITE_LIST_2026_11) */
+export function applySiteList(sites: Site[]): Site[] {
+  const out = sites.map((s) => {
+    const plants = s.plants.map((p) => renamedPlant(s.id, p));
+    if (plants.some((p, i) => p !== s.plants[i])) {
+      const keep = new Set<string>();
+      s = {
+        ...s,
+        plants: plants.filter((p) => !keep.has(p.toUpperCase()) && keep.add(p.toUpperCase())),
+        plantDetails: (s.plantDetails ?? []).map((d) => ({ ...d, name: renamedPlant(s.id, d.name) })),
+      };
+    }
+    if (s.plantCode !== undefined) return s;
+    const want = SITE_LIST_2026_11.find((w) => w.id === s.id);
+    if (want) return { ...s, name: want.name, plantCode: want.plantCode, rpTags: want.rpTags };
+    if (SITES_OFF_2026_11.includes(s.id)) return { ...s, plantCode: "", enabled: false };
+    return s;
+  });
+  for (const w of SITE_LIST_2026_11) {
+    if (out.some((s) => s.id === w.id)) continue;
+    if (out.some((s) => s.code === w.code)) continue; // a site with that code was added by hand: leave it
+    out.push({ ...w, enabled: true, plantDetails: [] });
+  }
+  // Keep the owner's order in the pickers
+  const rank = (id: string) => {
+    const i = SITE_LIST_2026_11.findIndex((w) => w.id === id);
+    return i < 0 ? 999 : i;
+  };
+  return out.map((s, i) => ({ s, i })).sort((a, b) => rank(a.s.id) - rank(b.s.id) || a.i - b.i).map((x) => x.s);
+}
 
 /** Checks for a new or edited site. Returns an error message, or null when valid. */
 export function checkSite(site: Site, sites: Site[]): string | null {

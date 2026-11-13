@@ -409,3 +409,18 @@ Process page: "Store module — process" (Claude doc). Decisions there: reorder 
 - **Work → Plan layout (2026-10-27):** the **Add to plan** form sits **above** the plan table and stays **pinned** under the header while the list scrolls (the header publishes its height as `--sge-header-h`). Every plan line has **Edit** (plant, service item, plan m², supervisor; plant + item lock once work is on it; Remove when empty) for Admin / SIC / Owner / SA.
 - **Every plan change is in the audit log:** add → `plan_added`, correction → `plan_changed` (what changed: plant / item / plan m² before → after / supervisor), removal → `plan_removed`; each with who and when, shown on the Audit page (and the shared audit log on the live site).
 
+## 33. Site list with RIL plant codes (decided 2026-11-13)
+- The header site pickers read **plant code - site - server (RP)**, e.g. `3611 - DTA - RP2`, after **All sites**: 3611 DTA RP2 · 3611 MTF RP2 · 3622 MTF RP5 · 3611 SWRO RP2 · 3622 Jetty Mech RP5 · 3622 Marine Ops RP5 · 36AG CPP RP5 · 36KK PCG RP2 · ---- PCG (PCCS) RP2 · 36IY HPIB RP2.
+- Existing sites keep their ids (DTA, MTF = 3611 RP2, Marine → Marine Ops, Jetty → Jetty Mech, PCG); new: MTF5 (3622 MTF RP5), SWRO, CPP, PCCS, HPIB. Gagva isn't on the list: switched off (data kept, Master Data → Sites). The header lists only active sites.
+- `Site.plantCode` (RIL plant code; empty when none) is edited in Master Data → Sites. Site codes may now have digits after the first letter (MTF5).
+- The list is applied once per saved site (`applySiteList`), so later edits in Master Data stay.
+- MTF's plants (MTF, ARMA, RRTF) stay under **3611 MTF** with their per-plant RP (owner, 2026-11-13); 3622 MTF RP5 starts with only a placeholder plant "MTF" and no data.
+- CPP and HPIB are sites of their own, not DTA plants (owner, 2026-11-13): DTA's "PRU & HPIB" is renamed **PRU** in the site list and in Work's plan lines, DPRs, RIL JMS and plan requests (`PLANT_RENAMES_2026_11`, `renameWorkPlants`). CPP was never on DTA's list.
+- Before this goes live the shared database needs a `plant_code` column on `sites`.
+
+## 34. Seats: several sites, payroll or sub contractor, rope access (decided 2026-11-13)
+- **Sites:** the Owner / SA tick every site a login may use; any role, supervisors too, can have several (the old "a supervisor works on one site" rule is gone, here and in the `admin-users` edge function). With more than one site the person switches among them in the header and sees only those sites.
+- The linked staff record follows the login's sites (`StaffMember.siteIds`, home site = `siteId`); supervisor pickers, crews, plan lines, DPRs, store and safety screens use `worksAt()` so a multi-site supervisor appears on each of their sites.
+- **Employment** (supervisors): **On payroll** or **Sub contractor** + the firm from Master Data → Contractors (`StaffMember.engagement`, `contractorId`; unset = payroll). Picking Painting & blasting suggests payroll, Scaffolding suggests sub contractor; Rope access keeps whatever was chosen (it is both). Changeable on each supervisor's row in Users / seats.
+- **Rope access** is a supervisor type of its own; its DPR is the painting & blasting DPR (rope access jobs are painting and blasting).
+- Before this goes live: the `admin-users` edge function must be redeployed (it still refuses a supervisor with two sites), and staff records aren't in the shared database yet, so employment lives in each browser like the rest of the staff list.

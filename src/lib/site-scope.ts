@@ -17,6 +17,11 @@ export function canSeeAllSites(role: RoleId | null | undefined, account?: Pick<U
  * Roles that work across sites one at a time (docs §2: HR / Finance / Admin
  * cover all sites; SIC one or more; Owner / Super Admin everything).
  */
+/** Does this staff member work on the site? Home site or any site the Owner / SA gave them. */
+export function worksAt(x: { siteId: string; siteIds?: string[] }, siteId: string): boolean {
+  return x.siteId === siteId || !!x.siteIds?.includes(siteId);
+}
+
 export function canSwitchSites(role: RoleId | null | undefined): boolean {
   return role === "super_admin" || role === "owner" || role === "sic" || role === "admin" || role === "finance" || role === "hr" || role === "store";
 }

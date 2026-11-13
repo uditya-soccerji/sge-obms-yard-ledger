@@ -38,9 +38,9 @@ import {
 import type { CatalogItem, Contractor, MasterCatalog, MaterialItem } from "./master/types";
 import { createSeedState, STORAGE_KEY } from "./seed";
 import type { DprReport } from "./work/types";
-import { ALL_SITES, canSeeAllSites, canSwitchSites, entrySiteId, isCentralStore, landingSite, scopeState } from "./site-scope";
+import { ALL_SITES, canSeeAllSites, canSwitchSites, entrySiteId, isCentralStore, landingSite, scopeState, worksAt } from "./site-scope";
 import { allStoreItems, GROUP_LABEL, heldBy, inStore as ledgerInStore, MOVE_LABEL, normalizeStoreItems, round, seedStoreItems } from "./store-ledger";
-import { checkPlantRps, checkSite } from "./sites";
+import { applySiteList, checkPlantRps, checkSite } from "./sites";
 import { approveBlock, checkCrewRequest } from "./crew";
 import { normalizeEp } from "./ep";
 import { checkLabourer, describeChanges } from "./labourers";
@@ -427,7 +427,8 @@ function migrateState(parsed: Partial<AppState>): AppState {
       // Rows from the RIL upload before upload stamps existed (docs §24): credit the first import
       ...(!l.upload && l.eic && firstImport ? { upload: firstImport } : {}),
     })),
-    sites:
+    // Owner's site list with plant codes (2026-11-13), applied once per site
+    sites: applySiteList(
       parsed.sites && parsed.sites.length >= 6
         ? parsed.sites.map((s) => ({
             ...s,
@@ -435,7 +436,8 @@ function migrateState(parsed: Partial<AppState>): AppState {
             plants: s.plants ?? [],
             plantDetails: s.plantDetails ?? [],
           }))
-        : seed.sites,
+        : seed.sites
+    ),
     wageLedger: parsed.wageLedger ?? seed.wageLedger,
     financeAlerts: parsed.financeAlerts ?? seed.financeAlerts,
     staff: parsed.staff && parsed.staff.length > 0 ? parsed.staff : seed.staff,
@@ -1205,7 +1207,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const s = stateRef.current;
     const account = s.users.find((u) => u.id === s.currentAccountId);
     if (!account) return { ok: false as const, error: "Not signed in" };
-    if (!canSwitchSites(s.currentRole)) {
+    // Owner, 2026-11-13: a login with several sites (given by the Owner / SA) switches among them
+    if (!canSwitchSites(s.currentRole) && account.siteIds.length < 2) {
       return { ok: false as const, error: "Site switch not allowed for this role" };
     }
     if (siteId === ALL_SITES) {
@@ -1747,7 +1750,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     if (!sup) return { ok: false as const, error: "Pick a supervisor", moved: [] };
     const picked = cur.labourers.filter((l) => labourerIds.includes(l.id) && l.active && l.supervisorId !== supervisorId);
     if (!picked.length) return { ok: false as const, error: "Pick at least one labourer not already on this crew", moved: [] };
-    const off = picked.filter((l) => l.siteId !== sup.siteId);
+    const off = picked.filter((l) => !worksAt(sup, l.siteId));
     if (off.length) return { ok: false as const, error: `${off[0].name} works on another site`, moved: [] };
     const moved = picked.map((l) => ({ labourerId: l.id, name: l.name, fromSupervisorId: l.supervisorId || null }));
     const ids = new Set(picked.map((l) => l.id));

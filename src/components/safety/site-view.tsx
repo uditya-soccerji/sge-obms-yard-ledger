@@ -31,7 +31,7 @@ export function SafetySiteView() {
     .sort((a, b) => a.days - b.days);
   const due = kit.filter((k) => k.days <= 30);
 
-  const sups = state.staff.filter((s) => s.role === "supervisor" && sites.has(s.siteId) && s.active !== false);
+  const sups = state.staff.filter((s) => s.role === "supervisor" && [s.siteId, ...(s.siteIds ?? [])].some((id) => sites.has(id)) && s.active !== false);
   const crewOf = (id: string) => state.labourers.filter((l) => l.active && l.supervisorId === id);
 
   return (

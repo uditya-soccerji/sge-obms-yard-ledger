@@ -44,7 +44,7 @@ export function defaultDprSubmitterType(
   if (role === "safety") return "safety";
   if (staff?.supervisorType === "scaffolding") return "scaffolding";
   if (staff?.supervisorType === "safety") return "safety";
-  if (staff?.supervisorType === "painting_blasting") return "painting_blasting";
+  if (staff?.supervisorType === "painting_blasting" || staff?.supervisorType === "rope_access") return "painting_blasting";
   if (role === "supervisor") return "painting_blasting";
   return "painting_blasting";
 }

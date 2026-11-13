@@ -39,10 +39,12 @@ export function checkLink(roles: RoleId[], staffId?: string, labourerId?: string
   return null;
 }
 
-/** Site rules: at least one; supervisors work on exactly one site (they may cover several plants there). */
-export function checkSites(roles: RoleId[], siteIds: string[]): string | null {
+/**
+ * Site rules: at least one. The Owner / SA decide which sites a login may use; any role,
+ * supervisors too, may have several and switches between them in the header (owner, 2026-11-13).
+ */
+export function checkSites(_roles: RoleId[], siteIds: string[]): string | null {
   if (siteIds.length === 0) return "Pick at least one site";
-  if (roles.includes("supervisor") && siteIds.length > 1) return "A supervisor works on one site only";
   return null;
 }
 

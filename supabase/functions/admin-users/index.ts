@@ -61,11 +61,10 @@ Deno.serve(async (req) => {
   // One role per login (§2)
   const validRoles = (roles: unknown) =>
     Array.isArray(roles) && roles.length === 1 && roles.every((r) => ROLES.includes(r));
-  // Supervisors work on exactly one site (src/lib/users.ts checkSites)
-  const siteProblem = (roles: unknown, siteIds: unknown) => {
+  // At least one site; any role may have several (owner, 2026-11-13; src/lib/users.ts checkSites)
+  const siteProblem = (_roles: unknown, siteIds: unknown) => {
     const ids = Array.isArray(siteIds) ? siteIds : [];
     if (!ids.length) return "Pick at least one site";
-    if (Array.isArray(roles) && roles.includes("supervisor") && ids.length > 1) return "A supervisor works on one site only";
     return null;
   };
   // Keep at least one active Super Admin
