@@ -96,6 +96,8 @@ const ROLE_MATRIX: Record<RoleId, Partial<Record<ModuleId, PermissionAction[]>>>
     rates: ["view", "create", "update", "upload"],
     // Round 2 (§27): Admin approves DPR quantities for the SIC, any time
     approvals: ["view", "approve"],
+    // Owner, 2026-11-15: the Admin adds labourers to a supervisor's crew from the DPR (§38)
+    crew: ["view", "approve"],
     // Round 2 (§27): Admin manages Materials and Units (sheets limited in desk.ts + RLS)
     master: ["view", "update"],
   },

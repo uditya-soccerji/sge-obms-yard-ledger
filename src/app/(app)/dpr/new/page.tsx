@@ -67,8 +67,10 @@ function NewDprPage() {
       if (!worksAt(x, site) || x.active === false) return false;
       if (t === "store") return x.role === "store";
       if (t === "safety") return x.role === "safety" || x.supervisorType === "safety";
-      if (t === "scaffolding") return x.supervisorType === "scaffolding";
-      return x.supervisorType === "painting_blasting" || x.supervisorType === "rope_access";
+      // A supervisor whose type isn't picked yet (record rebuilt from the login) is offered too, marked
+      const untyped = x.role === "supervisor" && !x.supervisorType;
+      if (t === "scaffolding") return x.supervisorType === "scaffolding" || untyped;
+      return x.supervisorType === "painting_blasting" || x.supervisorType === "rope_access" || untyped;
     });
   // Field roles file their own DPR; Admin / Owner pick whose DPR it is (first on this site by default)
   const defaultSubmitter = useMemo(
@@ -208,7 +210,7 @@ function NewDprPage() {
               <SelectContent>
                 {submitters.map((s) => (
                   <SelectItem key={s.id} value={s.id}>
-                    {s.name} · {s.designation}
+                    {s.name} · {s.supervisorType || s.role !== "supervisor" ? s.designation ?? s.role : "type not set — pick it in Users / seats"}
                   </SelectItem>
                 ))}
               </SelectContent>

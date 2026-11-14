@@ -793,9 +793,20 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const first = !staffSynced.current;
     const onServer = new Set(rows.map((x) => x.id));
     let extra: StaffMember[] = [];
+    // A record rebuilt from a login has no supervisor type / payroll; this browser's original wins
+    const upgrade = new Map<string, StaffMember>();
+    if (first) {
+      for (const r of rows) {
+        const mine = cur.staff.find((x) => x.id === r.id);
+        if (mine && ((mine.supervisorType && !r.supervisorType) || (mine.engagement && !r.engagement))) {
+          upgrade.set(r.id, { ...r, supervisorType: r.supervisorType ?? mine.supervisorType, engagement: r.engagement ?? mine.engagement, contractorId: r.contractorId ?? mine.contractorId, designation: r.designation ?? mine.designation });
+        }
+      }
+    }
     if (first) {
       // This browser's own records (originals made here, with supervisor type and payroll)
-      extra = cur.staff.filter((x) => !onServer.has(x.id) && !demoStaffIds.has(x.id));
+      const linked = new Set(cur.users.map((a) => a.staffId).filter(Boolean));
+      extra = cur.staff.filter((x) => !onServer.has(x.id) && (!demoStaffIds.has(x.id) || linked.has(x.id)));
       // Logins whose staff record is nowhere: build it from the login (same id, so links hold)
       const known = new Set([...onServer, ...extra.map((x) => x.id)]);
       for (const acc of cur.users) {
@@ -810,7 +821,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     }
     staffSynced.current = new Map(rows.map((x) => [x.id, staffPrint(x)]));
     const pendingIds = new Set(cur.staff.filter((x) => onServer.has(x.id) && staffSynced.current?.get(x.id) !== staffPrint(x) && !first).map((x) => x.id));
-    setState((s) => ({ ...s, staff: [...rows.map((r) => (pendingIds.has(r.id) ? s.staff.find((x) => x.id === r.id) ?? r : r)), ...extra] }));
+    setState((s) => ({ ...s, staff: [...rows.map((r) => upgrade.get(r.id) ?? (pendingIds.has(r.id) ? s.staff.find((x) => x.id === r.id) ?? r : r)), ...extra] }));
     setStaffLoaded(true);
   }, [demoStaffIds]);
 
@@ -829,7 +840,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     const cur = stateRef.current;
     const roles = cur.users.find((x) => x.id === cur.currentAccountId)?.roles ?? [];
     if (!roles.some((r) => STAFF_WRITE_ROLES.includes(r))) return;
-    const changed = cur.staff.filter((x) => !demoStaffIds.has(x.id) && synced.get(x.id) !== staffPrint(x) && cur.sites.some((site) => site.id === x.siteId));
+    // Demo records stay local unless a real login points at them (e.g. the first Super Admin's)
+    const linked = new Set(cur.users.map((a) => a.staffId).filter(Boolean));
+    const changed = cur.staff.filter((x) => (!demoStaffIds.has(x.id) || linked.has(x.id)) && synced.get(x.id) !== staffPrint(x) && cur.sites.some((site) => site.id === x.siteId));
     if (!changed.length) return;
     staffBusy.current = true;
     const res = await remoteSaveStaff(roles, changed);

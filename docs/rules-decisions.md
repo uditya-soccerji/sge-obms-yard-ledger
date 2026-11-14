@@ -446,3 +446,8 @@ Process page: "Store module — process" (Claude doc). Decisions there: reorder 
 - **Table** `staff` (migration 009): same fields and the app's own ids (st-…). Every active login reads; Owner, SA, HR and Admin add and edit; no delete (switch off). `sites.plant_code` holds the RIL plant code (filled for the 10 listed sites).
 - **In the app:** staff load at sign-in and every minute, and every change is sent back. On the first load a writer also sends up this browser's own staff records (not the demo ones) and builds a record from the login for any login whose record exists nowhere (same id, name, role, sites) — supervisor type is then picked on the supervisor's row in Users / seats (red until set).
 - The attendance table (migration 008, §32) was created in the same session; its app change is on the `feat/shared-attendance` branch.
+
+## 38. Crew from the DPR; supervisors without a type (decided 2026-11-15)
+- **Add to crew:** on the Admin's DPR, the labour search (name or EP) offers **Add to crew** — the labourer goes on the submitting supervisor's crew for good (listed on their DPR every day, attendance and wages under that crew) — or **Today only** (marked present on this DPR, crew unchanged). Labourers of crews planned at the plant show an **Add to this crew** link. The Admin now has crew rights (view / approve) alongside the SIC, Owner and SA.
+- **Submitters without a type:** a supervisor whose record was rebuilt from the login has no type yet; they are still offered as a submitter, marked "type not set — pick it in Users / seats".
+- **Originals win:** when a laptop that made the seats first opens the updated app, its records' supervisor type and payroll fill in a rebuilt record that lacks them.

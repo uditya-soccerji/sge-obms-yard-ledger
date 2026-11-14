@@ -75,7 +75,17 @@ export function DprForm({
   /** Admin DPR: save the draft (if new) before a work line is added */
   ensureSaved?: () => { ok: boolean; error?: string; doc?: DprReport };
 }) {
-  const { state } = useStore();
+  const { state, assignCrew } = useStore();
+  // Owner, 2026-11-15: the Admin / SIC / Owner / SA put a labourer on this supervisor's crew from the DPR (§38)
+  const canCrew = ["admin", "sic", "owner", "super_admin"].includes(state.currentRole ?? "") && value.submitterType !== "safety" && value.submitterType !== "store";
+  const [crewMsg, setCrewMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  function addToCrew(labourerId: string) {
+    const r = assignCrew([labourerId], value.submitterId);
+    const name = state.labourers.find((l) => l.id === labourerId)?.name ?? "Labourer";
+    const sup = state.staff.find((x) => x.id === value.submitterId)?.name ?? "this supervisor";
+    setCrewMsg(r.ok ? { ok: true, text: `${name} is now on ${sup}'s crew — listed on their DPR from now on` } : { ok: false, text: r.error ?? "Couldn't add to the crew" });
+    if (r.ok) setFind("");
+  }
   const { work } = useWork();
   // The Admin enters the DPR for a supervisor (attendance tabs, PPE, work from the plan)
   const all = !!value.allSections;
@@ -351,11 +361,12 @@ export function DprForm({
           {crew.length === 0 ? (
             // B03: a new supervisor has no crew yet; say so instead of an empty panel
             <p className="text-sm text-[var(--sge-ink-3)]">
-              No labourers are on this supervisor&apos;s crew yet. The SIC assigns them in{" "}
+              No labourers are on this supervisor&apos;s crew yet.{" "}
+              {canCrew ? "Search above by name or EP and click Add to crew — they stay on this crew for every DPR. Or use " : "The SIC assigns them in "}
               <a className="text-[var(--sge-brass-ink)] underline" href="/operations?p=crew">
                 Operations → Crews
               </a>
-              {" "}(or the supervisor requests them there, if allowed).
+              {canCrew ? "." : " (or the supervisor requests them there, if allowed)."}
             </p>
           ) : null}
           {all && !value.plant ? (
@@ -378,12 +389,22 @@ export function DprForm({
                         <span className="font-semibold">{l.name}</span> · {l.epNumber} ·{" "}
                         {l.supervisorId ? `crew of ${state.staff.find((x) => x.id === l.supervisorId)?.name ?? "?"}` : "not on a crew"}
                       </span>
-                      <Button type="button" size="sm" variant="outline" className="h-7" onClick={() => { setMark(l.id, "present"); setFind(""); }}>
-                        Add as present
-                      </Button>
+                      <span className="flex gap-1">
+                        {canCrew ? (
+                          <Button type="button" size="sm" className="h-7" onClick={() => addToCrew(l.id)}>
+                            Add to crew
+                          </Button>
+                        ) : null}
+                        <Button type="button" size="sm" variant="outline" className="h-7" onClick={() => { setMark(l.id, "present"); setFind(""); }}>
+                          Today only
+                        </Button>
+                      </span>
                     </div>
                   ))}
                 </div>
+              ) : null}
+              {crewMsg ? (
+                <p className={cn("mt-1 text-xs", crewMsg.ok ? "text-[var(--sge-ok)]" : "text-[var(--sge-crit)]")}>{crewMsg.text}</p>
               ) : null}
               {find.trim() ? (
                 <p className="mt-1 text-[11px] text-[var(--sge-ink-3)]">
@@ -416,6 +437,11 @@ export function DprForm({
                     <div className="text-xs text-[var(--sge-ink-3)]">
                       {state.tradeCatalogue.find((t) => t.id === l.trade)?.label ?? l.trade} · {l.epNumber}
                       {!own ? <> · {crewOf ? `crew of ${crewOf}` : "not on a crew"}</> : null}
+                      {!own && canCrew && !readOnly ? (
+                        <button type="button" className="ml-2 text-[11px] font-semibold text-[var(--sge-brass-ink)] underline" onClick={() => addToCrew(l.id)}>
+                          Add to this crew
+                        </button>
+                      ) : null}
                     </div>
                   </div>
                   {all ? (
