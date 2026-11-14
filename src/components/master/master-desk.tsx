@@ -631,6 +631,7 @@ function EngagementPicker({
   );
 }
 
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- the sheet-wide toggle; seats use their own Deactivated box
 function UsersSheet({ showInactive }: { showInactive: boolean }) {
   const {
     fullState: state,
@@ -648,7 +649,10 @@ function UsersSheet({ showInactive }: { showInactive: boolean }) {
   // Only a Super Admin grants or touches Super Admin (M2)
   const roleChoices = ROLES.filter((r) => isSa || r.id !== "super_admin");
   const [showPw, setShowPw] = useState(false);
-  const rows = state.users.filter((u) => showInactive || u.active);
+  // Owner, 2026-11-14: the list holds active seats only; deactivated ones sit in their own box
+  const rows = state.users.filter((u) => u.active);
+  const deactivated = state.users.filter((u) => !u.active).sort((a, b) => (a.name || a.username).localeCompare(b.name || b.username));
+  const [showDeactivated, setShowDeactivated] = useState(false);
   const [name, setName] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -864,6 +868,70 @@ function UsersSheet({ showInactive }: { showInactive: boolean }) {
           ) : null}
         </div>
       </div>
+      <div className="mb-3">
+        <button
+          type="button"
+          aria-expanded={showDeactivated}
+          onClick={() => setShowDeactivated((v) => !v)}
+          className={cn(
+            "inline-flex items-center gap-2 rounded-sm border px-3 py-1.5 text-xs font-semibold",
+            showDeactivated ? "border-[var(--sge-night)] bg-[var(--sge-night)] text-white" : "border-[var(--sge-line)] bg-[var(--sge-paper)] text-[var(--sge-ink-2)] hover:border-[var(--sge-brass)]"
+          )}
+        >
+          Deactivated
+          <span className={cn("rounded-sm px-1.5 font-mono", showDeactivated ? "bg-white/20" : "bg-[var(--sge-paper-2)]")}>{deactivated.length}</span>
+          <span aria-hidden>{showDeactivated ? "▴" : "▾"}</span>
+        </button>
+        {showDeactivated ? (
+          <div className="mt-2 rounded-sm border border-[var(--sge-line)] bg-[var(--sge-linen)] p-2">
+            {deactivated.length === 0 ? (
+              <p className="px-1 py-2 text-xs text-[var(--sge-ink-3)]">No deactivated seats.</p>
+            ) : (
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-left text-[10px] uppercase tracking-wider text-[var(--sge-ink-3)]">
+                    <th className="py-1.5">User</th>
+                    <th>Role</th>
+                    <th>Sites</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {deactivated.map((u) => {
+                    const mayTouch = canEdit && (isSa || !u.roles.includes("super_admin"));
+                    return (
+                      <tr key={u.id} className="border-t border-[var(--sge-line)] align-top">
+                        <td className="py-1.5">
+                          <div className="font-medium">{u.name || u.username}</div>
+                          <div className="font-mono text-[11px] text-[var(--sge-ink-3)]">@{u.username}</div>
+                        </td>
+                        <td className="py-1.5 text-xs">{u.roles.join(", ")}</td>
+                        <td className="py-1.5 text-xs">
+                          {siteCodes(state, u.siteIds) || "—"}
+                          <span className="text-[var(--sge-ink-3)]"> · {u.plantIds.length ? u.plantIds.join(", ") : "all plants"}</span>
+                        </td>
+                        <td className="py-1.5 text-right">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            disabled={!mayTouch}
+                            onClick={async () => {
+                              const r = await updateUser(u.id, { active: true });
+                              setMsg(r.ok ? { ok: true, text: `@${u.username} is active again` } : { ok: false, text: r.error ?? "Failed" });
+                            }}
+                          >
+                            Activate
+                          </Button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            )}
+          </div>
+        ) : null}
+      </div>
       <table className="w-full text-sm">
         <thead>
           <tr className="text-left text-[10px] uppercase tracking-wider text-[var(--sge-ink-3)]">
@@ -884,7 +952,7 @@ function UsersSheet({ showInactive }: { showInactive: boolean }) {
               isMe={u.id === state.currentAccountId}
               onToggle={async () => {
                 const r = await updateUser(u.id, { active: !u.active });
-                if (!r.ok) setMsg({ ok: false, text: r.error ?? "Failed" });
+                setMsg(r.ok ? { ok: true, text: `@${u.username} deactivated — find them under Deactivated` } : { ok: false, text: r.error ?? "Failed" });
               }}
               onResetPassword={async (pw) => {
                 const r = await setUserPassword(u.id, pw);
