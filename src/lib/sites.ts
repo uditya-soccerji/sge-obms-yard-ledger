@@ -41,6 +41,29 @@ export function renamedPlant(siteId: string, plant: string): string {
 /** Sites not on the owner's list: switched off (read only, data kept) */
 export const SITES_OFF_2026_11 = ["site-gagva"];
 
+/**
+ * Sites as the shared database has them, plus what the database can't hold yet (owner, 2026-11-14):
+ * the plant code from the owner's list (no plant_code column yet), and any listed site the database
+ * doesn't have (saved there by the next Owner / SA sign-in). Names, RPs and on / off come from the
+ * database as edited in Master Data → Sites — never overridden here.
+ */
+export function withPlantCodes(dbSites: Site[]): Site[] {
+  const out: Site[] = dbSites.map((s) => {
+    const want = SITE_LIST_2026_11.find((w) => w.id === s.id);
+    const plants = s.plants.map((p) => renamedPlant(s.id, p));
+    return { ...s, plants, plantCode: s.plantCode ?? want?.plantCode ?? "" };
+  });
+  for (const w of SITE_LIST_2026_11) {
+    if (out.some((s) => s.id === w.id || s.code === w.code)) continue;
+    out.push({ ...w, enabled: true, plantDetails: [] });
+  }
+  const rank = (id: string) => {
+    const i = SITE_LIST_2026_11.findIndex((w) => w.id === id);
+    return i < 0 ? 999 : i;
+  };
+  return out.map((s, i) => ({ s, i })).sort((a, b) => rank(a.s.id) - rank(b.s.id) || a.i - b.i).map((x) => x.s);
+}
+
 /** Bring saved sites in line with the owner's list, once per site (see SITE_LIST_2026_11) */
 export function applySiteList(sites: Site[]): Site[] {
   const out = sites.map((s) => {

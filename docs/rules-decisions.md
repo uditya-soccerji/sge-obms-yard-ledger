@@ -417,6 +417,7 @@ Process page: "Store module — process" (Claude doc). Decisions there: reorder 
 - MTF's plants (MTF, ARMA, RRTF) stay under **3611 MTF** with their per-plant RP (owner, 2026-11-13); 3622 MTF RP5 starts with only a placeholder plant "MTF" and no data.
 - CPP and HPIB are sites of their own, not DTA plants (owner, 2026-11-13): DTA's "PRU & HPIB" is renamed **PRU** in the site list and in Work's plan lines, DPRs, RIL JMS and plan requests (`PLANT_RENAMES_2026_11`, `renameWorkPlants`). CPP was never on DTA's list.
 - **Same list on every device (2026-11-14):** the list is applied at sign-in too (not only when a browser reloads its saved copy), and sites on the list that the shared database doesn't have yet (MTF5, SWRO, CPP, PCCS, HPIB) are saved to it the next time an Owner / Super Admin signs in.
+- **Master Data wins (2026-11-14):** the database now holds the agreed names and RPs (3611 MTF RP2 — owner chose "MTF" over "OMSH" — Jetty Mech, Marine Ops, PCG RP2, Gagva off). At sign-in the app only adds plant codes (and any listed site the database lacks); names, RPs and on / off are whatever Master Data → Sites says (`withPlantCodes`).
 - Still to do: a `plant_code` column on `sites` in the shared database; until then plant codes come from the app's list, so a code edited in Master Data → Sites stays on that device.
 
 ## 34. Seats: several sites, payroll or sub contractor, rope access (decided 2026-11-13)

@@ -40,7 +40,7 @@ import { createSeedState, STORAGE_KEY } from "./seed";
 import type { DprReport } from "./work/types";
 import { ALL_SITES, canSeeAllSites, canSwitchSites, entrySiteId, isCentralStore, landingSite, scopeState, worksAt } from "./site-scope";
 import { allStoreItems, GROUP_LABEL, heldBy, inStore as ledgerInStore, MOVE_LABEL, normalizeStoreItems, round, seedStoreItems } from "./store-ledger";
-import { applySiteList, checkPlantRps, checkSite } from "./sites";
+import { applySiteList, checkPlantRps, checkSite, withPlantCodes } from "./sites";
 import { approveBlock, checkCrewRequest } from "./crew";
 import { normalizeEp } from "./ep";
 import { checkLabourer, describeChanges } from "./labourers";
@@ -635,10 +635,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const master = await remoteLoadMaster();
       const role = me.roles[0];
       const s = stateRef.current;
-      // Owner, 2026-11-14: the owner's site list (plant codes, MTF RP5, SWRO, CPP, PCCS, HPIB) is
-      // applied here too, so every device shows the same list straight after sign-in, not only after
-      // a refresh. The database has no plant-code column yet; codes come from the app's list (§33).
-      const listed = sites.length ? applySiteList(sites) : s.sites;
+      // Owner, 2026-11-14: every device shows the same sites straight after sign-in. Names, RPs and
+      // on / off are the database's (Master Data → Sites); only plant codes come from the app's list,
+      // as the database has no plant-code column yet (§33).
+      const listed = sites.length ? withPlantCodes(sites) : s.sites;
       const siteId = landingSite(role, me.siteIds, s.currentSiteId, me);
       const next: AppState = {
         ...s,
