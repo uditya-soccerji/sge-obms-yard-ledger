@@ -635,12 +635,16 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const master = await remoteLoadMaster();
       const role = me.roles[0];
       const s = stateRef.current;
+      // Owner, 2026-11-14: the owner's site list (plant codes, MTF RP5, SWRO, CPP, PCCS, HPIB) is
+      // applied here too, so every device shows the same list straight after sign-in, not only after
+      // a refresh. The database has no plant-code column yet; codes come from the app's list (§33).
+      const listed = sites.length ? applySiteList(sites) : s.sites;
       const siteId = landingSite(role, me.siteIds, s.currentSiteId, me);
       const next: AppState = {
         ...s,
         masterCatalog: master ?? s.masterCatalog,
         users,
-        sites: sites.length ? sites : s.sites,
+        sites: listed,
         currentAccountId: me.id,
         currentRole: role,
         currentUserId: me.staffId ?? me.labourerId ?? null,
@@ -651,6 +655,17 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const entry = makeAudit(next, "users", "login", `Signed in as ${me.username} (${role})`);
       // The audit sync below sends this login line to the shared log
       setState({ ...next, auditLog: [entry, ...s.auditLog] });
+      // Sites on the list but not in the shared database yet are saved once, by the Owner / SA
+      // (the only roles the database lets write sites), so labourers and DPRs can use them
+      if (sites.length && me.roles.some((r) => r === "owner" || r === "super_admin")) {
+        const missing = listed.filter((x) => !sites.some((d) => d.id === x.id));
+        void (async () => {
+          for (const site of missing) {
+            const r = await remoteSaveSite(site);
+            if (!r.ok) console.error("site not saved", site.code, r.error);
+          }
+        })();
+      }
       return { ok: true as const, role };
     },
     [mockLogin]

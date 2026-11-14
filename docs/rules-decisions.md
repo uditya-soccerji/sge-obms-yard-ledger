@@ -416,7 +416,8 @@ Process page: "Store module — process" (Claude doc). Decisions there: reorder 
 - The list is applied once per saved site (`applySiteList`), so later edits in Master Data stay.
 - MTF's plants (MTF, ARMA, RRTF) stay under **3611 MTF** with their per-plant RP (owner, 2026-11-13); 3622 MTF RP5 starts with only a placeholder plant "MTF" and no data.
 - CPP and HPIB are sites of their own, not DTA plants (owner, 2026-11-13): DTA's "PRU & HPIB" is renamed **PRU** in the site list and in Work's plan lines, DPRs, RIL JMS and plan requests (`PLANT_RENAMES_2026_11`, `renameWorkPlants`). CPP was never on DTA's list.
-- Before this goes live the shared database needs a `plant_code` column on `sites`.
+- **Same list on every device (2026-11-14):** the list is applied at sign-in too (not only when a browser reloads its saved copy), and sites on the list that the shared database doesn't have yet (MTF5, SWRO, CPP, PCCS, HPIB) are saved to it the next time an Owner / Super Admin signs in.
+- Still to do: a `plant_code` column on `sites` in the shared database; until then plant codes come from the app's list, so a code edited in Master Data → Sites stays on that device.
 
 ## 34. Seats: several sites, payroll or sub contractor, rope access (decided 2026-11-13)
 - **Sites:** the Owner / SA tick every site a login may use; any role, supervisors too, can have several (the old "a supervisor works on one site" rule is gone, here and in the `admin-users` edge function). With more than one site the person switches among them in the header and sees only those sites.
