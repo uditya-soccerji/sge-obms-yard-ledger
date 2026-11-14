@@ -654,6 +654,8 @@ function UsersSheet({ showInactive }: { showInactive: boolean }) {
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<RoleId>("supervisor");
   const [siteIds, setSiteIds] = useState<string[]>([entrySiteId(state)]);
+  // Owner, 2026-11-14: plants on the seat's sites (none = every plant)
+  const [plantIds, setPlantIds] = useState<string[]>([]);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   // Who this login belongs to: an existing staff record / labourer, or "new" to create the staff record
   const [link, setLink] = useState<string>("new");
@@ -740,6 +742,13 @@ function UsersSheet({ showInactive }: { showInactive: boolean }) {
             The sites this person may use. With more than one, they pick the site they&apos;re working on from the header.
           </p>
         </div>
+        <div className="sm:col-span-4">
+          <Label>Plants</Label>
+          <PlantPicker className="mt-1" siteIds={siteIds} value={keepPlants(state, siteIds, plantIds)} onChange={setPlantIds} />
+          <p className="mt-1 text-[11px] text-[var(--sge-ink-3)]">
+            Tick the plants this person works at; leave &quot;All plants&quot; for every plant on that site.
+          </p>
+        </div>
         <div className="sm:col-span-2">
           <Label>{isLabourerRole ? "Labourer" : "Staff record"}</Label>
           <select
@@ -808,7 +817,7 @@ function UsersSheet({ showInactive }: { showInactive: boolean }) {
                 name: name.trim(),
                 roles: [role],
                 siteIds,
-                plantIds: [],
+                plantIds: keepPlants(state, siteIds, plantIds),
                 permissionOverrides: [],
                 active: true,
                 // "pending" stands in for the staff record created just below
@@ -837,7 +846,8 @@ function UsersSheet({ showInactive }: { showInactive: boolean }) {
               }
               const r = await createUser(input);
               if (!r.ok) return setMsg({ ok: false, text: r.error ?? "Failed" });
-              setMsg({ ok: true, text: `Created @${input.username} · ${siteCodes(state, siteIds)}` });
+              setMsg({ ok: true, text: `Created @${input.username} · ${siteCodes(state, siteIds)}${input.plantIds.length ? ` · ${input.plantIds.join(", ")}` : ""}` });
+              setPlantIds([]);
               setUsername("");
               setName("");
               setPassword("");
@@ -884,10 +894,10 @@ function UsersSheet({ showInactive }: { showInactive: boolean }) {
                 });
                 return r.ok;
               }}
-              onSites={(ids) => {
+              onSites={(ids, plants) => {
                 const bad = checkSites(u.roles, ids);
                 if (bad) return bad;
-                void updateUser(u.id, { siteIds: ids }).then((r) => {
+                void updateUser(u.id, { siteIds: ids, plantIds: keepPlants(state, ids, plants) }).then((r) => {
                   if (!r.ok) setMsg({ ok: false, text: r.error ?? "Failed" });
                 });
                 // The staff record works on the same sites (home site kept when still given)
@@ -921,6 +931,71 @@ function UsersSheet({ showInactive }: { showInactive: boolean }) {
 
 function siteCodes(state: { sites: Site[] }, ids: string[]) {
   return ids.map((id) => state.sites.find((s) => s.id === id)?.code ?? id).join(", ");
+}
+
+/** Plants a seat keeps when its sites change: only plants still on one of its sites */
+function keepPlants(state: { sites: Site[] }, siteIds: string[], plantIds: string[]): string[] {
+  const allowed = new Set(state.sites.filter((x) => siteIds.includes(x.id)).flatMap((x) => x.plants.map((p) => p.toUpperCase())));
+  return plantIds.filter((p) => allowed.has(p.toUpperCase()));
+}
+
+/**
+ * Plants for a seat (owner, 2026-11-14): each picked site's plants as chips. None ticked = every
+ * plant on its sites (the DPR desk and Requests use this scope). Stored by plant name.
+ */
+function PlantPicker({
+  siteIds,
+  value,
+  onChange,
+  className,
+}: {
+  siteIds: string[];
+  value: string[];
+  onChange: (plants: string[]) => void;
+  className?: string;
+}) {
+  const { fullState: state } = useStore();
+  const sites = state.sites.filter((x) => siteIds.includes(x.id) && x.plants.length);
+  const has = (p: string) => value.some((v) => v.toUpperCase() === p.toUpperCase());
+  const chip = (on: boolean) =>
+    cn(
+      "rounded-sm border px-2 py-0.5 text-[11px] font-semibold",
+      on
+        ? "border-[var(--sge-brass-ink)] bg-[var(--sge-brass)] text-white"
+        : "border-[var(--sge-line)] bg-[var(--sge-paper)] text-[var(--sge-ink-2)] hover:border-[var(--sge-brass)]"
+    );
+  if (!sites.length) return <p className={cn("text-[11px] text-[var(--sge-ink-3)]", className)}>Pick a site to see its plants.</p>;
+  return (
+    <div className={cn("space-y-1.5", className)}>
+      {sites.map((site) => {
+        const mine = site.plants.filter(has);
+        return (
+          <div key={site.id} className="flex flex-wrap items-center gap-1.5">
+            <span className="w-16 shrink-0 font-mono text-[11px] font-semibold text-[var(--sge-ink-2)]">{site.code}</span>
+            <button
+              type="button"
+              className={chip(mine.length === 0)}
+              title="No plant ticked = every plant on this site"
+              onClick={() => onChange(value.filter((v) => !site.plants.some((p) => p.toUpperCase() === v.toUpperCase())))}
+            >
+              All plants
+            </button>
+            {site.plants.map((p) => (
+              <button
+                key={p}
+                type="button"
+                aria-pressed={has(p)}
+                className={chip(has(p))}
+                onClick={() => onChange(has(p) ? value.filter((v) => v.toUpperCase() !== p.toUpperCase()) : [...value, p])}
+              >
+                {p}
+              </button>
+            ))}
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 /** Toggle chips for sites; "All sites" picks every enabled site (not for supervisors). */
@@ -991,7 +1066,7 @@ function UserRow({
   /** Resolves true when the password was changed */
   onResetPassword: (password: string) => Promise<boolean>;
   /** Returns an error message, or null when saved */
-  onSites: (ids: string[]) => string | null;
+  onSites: (ids: string[], plantIds: string[]) => string | null;
   onViewAs: () => void;
   onLink: (staffId: string) => void;
   onCentral: (on: boolean) => void;
@@ -1007,6 +1082,7 @@ function UserRow({
   );
   const [editing, setEditing] = useState(false);
   const [ids, setIds] = useState(user.siteIds);
+  const [plants, setPlants] = useState(user.plantIds);
   const [err, setErr] = useState<string | null>(null);
   const [pwOpen, setPwOpen] = useState(false);
   const [pw1, setPw1] = useState("");
@@ -1079,23 +1155,25 @@ function UserRow({
         {editing ? (
           <div className="space-y-1.5">
             <SitePicker value={ids} onChange={setIds} />
+            <PlantPicker siteIds={ids} value={keepPlants(state, ids, plants)} onChange={setPlants} />
             <div className="flex items-center gap-2">
               <Button
                 size="sm"
                 onClick={() => {
-                  const bad = onSites(ids);
+                  const bad = onSites(ids, plants);
                   if (bad) return setErr(bad);
                   setErr(null);
                   setEditing(false);
                 }}
               >
-                Save sites
+                Save sites &amp; plants
               </Button>
               <Button
                 size="sm"
                 variant="ghost"
                 onClick={() => {
                   setIds(user.siteIds);
+                  setPlants(user.plantIds);
                   setErr(null);
                   setEditing(false);
                 }}
@@ -1108,16 +1186,18 @@ function UserRow({
         ) : (
           <div className="flex flex-wrap items-center gap-2">
             <span>{siteCodes(state, user.siteIds) || "—"}</span>
+            <span className="text-[11px] text-[var(--sge-ink-3)]">· {user.plantIds.length ? user.plantIds.join(", ") : "all plants"}</span>
             {canEdit ? (
               <button
                 type="button"
                 className="text-[11px] text-[var(--sge-brass-ink)] underline"
                 onClick={() => {
                   setIds(user.siteIds);
+                  setPlants(user.plantIds);
                   setEditing(true);
                 }}
               >
-                Edit sites
+                Edit sites &amp; plants
               </button>
             ) : null}
           </div>
