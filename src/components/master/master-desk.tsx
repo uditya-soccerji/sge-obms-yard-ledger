@@ -233,10 +233,92 @@ function SheetBody({
   );
 }
 
+/**
+ * Owner, 2026-11-14: deactivated rows leave a sheet's main list and sit in this box; it opens a
+ * list with an Activate button per row (Users / seats, Labourers, Contractors, Sites).
+ */
+function DeactivatedBox<T extends { id: string }>({
+  items,
+  headers,
+  cells,
+  onActivate,
+  canActivate = () => true,
+  searchText,
+  noun = "rows",
+}: {
+  items: T[];
+  headers: string[];
+  cells: (x: T) => React.ReactNode[];
+  onActivate: (x: T) => Promise<unknown> | unknown;
+  canActivate?: (x: T) => boolean;
+  /** Text to search on; gives the box its own search (long lists such as labourers) */
+  searchText?: (x: T) => string;
+  noun?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState("");
+  const LIMIT = 200;
+  const query = q.trim().toLowerCase();
+  const shown = searchText && query ? items.filter((x) => searchText(x).toLowerCase().includes(query)) : items;
+  return (
+    <div className="mb-3">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+        className={cn(
+          "inline-flex items-center gap-2 rounded-sm border px-3 py-1.5 text-xs font-semibold",
+          open ? "border-[var(--sge-night)] bg-[var(--sge-night)] text-white" : "border-[var(--sge-line)] bg-[var(--sge-paper)] text-[var(--sge-ink-2)] hover:border-[var(--sge-brass)]"
+        )}
+      >
+        Deactivated
+        <span className={cn("rounded-sm px-1.5 font-mono", open ? "bg-white/20" : "bg-[var(--sge-paper-2)]")}>{items.length}</span>
+        <span aria-hidden>{open ? "▴" : "▾"}</span>
+      </button>
+      {open ? (
+        <div className="mt-2 rounded-sm border border-[var(--sge-line)] bg-[var(--sge-linen)] p-2">
+          {searchText && items.length ? (
+            <Input aria-label="Search deactivated" className="mb-2 h-8 text-xs" placeholder="Search deactivated — name, EP, code…" value={q} onChange={(e) => setQ(e.target.value)} />
+          ) : null}
+          {items.length === 0 ? (
+            <p className="px-1 py-2 text-xs text-[var(--sge-ink-3)]">No deactivated {noun}.</p>
+          ) : shown.length === 0 ? (
+            <p className="px-1 py-2 text-xs text-[var(--sge-ink-3)]">No deactivated {noun} match.</p>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-[10px] uppercase tracking-wider text-[var(--sge-ink-3)]">
+                  {headers.map((h) => <th key={h} className="py-1.5 pr-2">{h}</th>)}
+                  <th />
+                </tr>
+              </thead>
+              <tbody>
+                {shown.slice(0, LIMIT).map((x) => (
+                  <tr key={x.id} className="border-t border-[var(--sge-line)] align-top">
+                    {cells(x).map((c, i) => <td key={i} className="py-1.5 pr-2 text-xs">{c}</td>)}
+                    <td className="py-1.5 text-right">
+                      <Button size="sm" variant="outline" disabled={!canActivate(x)} onClick={() => void onActivate(x)}>
+                        Activate
+                      </Button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          {shown.length > LIMIT ? <p className="mt-1 text-[11px] text-[var(--sge-ink-3)]">Showing {LIMIT} of {shown.length} — search to narrow.</p> : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+// eslint-disable-next-line @typescript-eslint/no-unused-vars -- deactivated sites sit in their own box
 function SitesSheet({ showInactive }: { showInactive: boolean }) {
   const { fullState: state, upsertSite } = useStore();
   const report = useReport();
-  const rows = state.sites.filter((s) => showInactive || s.enabled);
+  const rows = state.sites.filter((s) => s.enabled);
+  const offSites = state.sites.filter((s) => !s.enabled);
   const [draft, setDraft] = useState<Site | null>(null);
   const [formErr, setFormErr] = useState<string | null>(null);
 
@@ -283,6 +365,13 @@ function SitesSheet({ showInactive }: { showInactive: boolean }) {
           }}
         />
       ) : null}
+      <DeactivatedBox
+        noun="sites"
+        items={offSites}
+        headers={["Code", "Plant code", "Name", "RP"]}
+        cells={(x) => [<span key="c" className="font-mono">{x.code}</span>, x.plantCode || "—", x.name, x.rpTags.join(" / ") || "—"]}
+        onActivate={async (x) => report(await upsertSite({ ...x, enabled: true }))}
+      />
       <table className="w-full text-sm">
         <thead>
           <tr className="text-left text-[10px] uppercase tracking-wider text-[var(--sge-ink-3)]">
@@ -1342,7 +1431,6 @@ export function LabourRegister() {
 
 function LabourSheet({
   scope,
-  showInactive,
 }: {
   scope: ScopeFilter;
   showInactive: boolean;
@@ -1382,13 +1470,18 @@ function LabourSheet({
   const siteCode = (id: string) => state.sites.find((s) => s.id === id)?.code ?? id;
   const rows = useMemo(() => {
     return state.labourers.filter((l) => {
-      if (!showInactive && !l.active) return false;
+      // Owner, 2026-11-14: deactivated labourers sit in their own box
+      if (!l.active) return false;
       if (!matchScope(l.siteId, activeSite, scope)) return false;
       if (!q.trim()) return true;
       const hay = `${l.name} ${l.epNumber} ${l.trade} ${l.skill ?? ""} ${l.eic ?? ""} ${l.rilStatus ?? ""} ${(l.epHistory ?? []).map((h) => h.ep).join(" ")}`.toLowerCase();
       return hay.includes(q.trim().toLowerCase());
     });
-  }, [state.labourers, activeSite, scope, showInactive, q]);
+  }, [state.labourers, activeSite, scope, q]);
+  const offLabourers = useMemo(
+    () => state.labourers.filter((l) => !l.active && matchScope(l.siteId, activeSite, scope)).sort((a, b) => a.name.localeCompare(b.name)),
+    [state.labourers, activeSite, scope]
+  );
 
   const blank = () => ({
     name: "",
@@ -1486,6 +1579,14 @@ function LabourSheet({
         ) : null}
         <span className="text-xs text-[var(--sge-ink-3)]">{rows.length} rows</span>
       </div>
+      <DeactivatedBox
+        noun="labourers"
+        items={offLabourers}
+        headers={["Name", "EP", "Trade", "Site", "RIL pass"]}
+        cells={(l) => [l.name, <span key="ep" className="font-mono">{l.epNumber}</span>, state.tradeCatalogue.find((t) => t.id === l.trade)?.label ?? l.trade, siteCode(l.siteId), l.rilStatus || "—"]}
+        searchText={(l) => `${l.name} ${l.epNumber} ${l.trade}`}
+        onActivate={(l) => report(updateLabourer(l.id, { active: true }))}
+      />
       {form ? (
         <div className="mb-4 grid gap-2 rounded-sm border border-[var(--sge-line)] bg-[var(--sge-linen)] p-3 sm:grid-cols-4">
           <div>
@@ -1782,17 +1883,15 @@ function LabourSheet({
 
 function ContractorsSheet({
   scope,
-  showInactive,
 }: {
   scope: ScopeFilter;
   showInactive: boolean;
 }) {
   const { fullState: state, upsertContractor, setContractorActive } = useStore();
   const report = useReport();
-  const rows = state.masterCatalog.contractors.filter((c) => {
-    if (!showInactive && !c.active) return false;
-    return matchScope(c.siteId, entrySiteId(state), scope);
-  });
+  const inScope = state.masterCatalog.contractors.filter((c) => matchScope(c.siteId, entrySiteId(state), scope));
+  const rows = inScope.filter((c) => c.active);
+  const offContractors = inScope.filter((c) => !c.active);
   return (
     <Panel>
       <div className="mb-3">
@@ -1813,6 +1912,14 @@ function ContractorsSheet({
           Add contractor
         </Button>
       </div>
+      <DeactivatedBox
+        noun="contractors"
+        items={offContractors}
+        headers={["Code", "Name", "Scope"]}
+        cells={(c) => [<span key="c" className="font-mono">{c.code}</span>, c.name, c.siteId ? state.sites.find((x) => x.id === c.siteId)?.code : "Company"]}
+        searchText={(c) => `${c.code} ${c.name}`}
+        onActivate={async (c) => report(await setContractorActive(c.id, true))}
+      />
       <table className="w-full text-sm">
         <thead>
           <tr className="text-left text-[10px] uppercase tracking-wider text-[var(--sge-ink-3)]">
