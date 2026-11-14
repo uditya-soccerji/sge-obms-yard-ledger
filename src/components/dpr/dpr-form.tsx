@@ -35,7 +35,7 @@ import { JobEntryForm } from "@/components/work/work-jobs";
 import { PlanWorkLineForm } from "@/components/dpr/plan-work-lines";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
-import { ATTENDANCE_OPTIONS, otHours, timeProblem, WORKING } from "@/lib/attendance";
+import { ATTENDANCE_OPTIONS } from "@/lib/attendance";
 import { worksAt } from "@/lib/site-scope";
 
 function uid(prefix: string) {
@@ -135,8 +135,9 @@ export function DprForm({
             ? {
                 ...m,
                 status,
-                inTime: WORKING.includes(status) ? m.inTime ?? "08:00" : undefined,
-                outTime: WORKING.includes(status) ? m.outTime ?? (status === "half" ? "13:00" : "18:00") : undefined,
+                // Owner, 2026-11-14: no in / out times on labour attendance — a status only
+                inTime: undefined,
+                outTime: undefined,
               }
             : m
         )
@@ -145,12 +146,9 @@ export function DprForm({
           {
             labourerId,
             status,
-            inTime: WORKING.includes(status) ? "08:00" : undefined,
-            outTime: WORKING.includes(status) ? (status === "half" ? "13:00" : "18:00") : undefined,
           },
         ];
-    // Admin DPR (2026-10-27): Present / Absent without times — times are typed only if wanted
-    onChange({ ...value, labourMarks: all ? labourMarks.map((m) => (m.labourerId === labourerId && !existing ? { ...m, inTime: undefined, outTime: undefined } : m)) : labourMarks });
+    onChange({ ...value, labourMarks });
   }
 
   function setPpe(labourerId: string, ppe: NonNullable<DprLabourMark["ppe"]>) {
@@ -187,12 +185,6 @@ export function DprForm({
     });
   }
 
-  function setTime(labourerId: string, key: "inTime" | "outTime", v: string) {
-    onChange({
-      ...value,
-      labourMarks: value.labourMarks.map((m) => (m.labourerId === labourerId ? { ...m, [key]: v || undefined } : m)),
-    });
-  }
 
   function toggleEquipment(equipmentId: string) {
     const exists = value.equipmentMarks.find(
@@ -455,12 +447,6 @@ export function DprForm({
                           ))}
                         </select>
                       </div>
-                      {mark && WORKING.includes(mark.status) ? (
-                        <>
-                          <Input aria-label={`In-time ${l.name}`} type="time" disabled={readOnly} className="h-8 w-[104px] text-xs" value={mark.inTime ?? ""} onChange={(e) => setTime(l.id, "inTime", e.target.value)} />
-                          <Input aria-label={`Out-time ${l.name}`} type="time" disabled={readOnly} className="h-8 w-[104px] text-xs" value={mark.outTime ?? ""} onChange={(e) => setTime(l.id, "outTime", e.target.value)} />
-                        </>
-                      ) : null}
                       <div role="group" aria-label={`PPE ${l.name}`} className="inline-flex items-center overflow-hidden rounded-md border border-[var(--sge-line)] text-xs">
                         <span className="bg-[var(--sge-paper-2)] px-2 py-1.5 font-semibold text-[var(--sge-ink-3)]">PPE</span>
                         {PPE_OPTIONS.map((o) => (
@@ -497,17 +483,6 @@ export function DprForm({
                         ))}
                       </SelectContent>
                     </Select>
-                    {mark && WORKING.includes(mark.status) ? (
-                      <>
-                        <Input aria-label={`In-time ${l.name}`} type="time" disabled={readOnly} className="h-8 w-[104px] text-xs" value={mark.inTime ?? ""} onChange={(e) => setTime(l.id, "inTime", e.target.value)} />
-                        <Input aria-label={`Out-time ${l.name}`} type="time" disabled={readOnly} className="h-8 w-[104px] text-xs" value={mark.outTime ?? ""} onChange={(e) => setTime(l.id, "outTime", e.target.value)} />
-                        {timeProblem(mark.inTime, mark.outTime) ? (
-                          <span className="text-[11px] text-[var(--sge-crit)]">{timeProblem(mark.inTime, mark.outTime)}</span>
-                        ) : otHours(mark.inTime, mark.outTime) > 0 ? (
-                          <span className="text-[11px] font-semibold text-[var(--sge-warn)]">OT {otHours(mark.inTime, mark.outTime)} h</span>
-                        ) : null}
-                      </>
-                    ) : null}
                   </div>
                   )}
                 </div>
