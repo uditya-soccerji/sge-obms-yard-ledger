@@ -629,8 +629,9 @@ export interface DprLabourMark {
   inTime?: string;
   outTime?: string;
   note?: string;
-  /** PPE on the day (Admin DPR, 2026-10-27); damaged / urgent go to the store keeper on submit */
-  ppe?: "ok" | "damaged" | "urgent";
+  /** PPE on the day (Admin DPR, 2026-10-27); damaged / due / urgent go to the store keeper on submit
+   *  and, since 2026-11-14, each one is also a line in the DPR's requests to the store */
+  ppe?: "ok" | "damaged" | "due" | "urgent";
   /** The store dealt with it (issued / replaced) */
   ppeHandledBy?: string;
   ppeHandledAt?: string;
@@ -659,6 +660,8 @@ export interface DprRequest {
   qty?: number;
   urgent?: boolean;
   reason?: RequestReason;
+  /** Raised by a PPE mark on this DPR (2026-11-14): the labourer it's for; follows the mark */
+  ppeFor?: string;
 }
 
 export interface DprScaffoldWorkLine {

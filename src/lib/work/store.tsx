@@ -870,11 +870,11 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
     }
     if (sent.issues?.trim()) log({ kind: "dpr_issue", problem: true, siteId: r.siteId, subjectStaffId: r.submitterId, title: `Issue on ${r.plant} · DPR ${r.date}`, detail: sent.issues.trim(), tab: `/dpr/${id}`, refId: id });
     // 2026-10-27: PPE damaged / urgently needed goes to the store keeper with every submitted DPR
-    const ppe = r.labourMarks.filter((m) => m.ppe === "damaged" || m.ppe === "urgent");
+    const ppe = r.labourMarks.filter((m) => m.ppe === "damaged" || m.ppe === "due" || m.ppe === "urgent");
     if (ppe.length) {
       const urgent = ppe.filter((m) => m.ppe === "urgent").length;
       const ok = r.labourMarks.filter((m) => m.ppe === "ok").length;
-      log({ kind: "ppe_flag", problem: urgent > 0, siteId: r.siteId, subjectStaffId: r.submitterId, title: `PPE · ${urgent} urgent, ${ppe.length - urgent} damaged · DPR ${r.date}`, detail: `${ok} OK · ${r.plant || "site"} · Store Keeper dashboard`, tab: "/home", refId: id });
+      log({ kind: "ppe_flag", problem: urgent > 0, siteId: r.siteId, subjectStaffId: r.submitterId, title: `PPE · ${urgent} urgent, ${ppe.length - urgent} damaged / due · DPR ${r.date}`, detail: `${ok} OK · ${r.plant || "site"} · Store Keeper dashboard`, tab: "/home", refId: id });
     }
     return { ok: true };
   }, [log]);

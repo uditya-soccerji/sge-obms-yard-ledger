@@ -316,3 +316,8 @@ Rules in `rules-decisions.md` §24.
 - Waiting on the owner's real pay file to confirm the column names.
 - Checked locally as HR: SOURAV MAHATO Oct 2026 → Wage ₹7,150 new, Food ₹1,500 → ₹1,600 changed, 4 lines already in; NOBODY's EP and month "13/2026" refused. Profile: ₹7,150 + ₹500 − ₹6,672 = ₹978 net. Finance's bell summary shows the upload. `tsc` + `eslint src` clean.
 
+
+## Round 3 (owner, 2026-11-14) — New DPR as Admin
+### R3-01: Painting & Blasting DPR shows other types' supervisors and sections; labour list is the whole site; PPE doesn't reach the store
+- Fixed locally (docs §36): submitter list by type and site, only that type's sections, crew + plant crews + search for the rest, PPE Damaged / Due / Urgent → request to the store.
+- Checked as @admin on DTA: submitters V. Chauhan, K. Solanki only; sections Header, Labour attendance, Equipment, Requests to the store, Work lines; PPE Damaged / Due / Urgent on three labourers → three Safety & PPE requests (reasons Damaged / Replacement / Urgent); back to OK removes it.

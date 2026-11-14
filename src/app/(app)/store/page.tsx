@@ -27,7 +27,7 @@ function StoreHomePage() {
 
   const storeDprs = reports.filter((d) => d.submitterType === "store");
   // Tab counts: PPE flagged on submitted DPRs not yet handled; machinery at Fault
-  const ppeWaiting = reports.filter((r) => r.status === "submitted" || r.status === "sic_approved").reduce((t, r) => t + r.labourMarks.filter((m) => (m.ppe === "damaged" || m.ppe === "urgent") && !m.ppeHandledAt).length, 0);
+  const ppeWaiting = reports.filter((r) => r.status === "submitted" || r.status === "sic_approved").reduce((t, r) => t + r.labourMarks.filter((m) => (m.ppe === "damaged" || m.ppe === "due" || m.ppe === "urgent") && !m.ppeHandledAt).length, 0);
   const faults_n = state.equipment.filter((e) => e.status === "fault" && !e.scrapped).length;
 
   return (

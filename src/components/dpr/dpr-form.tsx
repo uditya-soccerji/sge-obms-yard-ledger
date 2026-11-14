@@ -46,6 +46,7 @@ function uid(prefix: string) {
 export const PPE_OPTIONS: { value: NonNullable<DprLabourMark["ppe"]>; label: string; on: string }[] = [
   { value: "ok", label: "OK", on: "bg-[var(--sge-ok)] text-white" },
   { value: "damaged", label: "Damaged", on: "bg-[var(--sge-warn)] text-white" },
+  { value: "due", label: "Due", on: "bg-[var(--sge-brass)] text-white" },
   { value: "urgent", label: "Urgent required", on: "bg-[var(--sge-crit)] text-white" },
 ];
 
@@ -75,21 +76,51 @@ export function DprForm({
   ensureSaved?: () => { ok: boolean; error?: string; doc?: DprReport };
 }) {
   const { state } = useStore();
-  // 2026-10-27: the Admin's DPR opens every section at once, with the whole site's labourers
+  const { work } = useWork();
+  // The Admin enters the DPR for a supervisor (attendance tabs, PPE, work from the plan)
   const all = !!value.allSections;
-  const crew = useMemo(
-    () =>
-      state.labourers.filter(
-        (l) =>
-          l.active &&
-          (all
-            ? l.siteId === value.siteId
-            : value.submitterType === "safety" ||
-              value.submitterType === "store" ||
-              l.supervisorId === value.submitterId)
-      ),
-    [state.labourers, value.submitterId, value.submitterType, value.siteId, all]
-  );
+  // Owner, 2026-11-14: the supervisor's own crew first, then the others working at this site and
+  // plant — labourers not on any crew yet, and the crews of supervisors planned at this plant this
+  // month. Only the supervisor's own crew must be marked to submit (docs §36).
+  const { crew, others } = useMemo(() => {
+    const own = state.labourers.filter((l) => l.active && l.supervisorId === value.submitterId);
+    if (!all || value.submitterType === "safety" || value.submitterType === "store") {
+      return { crew: value.submitterType === "safety" || value.submitterType === "store" ? state.labourers.filter((l) => l.active) : own, others: [] as typeof own };
+    }
+    const month = (value.date || "").slice(0, 7);
+    const plant = value.plant.trim().toUpperCase();
+    const atPlant = new Set(
+      plant
+        ? work.planLines.filter((p) => p.siteId === value.siteId && p.month === month && p.plant.trim().toUpperCase() === plant).map((p) => p.supervisorId)
+        : []
+    );
+    const ownIds = new Set(own.map((l) => l.id));
+    // Crews of the supervisors planned at this plant; people on no crew are found with the search below
+    const rest = state.labourers.filter(
+      (l) => l.active && !ownIds.has(l.id) && l.siteId === value.siteId && !!l.supervisorId && atPlant.has(l.supervisorId)
+    );
+    return { crew: own, others: rest };
+  }, [state.labourers, work.planLines, value.submitterId, value.submitterType, value.siteId, value.plant, value.date, all]);
+  // Anyone else on the site (mostly people on no crew yet), found by name or EP
+  const [find, setFind] = useState("");
+  const found = useMemo(() => {
+    const q = find.trim().toLowerCase();
+    if (!all || q.length < 2) return [];
+    // People already on the list are found by the filter above; this adds the rest of the site
+    const shown = new Set([...crew, ...others].map((l) => l.id).concat(value.labourMarks.map((m) => m.labourerId)));
+    return state.labourers
+      .filter((l) => l.active && l.siteId === value.siteId && !shown.has(l.id) && (l.name.toLowerCase().includes(q) || l.epNumber.toLowerCase().includes(q)))
+      .slice(0, 8);
+  }, [find, all, crew, others, state.labourers, value.siteId, value.labourMarks]);
+  // Others already marked on this DPR stay listed even if the plant changes
+  const listed = useMemo(() => {
+    const ids = new Set([...crew, ...others].map((l) => l.id));
+    const marked = state.labourers.filter((l) => !ids.has(l.id) && value.labourMarks.some((m) => m.labourerId === l.id));
+    const rows = [...crew.map((l) => ({ l, own: true })), ...others.map((l) => ({ l, own: false })), ...marked.map((l) => ({ l, own: false }))];
+    // Owner, 2026-11-14: the search box narrows the list by name or EP
+    const q = find.trim().toLowerCase();
+    return q ? rows.filter(({ l }) => l.name.toLowerCase().includes(q) || l.epNumber.toLowerCase().includes(q)) : rows;
+  }, [crew, others, state.labourers, value.labourMarks, find]);
 
   const equipment = state.equipment.filter((e) => e.siteId === value.siteId);
   // The DPR's site plants (docs §3: every DPR picks one of its site's plants)
@@ -124,11 +155,35 @@ export function DprForm({
 
   function setPpe(labourerId: string, ppe: NonNullable<DprLabourMark["ppe"]>) {
     const has = value.labourMarks.some((m) => m.labourerId === labourerId);
+    // Owner, 2026-11-14: damaged / due / urgent PPE is a request to the store on this DPR
+    const l = state.labourers.find((x) => x.id === labourerId);
+    const others = value.requests.filter((r) => r.ppeFor !== labourerId);
+    const kept = value.requests.find((r) => r.ppeFor === labourerId);
+    const reason: DprRequest["reason"] = ppe === "urgent" ? "urgent" : ppe === "due" ? "replacement" : "damaged";
+    const label = PPE_OPTIONS.find((o) => o.value === ppe)?.label ?? ppe;
+    const requests =
+      ppe === "ok"
+        ? others
+        : [
+            ...others,
+            {
+              id: kept?.id ?? uid("req"),
+              kind: "material" as const,
+              category: "Safety & PPE",
+              item: kept?.item,
+              description: `PPE for ${l?.name ?? "labourer"}${l?.epNumber ? ` (${l.epNumber})` : ""} — ${label}`,
+              qty: kept?.qty ?? 1,
+              reason,
+              urgent: ppe === "urgent",
+              ppeFor: labourerId,
+            },
+          ];
     onChange({
       ...value,
       labourMarks: has
         ? value.labourMarks.map((m) => (m.labourerId === labourerId ? { ...m, ppe } : m))
         : [...value.labourMarks, { labourerId, status: "present", ppe }],
+      requests,
     });
   }
 
@@ -252,7 +307,7 @@ export function DprForm({
             rows={2}
           />
         </div>
-        {all || value.submitterType === "painting_blasting" || value.submitterType === "scaffolding" ? (
+        {value.submitterType === "painting_blasting" || value.submitterType === "scaffolding" ? (
           <div className="mt-3 grid gap-3 sm:grid-cols-3">
             <label className="flex items-center gap-2 text-sm">
               <Checkbox
@@ -296,11 +351,10 @@ export function DprForm({
         ) : null}
       </Panel>
 
-      {all || (value.submitterType !== "store" &&
-      value.submitterType !== "safety") ? (
+      {value.submitterType !== "store" && value.submitterType !== "safety" ? (
         <Panel>
           <h3 className="mb-3 font-heading text-sm font-bold uppercase tracking-wide text-[var(--sge-ink-3)]">
-            Labour attendance{all ? ` · whole site (${crew.length})` : ""}
+            Labour attendance{all ? ` · crew ${crew.length}${others.length ? ` + ${others.length} others at ${value.plant || "this site"}` : ""}` : ""}
           </h3>
           {crew.length === 0 ? (
             // B03: a new supervisor has no crew yet; say so instead of an empty panel
@@ -312,18 +366,64 @@ export function DprForm({
               {" "}(or the supervisor requests them there, if allowed).
             </p>
           ) : null}
+          {all && !value.plant ? (
+            <p className="mb-2 text-xs text-[var(--sge-ink-3)]">Pick the plant to also list the crews planned there this month.</p>
+          ) : null}
+          {crew.length || others.length || all ? (
+            <div className="mb-2">
+              <Input
+                aria-label="Search labour by name or EP"
+                className="h-9 text-sm"
+                placeholder={all && !readOnly ? "Search labour — name or EP number (also finds others on this site to add)" : "Search labour — name or EP number"}
+                value={find}
+                onChange={(e) => setFind(e.target.value)}
+              />
+              {found.length ? (
+                <div className="mt-1 divide-y divide-[var(--sge-line)] rounded-md border border-[var(--sge-line)]">
+                  {found.map((l) => (
+                    <div key={l.id} className="flex items-center justify-between gap-2 px-2 py-1 text-xs">
+                      <span>
+                        <span className="font-semibold">{l.name}</span> · {l.epNumber} ·{" "}
+                        {l.supervisorId ? `crew of ${state.staff.find((x) => x.id === l.supervisorId)?.name ?? "?"}` : "not on a crew"}
+                      </span>
+                      <Button type="button" size="sm" variant="outline" className="h-7" onClick={() => { setMark(l.id, "present"); setFind(""); }}>
+                        Add as present
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+              {find.trim() ? (
+                <p className="mt-1 text-[11px] text-[var(--sge-ink-3)]">
+                  {listed.length ? `${listed.length} on this DPR match` : "No one on this DPR matches"}
+                  {all && !readOnly && find.trim().length >= 2 ? (found.length ? ` · ${found.length} more at this site below` : " · no one else at this site matches") : ""}
+                  {" · "}
+                  <button type="button" className="underline" onClick={() => setFind("")}>clear</button>
+                </p>
+              ) : null}
+            </div>
+          ) : null}
           <div className="space-y-2">
-            {crew.map((l) => {
+            {listed.map(({ l, own }, i) => {
               const mark = value.labourMarks.find((m) => m.labourerId === l.id);
+              const crewOf = l.supervisorId ? state.staff.find((x) => x.id === l.supervisorId)?.name : undefined;
+              const heading =
+                all && i === 0 && own ? `Crew of ${state.staff.find((x) => x.id === value.submitterId)?.name ?? "this supervisor"}`
+                : all && !own && (i === 0 || listed[i - 1].own) ? `Others at ${value.plant || "this site"} — not on this crew`
+                : null;
               return (
+                <div key={l.id}>
+                {heading ? (
+                  <div className="mb-1 mt-3 text-[11px] font-semibold uppercase tracking-wide text-[var(--sge-ink-3)]">{heading}</div>
+                ) : null}
                 <div
-                  key={l.id}
                   className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-[var(--sge-line)] px-3 py-2"
                 >
                   <div>
                     <div className="text-sm font-semibold">{l.name}</div>
                     <div className="text-xs text-[var(--sge-ink-3)]">
                       {state.tradeCatalogue.find((t) => t.id === l.trade)?.label ?? l.trade} · {l.epNumber}
+                      {!own ? <> · {crewOf ? `crew of ${crewOf}` : "not on a crew"}</> : null}
                     </div>
                   </div>
                   {all ? (
@@ -410,6 +510,7 @@ export function DprForm({
                     ) : null}
                   </div>
                   )}
+                </div>
                 </div>
               );
             })}
@@ -659,9 +760,9 @@ export function DprForm({
         )}
       </Panel>
 
-      {all || value.submitterType === "painting_blasting" ? <JobLines report={value} readOnly={readOnly} ensureSaved={all ? ensureSaved : undefined} /> : null}
+      {value.submitterType === "painting_blasting" ? <JobLines report={value} readOnly={readOnly} ensureSaved={all ? ensureSaved : undefined} /> : null}
 
-      {(all || value.submitterType === "scaffolding") && value.scaffoldWork ? (
+      {value.submitterType === "scaffolding" && value.scaffoldWork ? (
         <ScaffoldWorkEditor
           lines={value.scaffoldWork}
           plants={plants}
@@ -670,7 +771,7 @@ export function DprForm({
         />
       ) : null}
 
-      {(all || value.submitterType === "safety") && value.safetyBody ? (
+      {value.submitterType === "safety" && value.safetyBody ? (
         <SafetyDprForm
           body={value.safetyBody}
           readOnly={readOnly}
@@ -678,7 +779,7 @@ export function DprForm({
         />
       ) : null}
 
-      {(all || value.submitterType === "store") && value.storeBody ? (
+      {value.submitterType === "store" && value.storeBody ? (
         <Panel>
           <h3 className="mb-3 font-heading text-sm font-bold uppercase tracking-wide text-[var(--sge-ink-3)]">
             Store body

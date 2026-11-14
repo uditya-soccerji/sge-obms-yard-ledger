@@ -20,7 +20,7 @@ import {
 } from "@/lib/paint-lifecycle";
 import { useStore } from "@/lib/store";
 import { useWork } from "@/lib/work/store";
-import { entrySiteId } from "@/lib/site-scope";
+import { entrySiteId, worksAt } from "@/lib/site-scope";
 import type { DprSubmitterType } from "@/lib/types";
 import type { DprReport } from "@/lib/work/types";
 
@@ -31,17 +31,13 @@ const TYPE_LABEL: Record<DprSubmitterType, string> = {
   store: "Store Keeper",
 };
 
-/** Open every section on a new DPR: scaffolding, safety and store bodies alongside the work lines */
-function withAllSections(d: DprReport, on: boolean): DprReport {
-  if (!on) return d;
-  const filled = (t: DprSubmitterType) => blankDpr({ submitterId: d.submitterId, submitterType: t, siteId: d.siteId });
-  return {
-    ...d,
-    allSections: true,
-    scaffoldWork: d.scaffoldWork ?? filled("scaffolding").scaffoldWork,
-    safetyBody: d.safetyBody ?? filled("safety").safetyBody,
-    storeBody: d.storeBody ?? filled("store").storeBody,
-  };
+/**
+ * The Admin enters the DPR on a supervisor's behalf (attendance tabs, PPE, work from the plan).
+ * Owner, 2026-11-14: only the chosen type's sections show — a Painting & Blasting DPR has no
+ * scaffolding, safety or store section (docs §36).
+ */
+function adminEntry(d: DprReport, on: boolean): DprReport {
+  return on ? { ...d, allSections: true } : d;
 }
 
 function NewDprPage() {
@@ -67,7 +63,8 @@ function NewDprPage() {
   /** Staff on this DPR's site who file this type of DPR */
   const submittersFor = (t: DprSubmitterType) =>
     state.staff.filter((x) => {
-      if (x.siteId !== site) return false;
+      // Anyone who works on this site (home site or one the Owner / SA gave them)
+      if (!worksAt(x, site) || x.active === false) return false;
       if (t === "store") return x.role === "store";
       if (t === "safety") return x.role === "safety" || x.supervisorType === "safety";
       if (t === "scaffolding") return x.supervisorType === "scaffolding";
@@ -87,7 +84,7 @@ function NewDprPage() {
   // 2026-10-27: the Admin's DPR has every section open (no type restrictions)
   const allSections = state.currentRole === "admin";
   const [doc, setDoc] = useState<DprReport>(() =>
-    withAllSections(
+    adminEntry(
       blankDpr({
         submitterId: defaultSubmitter,
         submitterType: defaultType,
@@ -104,27 +101,20 @@ function NewDprPage() {
     setSubmitterType(t);
     const sid = fieldRole ? state.currentUserId ?? "" : submittersFor(t)[0]?.id ?? "";
     setSubmitterId(sid);
-    // Keep what the Admin already typed; only whose DPR it is changes
-    setDoc((d) =>
-      allSections
-        ? { ...d, submitterId: sid, submitterType: t }
-        : blankDpr({
-            submitterId: sid,
-            submitterType: t,
-            siteId: entrySiteId(state),
-          })
-    );
+    // A new type starts its own form (its sections only); the Admin keeps date, plant and notes
+    setDoc((d) => {
+      const fresh = adminEntry(blankDpr({ submitterId: sid, submitterType: t, siteId: entrySiteId(state) }), allSections);
+      return allSections ? { ...fresh, id: d.id, date: d.date, plant: d.plant, note: d.note, issues: d.issues, nextDayPlan: d.nextDayPlan } : fresh;
+    });
   }
 
   /** The DPR as it will be saved (an Admin DPR keeps every section) */
   function prepared() {
     const next = { ...doc, submitterId, submitterType };
-    if (!allSections) {
-      // Keep only the body for this type
-      if (submitterType !== "scaffolding") next.scaffoldWork = undefined;
-      if (submitterType !== "safety") next.safetyBody = undefined;
-      if (submitterType !== "store") next.storeBody = undefined;
-    }
+    // Keep only the body for this type (the Admin's DPR too, docs §36)
+    if (submitterType !== "scaffolding") next.scaffoldWork = undefined;
+    if (submitterType !== "safety") next.safetyBody = undefined;
+    if (submitterType !== "store") next.storeBody = undefined;
     return next;
   }
 
@@ -208,7 +198,8 @@ function NewDprPage() {
               value={submitterId}
               onValueChange={(v) => {
                 setSubmitterId(v);
-                setDoc({ ...doc, submitterId: v });
+                // Another supervisor = another crew: marks and PPE requests start again
+                setDoc({ ...doc, submitterId: v, labourMarks: [], requests: doc.requests.filter((r) => !r.ppeFor) });
               }}
             >
               <SelectTrigger className="mt-1">

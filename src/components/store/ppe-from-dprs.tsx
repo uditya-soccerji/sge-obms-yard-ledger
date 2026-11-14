@@ -21,7 +21,7 @@ export function PpeFromDprs() {
   const labourer = (id: string) => state.labourers.find((l) => l.id === id);
   const rows = reports
     .filter((r) => r.status === "submitted" || r.status === "sic_approved")
-    .flatMap((r) => r.labourMarks.filter((m) => (m.ppe === "damaged" || m.ppe === "urgent") && !m.ppeHandledAt).map((m) => ({ r, m })))
+    .flatMap((r) => r.labourMarks.filter((m) => (m.ppe === "damaged" || m.ppe === "due" || m.ppe === "urgent") && !m.ppeHandledAt).map((m) => ({ r, m })))
     .sort((a, b) => Number(b.m.ppe === "urgent") - Number(a.m.ppe === "urgent") || b.r.date.localeCompare(a.r.date));
   const urgent = rows.filter((x) => x.m.ppe === "urgent").length;
 
@@ -40,7 +40,7 @@ export function PpeFromDprs() {
             const l = labourer(m.labourerId);
             return (
               <div key={`${r.id}-${m.labourerId}`} className="flex flex-wrap items-center gap-2 py-2 text-sm">
-                <StatusPill tone={m.ppe === "urgent" ? "crit" : "warn"}>{m.ppe === "urgent" ? "Urgent required" : "Damaged"}</StatusPill>
+                <StatusPill tone={m.ppe === "urgent" ? "crit" : "warn"}>{m.ppe === "urgent" ? "Urgent required" : m.ppe === "due" ? "Due" : "Damaged"}</StatusPill>
                 <span className="font-semibold">{l?.name ?? m.labourerId}</span>
                 <span className="text-xs text-[var(--sge-ink-3)]">{l?.epNumber} · {r.plant || "—"} ·</span>
                 <Link className="text-xs text-[var(--sge-brass-ink)] underline" href={`/dpr/${r.id}`}>DPR {r.date}</Link>
