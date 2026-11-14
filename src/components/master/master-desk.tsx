@@ -1292,9 +1292,25 @@ function UserRow({
         ) : null}
         {linked && user.roles.includes("supervisor") ? (
           <div className="mt-1">
-            {linked.supervisorType ? (
-              <div className="text-[11px] text-[var(--sge-ink-3)]">{SUPERVISOR_DESIGNATION[linked.supervisorType]}</div>
-            ) : null}
+            {/* Owner, 2026-11-14: records rebuilt from a login have no type yet — pick it here */}
+            <select
+              aria-label={`Supervisor type for @${user.username}`}
+              disabled={!canEdit}
+              className={cn(
+                "mb-1 h-6 rounded-sm border bg-[var(--sge-paper)] px-1 text-[11px]",
+                linked.supervisorType ? "border-[var(--sge-line)] text-[var(--sge-ink-3)]" : "border-[var(--sge-crit)]/60 text-[var(--sge-crit)]"
+              )}
+              value={linked.supervisorType ?? ""}
+              onChange={(e) => {
+                const t = e.target.value as NonNullable<StaffMember["supervisorType"]>;
+                if (t) updateStaff(linked.id, { supervisorType: t, designation: SUPERVISOR_DESIGNATION[t] });
+              }}
+            >
+              <option value="">Pick supervisor type…</option>
+              <option value="painting_blasting">Painting &amp; Blasting Supervisor</option>
+              <option value="scaffolding">Scaffolding Supervisor</option>
+              <option value="rope_access">Rope Access Supervisor</option>
+            </select>
             <EngagementPicker
               compact
               disabled={!canEdit}

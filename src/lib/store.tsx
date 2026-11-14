@@ -23,6 +23,7 @@ import { seedMasterCatalog } from "./master/seed-catalog";
 import { inStore, pickLots } from "./equipment-register";
 import { supabase } from "./supabase/client";
 import { partsOf, remoteLoadLabourers, remoteSaveLabourers, type LabourerParts } from "./supabase/labourers";
+import { remoteLoadStaff, remoteSaveStaff, STAFF_WRITE_ROLES, staffPrint } from "./supabase/staff";
 import {
   remoteAudit,
   remoteCreateUser,
@@ -774,6 +775,72 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (labourerSync.loaded) void pushLabourers();
   }, [state.labourers, labourerSync.loaded, pushLabourers]);
+
+  // ---- Staff records in the shared database (owner, 2026-11-14, migration 009) ----
+  // Loaded at sign-in and every minute; changes are sent back. On the first load a writer
+  // (Owner / SA / HR / Admin) also sends up this browser's own staff records (not the demo
+  // ones) and creates a record for any login whose staff record exists nowhere yet.
+  const staffSynced = React.useRef<Map<string, string> | null>(null);
+  const staffBusy = React.useRef(false);
+  const [staffLoaded, setStaffLoaded] = useState(false);
+  const demoStaffIds = useMemo(() => new Set(createSeedState().staff.map((x) => x.id)), []);
+
+  const pullStaff = useCallback(async () => {
+    if (!supabase || staffBusy.current) return;
+    const rows = await remoteLoadStaff();
+    if (!rows) return;
+    const cur = stateRef.current;
+    const first = !staffSynced.current;
+    const onServer = new Set(rows.map((x) => x.id));
+    let extra: StaffMember[] = [];
+    if (first) {
+      // This browser's own records (originals made here, with supervisor type and payroll)
+      extra = cur.staff.filter((x) => !onServer.has(x.id) && !demoStaffIds.has(x.id));
+      // Logins whose staff record is nowhere: build it from the login (same id, so links hold)
+      const known = new Set([...onServer, ...extra.map((x) => x.id)]);
+      for (const acc of cur.users) {
+        const role = acc.roles[0];
+        if (!acc.staffId || known.has(acc.staffId) || role === "labourer" || !acc.siteIds.length) continue;
+        extra.push({ id: acc.staffId, name: acc.name || acc.username, role, siteId: acc.siteIds[0], ...(acc.siteIds.length > 1 ? { siteIds: acc.siteIds } : {}), active: acc.active });
+        known.add(acc.staffId);
+      }
+    } else {
+      // Later loads keep local records not sent yet
+      extra = cur.staff.filter((x) => !onServer.has(x.id) && !demoStaffIds.has(x.id) && staffSynced.current?.get(x.id) !== staffPrint(x));
+    }
+    staffSynced.current = new Map(rows.map((x) => [x.id, staffPrint(x)]));
+    const pendingIds = new Set(cur.staff.filter((x) => onServer.has(x.id) && staffSynced.current?.get(x.id) !== staffPrint(x) && !first).map((x) => x.id));
+    setState((s) => ({ ...s, staff: [...rows.map((r) => (pendingIds.has(r.id) ? s.staff.find((x) => x.id === r.id) ?? r : r)), ...extra] }));
+    setStaffLoaded(true);
+  }, [demoStaffIds]);
+
+  useEffect(() => {
+    staffSynced.current = null;
+    setStaffLoaded(false);
+    if (!supabase || !accountId || !hydrated) return;
+    void pullStaff();
+    const t = setInterval(() => void pullStaff(), 60 * 1000);
+    return () => clearInterval(t);
+  }, [accountId, hydrated, pullStaff]);
+
+  const pushStaff = useCallback(async () => {
+    const synced = staffSynced.current;
+    if (!supabase || !synced || staffBusy.current) return;
+    const cur = stateRef.current;
+    const roles = cur.users.find((x) => x.id === cur.currentAccountId)?.roles ?? [];
+    if (!roles.some((r) => STAFF_WRITE_ROLES.includes(r))) return;
+    const changed = cur.staff.filter((x) => !demoStaffIds.has(x.id) && synced.get(x.id) !== staffPrint(x) && cur.sites.some((site) => site.id === x.siteId));
+    if (!changed.length) return;
+    staffBusy.current = true;
+    const res = await remoteSaveStaff(roles, changed);
+    staffBusy.current = false;
+    if (res.ok) for (const x of changed) synced.set(x.id, staffPrint(x));
+    else console.error(res.error);
+  }, [demoStaffIds]);
+
+  useEffect(() => {
+    if (staffLoaded) void pushStaff();
+  }, [state.staff, staffLoaded, pushStaff]);
   useEffect(() => {
     if (!supabase || !signedIn) return;
     const check = async () => {

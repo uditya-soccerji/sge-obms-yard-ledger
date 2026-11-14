@@ -30,6 +30,8 @@ interface SiteRow {
   plants: string[];
   /** Added by migration 20261014_005; absent before it is applied */
   plant_details?: PlantDetail[] | null;
+  /** RIL plant code (migration 20261114_009); null until set */
+  plant_code?: string | null;
 }
 
 function toAccount(p: ProfileRow): UserAccount {
@@ -58,6 +60,7 @@ function toSite(s: SiteRow): Site {
     rpTags: s.rp_tags,
     plants: s.plants,
     plantDetails: s.plant_details ?? [],
+    ...(s.plant_code != null ? { plantCode: s.plant_code } : {}),
   };
 }
 
@@ -273,6 +276,7 @@ export async function remoteSaveSite(site: Site): Promise<{ ok: boolean; error?:
     rp_tags: site.rpTags,
     plants: site.plants,
     plant_details: site.plantDetails ?? [],
+    plant_code: site.plantCode ?? null,
   });
   if (error) {
     console.error("site save failed", site.code, error.message);
