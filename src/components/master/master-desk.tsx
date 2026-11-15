@@ -633,6 +633,24 @@ function PlantDetailsEditor({
   );
 }
 
+/**
+ * A staff member's EP number (owner, 2026-11-15): optional, PP + 10 digits, one staff member per EP.
+ * Staff and labourer profiles stay separate; an EP also in the labourer register is only noted.
+ */
+function checkStaffEp(
+  state: { staff: StaffMember[]; labourers: Labourer[] },
+  raw: string,
+  staffId?: string
+): { ep?: string; error?: string; note?: string } {
+  if (!raw.trim()) return {};
+  const ep = normalizeEp(raw);
+  if (!ep) return { error: `EP "${raw.trim()}" must be PP + 10 digits` };
+  const other = state.staff.find((x) => x.id !== staffId && x.epNumber === ep);
+  if (other) return { error: `EP ${ep} already belongs to ${other.name}` };
+  const lab = state.labourers.find((l) => l.epNumber === ep);
+  return { ep, ...(lab ? { note: `${ep} is also in the labourer register (${lab.name}) — the two profiles stay separate` } : {}) };
+}
+
 /** Staff designation by supervisor type (owner, 2026-11-13: rope access added) */
 const SUPERVISOR_DESIGNATION: Record<NonNullable<StaffMember["supervisorType"]>, string> = {
   painting_blasting: "Painting & Blasting Supervisor",
@@ -756,6 +774,8 @@ function UsersSheet({ showInactive }: { showInactive: boolean }) {
   // Owner, 2026-11-13: on our payroll or with a sub contractor (scaffolding mostly sub contract)
   const [engagement, setEngagement] = useState<Engagement>("payroll");
   const [contractorId, setContractorId] = useState("");
+  // Owner, 2026-11-15: the staff member's EP number, for attendance
+  const [ep, setEp] = useState("");
   const subContractors = state.masterCatalog.contractors.filter(
     (c) => c.active && !/shree gayatri/i.test(c.name) && (!c.siteId || siteIds.includes(c.siteId))
   );
@@ -869,6 +889,13 @@ function UsersSheet({ showInactive }: { showInactive: boolean }) {
             The login sees this person&apos;s jobs, DPRs and crew.
           </p>
         </div>
+        {!isLabourerRole ? (
+          <div>
+            <Label>EP number</Label>
+            <Input className="mt-1 font-mono" value={ep} placeholder="PP5920xxxxxx (optional)" onChange={(e) => setEp(e.target.value.toUpperCase())} />
+            <p className="mt-1 text-[11px] text-[var(--sge-ink-3)]">RIL gate pass — tracks this staff member&apos;s attendance.</p>
+          </div>
+        ) : null}
         {role === "supervisor" && linkValue === "new" ? (
           <div>
             <Label>Supervisor type</Label>
@@ -920,6 +947,8 @@ function UsersSheet({ showInactive }: { showInactive: boolean }) {
               // Check here too: the store's result isn't known until React applies the update
               const invalid = checkSeat(input, state.users);
               if (invalid) return setMsg({ ok: false, text: invalid });
+              const epCheck = isLabourerRole ? {} : checkStaffEp(state, ep, newStaff ? undefined : linkValue);
+              if (epCheck.error) return setMsg({ ok: false, text: epCheck.error });
               if (newStaff && role === "supervisor" && engagement === "subcontract" && !contractorId) {
                 return setMsg({ ok: false, text: "Pick the sub contractor this person comes from" });
               }
@@ -933,13 +962,17 @@ function UsersSheet({ showInactive }: { showInactive: boolean }) {
                   designation: role === "supervisor" ? SUPERVISOR_DESIGNATION[supType] : meta?.label ?? role,
                   ...(role === "supervisor" ? { supervisorType: supType } : {}),
                   ...(role === "supervisor" ? { engagement, ...(engagement === "subcontract" ? { contractorId } : {}) } : {}),
+                  ...(epCheck.ep ? { epNumber: epCheck.ep } : {}),
                 });
                 if (!staffId) return setMsg({ ok: false, text: "Your role can't create staff records" });
                 input.staffId = staffId;
+              } else if (epCheck.ep && linkValue) {
+                updateStaff(linkValue, { epNumber: epCheck.ep });
               }
               const r = await createUser(input);
               if (!r.ok) return setMsg({ ok: false, text: r.error ?? "Failed" });
-              setMsg({ ok: true, text: `Created @${input.username} · ${siteCodes(state, siteIds)}${input.plantIds.length ? ` · ${input.plantIds.join(", ")}` : ""}` });
+              setMsg({ ok: true, text: `Created @${input.username} · ${siteCodes(state, siteIds)}${input.plantIds.length ? ` · ${input.plantIds.join(", ")}` : ""}${epCheck.ep ? ` · ${epCheck.ep}` : ""}${epCheck.note ? ` (${epCheck.note})` : ""}` });
+              setEp("");
               setPlantIds([]);
               setUsername("");
               setName("");
@@ -1240,6 +1273,7 @@ function UserRow({
   const [editing, setEditing] = useState(false);
   const [ids, setIds] = useState(user.siteIds);
   const [plants, setPlants] = useState(user.plantIds);
+  const [epErr, setEpErr] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const [pwOpen, setPwOpen] = useState(false);
   const [pw1, setPw1] = useState("");
@@ -1256,7 +1290,29 @@ function UserRow({
           {linkedLabourer ? (
             <span className="text-[var(--sge-ink-3)]">Labourer: {linkedLabourer.name}</span>
           ) : linked ? (
-            <span className="text-[var(--sge-ink-3)]">Staff: {linked.name}</span>
+            <span className="text-[var(--sge-ink-3)]">
+              Staff: {linked.name}
+              <span className="mt-0.5 flex items-center gap-1">
+                <span className="text-[10px] font-semibold uppercase tracking-wide">EP</span>
+                {canEdit ? (
+                  <BlurInput
+                    aria-label={`EP number for @${user.username}`}
+                    className="h-6 w-[120px] px-1.5 font-mono text-[11px]"
+                    placeholder="PP… (optional)"
+                    value={linked.epNumber ?? ""}
+                    onSave={(v) => {
+                      const c = checkStaffEp(state, v, linked.id);
+                      if (c.error) return setEpErr(c.error);
+                      setEpErr(c.note ?? null);
+                      if ((c.ep ?? "") !== (linked.epNumber ?? "")) updateStaff(linked.id, { epNumber: c.ep });
+                    }}
+                  />
+                ) : (
+                  <span className="font-mono">{linked.epNumber || "—"}</span>
+                )}
+              </span>
+              {epErr ? <span className="block text-[10px] text-[var(--sge-crit)]">{epErr}</span> : null}
+            </span>
           ) : user.roles.includes("labourer") ? (
             <span className="text-[var(--sge-crit)]">Not linked to a labourer</span>
           ) : canEdit && linkChoices.length ? (

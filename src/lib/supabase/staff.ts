@@ -19,6 +19,8 @@ interface StaffRow {
   employee_code: string | null;
   joined_on: string | null;
   active: boolean;
+  /** Migration 010 */
+  ep_number?: string | null;
 }
 
 /** Roles the database lets add / edit staff (mirrors the RLS in migration 009) */
@@ -39,6 +41,7 @@ function fromRow(r: StaffRow): StaffMember {
     engagement: u(r.engagement),
     contractorId: u(r.contractor_id),
     employeeCode: u(r.employee_code),
+    epNumber: u(r.ep_number),
     joinedOn: u(r.joined_on),
     active: r.active,
   };
@@ -57,6 +60,7 @@ function toRow(s: StaffMember): StaffRow {
     engagement: s.engagement ?? null,
     contractor_id: s.contractorId || null,
     employee_code: s.employeeCode || null,
+    ep_number: s.epNumber || null,
     joined_on: s.joinedOn || null,
     active: s.active !== false,
   };

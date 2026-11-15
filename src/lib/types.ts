@@ -305,6 +305,8 @@ export interface StaffMember {
    * `siteId` stays the home site; unset = the home site only. Use worksAt().
    */
   siteIds?: string[];
+  /** RIL gate-pass (EP) number, PP + 10 digits — tracks staff attendance like labourers' (owner, 2026-11-15) */
+  epNumber?: string;
   /** HR's staff record (round 2, §27) */
   employeeCode?: string;
   joinedOn?: string;

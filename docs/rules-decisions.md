@@ -451,3 +451,7 @@ Process page: "Store module — process" (Claude doc). Decisions there: reorder 
 - **Add to crew:** on the Admin's DPR, the labour search (name or EP) offers **Add to crew** — the labourer goes on the submitting supervisor's crew for good (listed on their DPR every day, attendance and wages under that crew) — or **Today only** (marked present on this DPR, crew unchanged). Labourers of crews planned at the plant show an **Add to this crew** link. The Admin now has crew rights (view / approve) alongside the SIC, Owner and SA.
 - **Submitters without a type:** a supervisor whose record was rebuilt from the login has no type yet; they are still offered as a submitter, marked "type not set — pick it in Users / seats".
 - **Originals win:** when a laptop that made the seats first opens the updated app, its records' supervisor type and payroll fill in a rebuilt record that lacks them.
+
+## 39. Staff EP number (decided 2026-11-15)
+- Every login is a staff member; each staff record can carry the person's **EP number** (RIL gate pass, PP + 10 digits; a bare 10-digit number gets "PP" added) so staff attendance can be tracked the way labourers' is (ACPL / eSSL punches).
+- Entered in the add-seat form (**EP number**, optional) or on the user's row in Users / seats (EP box under "Staff: …", saves when you leave it). One staff member per EP (database: unique `staff.ep_number`, migration 010); a second staff member with the same EP is refused. An EP that's also in the labourer register is only noted — staff and labourer profiles stay separate.
