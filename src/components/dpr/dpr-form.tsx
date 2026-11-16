@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { today as todayDate } from "@/lib/today";
 import { Panel, StatusPill } from "@/components/shared/ui-bits";
 import { Button } from "@/components/ui/button";
@@ -831,7 +831,7 @@ export function DprForm({
         )}
       </Panel>
 
-      {value.submitterType === "painting_blasting" ? <JobLines report={value} readOnly={readOnly} ensureSaved={ensureSaved} fromPlanAllowed={all} /> : null}
+      {value.submitterType === "painting_blasting" ? <JobLines report={value} readOnly={readOnly} ensureSaved={ensureSaved} fromPlanAllowed={all} onPlant={(plant) => onChange({ ...value, plant })} /> : null}
 
       {value.submitterType === "scaffolding" && value.scaffoldWork ? (
         <ScaffoldWorkEditor
@@ -940,7 +940,20 @@ export function DprForm({
  * each picks an open job on this plant and a stage, with measured members,
  * paint and crew — the same line the Work job card adds. They move the job on.
  */
-function JobLines({ report, readOnly, ensureSaved, fromPlanAllowed }: { report: DprReport; readOnly?: boolean; ensureSaved?: () => { ok: boolean; error?: string; doc?: DprReport }; fromPlanAllowed?: boolean }) {
+function JobLines({
+  report,
+  readOnly,
+  ensureSaved,
+  fromPlanAllowed,
+  onPlant,
+}: {
+  report: DprReport;
+  readOnly?: boolean;
+  ensureSaved?: () => { ok: boolean; error?: string; doc?: DprReport };
+  fromPlanAllowed?: boolean;
+  /** Owner, 2026-11-16: picking a job (or a plan line) before the plant fills in the DPR's plant */
+  onPlant?: (plant: string) => void;
+}) {
   const { state } = useStore();
   const { work, removeEntry } = useWork();
   const [adding, setAdding] = useState<string>("");
@@ -952,10 +965,35 @@ function JobLines({ report, readOnly, ensureSaved, fromPlanAllowed }: { report: 
   const [msg, setMsg] = useState<{ ok: boolean; msg: string } | null>(null);
   const saved = work.reports.some((r) => r.id === report.id);
   const lines = work.dprs.filter((d) => d.reportId === report.id);
+  const plantOf = (jobId: string) => work.planLines.find((l) => l.id === work.jobs.find((j) => j.id === jobId)?.planLineId)?.plant ?? "";
+  // No plant yet: every open job of this supervisor on this site (picking one sets the plant)
   const jobs = work.jobs.filter((j) => {
     const line = work.planLines.find((l) => l.id === j.planLineId);
-    return j.status === "open" && j.supervisorId === report.submitterId && line?.siteId === report.siteId && line.plant === report.plant;
+    return j.status === "open" && j.supervisorId === report.submitterId && line?.siteId === report.siteId && (!report.plant || line.plant === report.plant);
   });
+  // A job picked before the plant: once the plant is in the form, save the draft and open the job's line
+  const [pending, setPending] = useState<{ jobId: string; plant: string; msg?: string } | null>(null);
+  useEffect(() => {
+    if (!pending || !report.plant || pending.plant !== report.plant) return;
+    const p = pending;
+    setPending(null);
+    if (!saveFirst()) return;
+    setAdding(p.jobId);
+    if (p.msg) setMsg({ ok: true, msg: p.msg });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pending, report.plant]);
+  function openJob(jobId: string, okMsg?: string, plantHint?: string) {
+    // A job started this moment isn't in the list until the next render — its plan line's plant comes along
+    const plant = plantHint ?? plantOf(jobId);
+    if (!report.plant && plant && onPlant) {
+      onPlant(plant);
+      setPending({ jobId, plant, msg: okMsg });
+      return;
+    }
+    if (!saveFirst()) return;
+    setAdding(jobId);
+    if (okMsg) setMsg({ ok: true, msg: okMsg });
+  }
   const jobNo = (id: string) => work.jobs.find((j) => j.id === id)?.jobNo ?? id;
   // Owner, 2026-11-16: job lines (and a new job) can be added before the draft is saved — it saves itself first
   const canSave = !!ensureSaved && !readOnly && reportOpen(report);
@@ -1028,9 +1066,9 @@ function JobLines({ report, readOnly, ensureSaved, fromPlanAllowed }: { report: 
         <p className="text-xs text-[var(--sge-ink-3)]">Pick the plant and save the draft, then add job lines here.</p>
       ) : null}
       {editable && !report.plant ? (
-        <p className="text-xs text-[var(--sge-ink-3)]">Pick the plant above to see this supervisor&apos;s open jobs there, or start one.</p>
+        <p className="mb-2 text-xs text-[var(--sge-ink-3)]">No plant picked yet — pick a job or start one and the DPR&apos;s plant fills in from it.</p>
       ) : null}
-      {editable && report.plant ? (
+      {editable ? (
         <div className="space-y-2">
           <div className="flex flex-wrap items-end gap-2">
             {jobs.length ? (
@@ -1041,19 +1079,19 @@ function JobLines({ report, readOnly, ensureSaved, fromPlanAllowed }: { report: 
                   value={adding}
                   onChange={(e) => {
                     const id = e.target.value;
-                    if (id && !saveFirst()) return;
-                    setAdding(id);
                     setStarting(false);
+                    if (!id) return setAdding("");
+                    openJob(id);
                   }}
                 >
                   <option value="">Pick a job…</option>
                   {jobs.map((j) => (
-                    <option key={j.id} value={j.id}>{j.jobNo} · {j.location}</option>
+                    <option key={j.id} value={j.id}>{j.jobNo}{report.plant ? "" : ` · ${plantOf(j.id)}`} · {j.location}</option>
                   ))}
                 </select>
               </div>
             ) : (
-              <p className="text-xs text-[var(--sge-ink-3)]">No open jobs for this supervisor on {report.plant}.</p>
+              <p className="text-xs text-[var(--sge-ink-3)]">No open jobs for this supervisor{report.plant ? ` on ${report.plant}` : " on this site"}.</p>
             )}
             {!starting ? (
               <Button type="button" size="sm" variant="outline" className="h-9" onClick={() => { setStarting(true); setAdding(""); setMsg(null); }}>
@@ -1067,10 +1105,9 @@ function JobLines({ report, readOnly, ensureSaved, fromPlanAllowed }: { report: 
               openJobs={jobs}
               saveFirst={saveFirst}
               onCancel={() => setStarting(false)}
-              onStarted={(id, m) => {
+              onStarted={(id, m, plant) => {
                 setStarting(false);
-                setAdding(id);
-                setMsg({ ok: true, msg: m });
+                openJob(id, m, plant);
               }}
             />
           ) : null}
@@ -1108,13 +1145,14 @@ function DprStartJob({
   openJobs: { id: string; jobNo: string; location: string }[];
   saveFirst: () => boolean;
   onCancel: () => void;
-  onStarted: (jobId: string, msg: string) => void;
+  onStarted: (jobId: string, msg: string, plant: string) => void;
 }) {
   const { work, startJob } = useWork();
   const { state } = useStore();
+  const jobPlant = (jobId: string) => work.planLines.find((l) => l.id === work.jobs.find((j) => j.id === jobId)?.planLineId)?.plant;
   const month = report.date.slice(0, 7);
   const plant = report.plant.trim().toUpperCase();
-  const lines = work.planLines.filter((l) => l.siteId === report.siteId && l.month === month && l.supervisorId === report.submitterId && l.plant.trim().toUpperCase() === plant);
+  const lines = work.planLines.filter((l) => l.siteId === report.siteId && l.month === month && l.supervisorId === report.submitterId && (!plant || l.plant.trim().toUpperCase() === plant));
   const [picked, setPicked] = useState(lines[0]?.id ?? "");
   const lineId = lines.some((l) => l.id === picked) ? picked : lines[0]?.id ?? "";
   const line = lines.find((l) => l.id === lineId);
@@ -1126,19 +1164,21 @@ function DprStartJob({
   const [err, setErr] = useState<string | null>(null);
   const chosen = stages ?? item?.defaultStages ?? ["prep", "coat1", "coat2", "final"];
   const where = location.trim().toLowerCase();
-  const twin = where ? openJobs.find((j) => j.location.trim().toLowerCase() === where) : undefined;
+  // Same supervisor + plant + location already open → a duplicate
+  const samePlant = openJobs.filter((j) => !line || jobPlant(j.id) === line.plant);
+  const twin = where ? samePlant.find((j) => j.location.trim().toLowerCase() === where) : undefined;
   const sup = state.staff.find((x) => x.id === report.submitterId)?.name ?? "this supervisor";
   if (!lines.length) {
     return (
       <div className="rounded-md border border-dashed border-[var(--sge-line)] p-3 text-xs text-[var(--sge-ink-2)]">
-        {sup} has no plan line on {report.plant} for {month}, so a job can&apos;t start yet. The Admin adds the plan line in Work → Plan vs actual (the SIC approves it).{" "}
+        {sup} has no plan line {report.plant ? `on ${report.plant}` : "on this site"} for {month}, so a job can&apos;t start yet. The Admin adds the plan line in Work → Plan vs actual (the SIC approves it).{" "}
         <button type="button" className="underline" onClick={onCancel}>Close</button>
       </div>
     );
   }
   return (
     <div className="space-y-3 rounded-md border border-[var(--sge-line)] p-3">
-      <div className="text-xs font-semibold uppercase tracking-wide text-[var(--sge-ink-3)]">New job · {sup} · {report.plant} · starts {report.date}</div>
+      <div className="text-xs font-semibold uppercase tracking-wide text-[var(--sge-ink-3)]">New job · {sup} · {report.plant || line?.plant} · starts {report.date}</div>
       <div className="grid gap-3 sm:grid-cols-2">
         <div>
           <Label>Plan line</Label>
@@ -1176,11 +1216,11 @@ function DprStartJob({
           ))}
         </div>
       </div>
-      {openJobs.length ? (
+      {samePlant.length ? (
         <p className={cn("text-xs", twin ? "font-semibold text-[var(--sge-crit)]" : "text-[var(--sge-ink-3)]")}>
           {twin
-            ? `${twin.jobNo} is already open for ${sup} at ${report.plant} · ${twin.location} — pick it above instead of starting a duplicate.`
-            : `Already open for ${sup} on ${report.plant}: ${openJobs.map((j) => `${j.jobNo} (${j.location})`).join(", ")} — start a new job only for a different location.`}
+            ? `${twin.jobNo} is already open for ${sup} at ${line?.plant} · ${twin.location} — pick it above instead of starting a duplicate.`
+            : `Already open for ${sup} on ${line?.plant}: ${samePlant.map((j) => `${j.jobNo} (${j.location})`).join(", ")} — start a new job only for a different location.`}
         </p>
       ) : null}
       {err ? <p className="text-xs text-[var(--sge-crit)]">{err}</p> : null}
@@ -1193,10 +1233,11 @@ function DprStartJob({
             setErr(null);
             if (!location.trim()) return setErr("Give the location / area");
             if (!(Number(plannedM2) > 0) || !plannedEnd) return setErr("Give the planned m² and the planned end date");
-            if (!saveFirst()) return;
+            // With the plant already set the draft saves first; otherwise it saves once the job fills the plant in
+            if (report.plant && !saveFirst()) return;
             const r = startJob({ planLineId: lineId, location, stages: chosen, startDate: report.date, plannedM2: Number(plannedM2), plannedEnd });
             if (!r.ok) return setErr(r.error);
-            onStarted(r.id!, "Job started (its plan goes to the SIC) — add today's line below.");
+            onStarted(r.id!, "Job started (its plan goes to the SIC) — add today's line below.", line!.plant);
           }}
         >
           Start job &amp; add today&apos;s line
