@@ -76,8 +76,8 @@ function DprPrint() {
           <tr>
             <td className={th}>Submitted</td>
             <td className={td}>{submitted}</td>
-            <td className={th}>Permit · TBT</td>
-            <td className={td}>{r.permitOk ? "Permit OK" : "—"} · {r.tbtDone ? "TBT done" : "—"}</td>
+            <td className={th}>Work permit</td>
+            <td className={td}>{r.permitOk ? `In force${(r.permitNo || r.permitNos?.length) ? ` · No. ${r.permitNo || r.permitNos!.join(", ")}` : ""}` : "—"}</td>
           </tr>
         </tbody>
       </table>

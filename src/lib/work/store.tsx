@@ -498,6 +498,14 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
     if (input.stages.length === 0) return { ok: false, error: "Pick at least one stage" };
     if (!/^\d{4}-\d{2}-\d{2}$/.test(input.startDate)) return { ok: false, error: "Pick the start date" };
     if (input.startDate > today()) return { ok: false, error: "A job can't start in the future" };
+    // Owner, 2026-11-16: no second open job for the same supervisor, plant and location
+    const where = input.location.trim().toLowerCase();
+    const twin = w.jobs.find((j) => {
+      if (j.status === "closed" || j.supervisorId !== line.supervisorId || j.location.trim().toLowerCase() !== where) return false;
+      const jl = w.planLines.find((l) => l.id === j.planLineId);
+      return jl?.siteId === line.siteId && jl.plant.trim().toUpperCase() === line.plant.trim().toUpperCase();
+    });
+    if (twin) return { ok: false, error: `${twin.jobNo} is already open for this supervisor at ${line.plant} · ${twin.location} — add the DPR line to that job` };
     // docs §24: the supervisor's plan — what he expects to finish and by when
     if (input.plannedM2 != null && !(input.plannedM2 > 0)) return { ok: false, error: "Planned m² must be above zero" };
     if (input.plannedEnd && input.plannedEnd < input.startDate) return { ok: false, error: "The planned end can't be before the start" };
@@ -823,6 +831,9 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
     const existing = w.reports.find((r) => r.id === doc.id);
     if (existing && !reportOpen(existing)) return { ok: false, error: `This DPR is ${existing.status === "submitted" ? "with SIC" : "approved"} — it can't be edited` };
     if (existing && existing.plant && doc.plant !== existing.plant && entriesOf(w, doc.id).length) return { ok: false, error: "This DPR has job lines on " + existing.plant + " — the plant can't change" };
+    // Owner, 2026-11-16: one DPR per supervisor · plant · day (the Admin's entry is its own, docs §5b)
+    const twin = doc.plant.trim() ? w.reports.find((r) => r.id !== doc.id && sameDay(r, { ...doc, admin: doc.enteredBy === "admin" })) : undefined;
+    if (twin) return { ok: false, error: `There's already a DPR for this supervisor on ${doc.plant} for ${doc.date} — open that one instead of making another` };
     // Crew booked on this report's job lines stays marked, whatever the form held
     const booked = [...new Set(entriesOf(w, doc.id).flatMap((e) => e.crew ?? []))].filter((id) => !doc.labourMarks.some((m) => m.labourerId === id));
     const saved: DprReport = {

@@ -134,7 +134,7 @@ function NewDprPage() {
     const r = saveReport(next);
     if (!r.ok) return setProblems([r.error]);
     if (andSubmit) {
-      // docs §5: permit + TBT, every crew member marked, quantity or a reason — checked by the store
+      // docs §5: permit (+ its number), every crew member marked, quantity or a reason — checked by the store
       const sent = submitReport(next.id);
       if (!sent.ok) {
         // Saved as a draft; open it so the problems can be fixed there
@@ -219,7 +219,7 @@ function NewDprPage() {
         </div>
       </div>
 
-      <DprForm value={doc} onChange={setDoc} ensureSaved={allSections ? ensureSaved : undefined} />
+      <DprForm value={doc} onChange={setDoc} ensureSaved={ensureSaved} />
 
       {problems.length ? (
         <div className="rounded-md border border-[var(--sge-crit)]/30 bg-[var(--sge-crit-wash)] px-3 py-2 text-sm text-[var(--sge-crit)]">

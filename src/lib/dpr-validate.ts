@@ -40,7 +40,8 @@ export function validateDprForSubmit(
   const fieldWork = doc.submitterType === "painting_blasting" || doc.submitterType === "scaffolding";
   if (fieldWork) {
     if (!doc.permitOk) out.push("Confirm the work permit");
-    if (!doc.tbtDone) out.push("Confirm the toolbox talk (TBT)");
+    else if (!doc.permitNo?.trim() && !doc.permitNos?.length) out.push("Enter the work permit number");
+    // Owner, 2026-11-16: TBT is recorded on the safety officer's report, not here
     const unmarked = crew.filter((l) => !doc.labourMarks.some((m) => m.labourerId === l.id));
     for (const m of doc.labourMarks) {
       if (!WORKING.includes(m.status)) continue;

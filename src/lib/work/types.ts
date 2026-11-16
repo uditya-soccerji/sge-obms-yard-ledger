@@ -169,8 +169,12 @@ export interface DprReport {
   scaffoldWork?: DprScaffoldWorkLine[];
   safetyBody?: DprSafetyBody;
   storeBody?: DprStoreBody;
+  /** Older / imported DPRs; new ones use permitNo */
   permitNos?: string[];
   permitOk?: boolean;
+  /** Work permit number, asked once the permit is in force (owner, 2026-11-16) */
+  permitNo?: string;
+  /** No longer asked on this DPR — TBT is the safety officer's report (owner, 2026-11-16); kept for old DPRs */
   tbtDone?: boolean;
   zeroReason?: string;
   submittedAt?: string;

@@ -14,6 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { REQUEST_REASONS } from "@/lib/requests";
 import { STORE_CATALOGUE } from "@/lib/store-catalogue";
@@ -27,12 +28,14 @@ import type {
   EquipmentItem,
 } from "@/lib/types";
 import type { DprReport } from "@/lib/work/types";
-import { blankReport, reportOpen } from "@/lib/work/reports";
+import { blankReport, reportOpen, sameDay } from "@/lib/work/reports";
 import { useWork } from "@/lib/work/store";
 import { entryArea, round3 } from "@/lib/work/logic";
 import { STAGES } from "@/lib/work/types";
 import { JobEntryForm } from "@/components/work/work-jobs";
 import { PlanWorkLineForm } from "@/components/dpr/plan-work-lines";
+import { lineLabel } from "@/components/work/common";
+import type { Stage } from "@/lib/work/types";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { ATTENDANCE_OPTIONS } from "@/lib/attendance";
@@ -84,7 +87,7 @@ export function DprForm({
     const name = state.labourers.find((l) => l.id === labourerId)?.name ?? "Labourer";
     const sup = state.staff.find((x) => x.id === value.submitterId)?.name ?? "this supervisor";
     setCrewMsg(r.ok ? { ok: true, text: `${name} is now on ${sup}'s crew — listed on their DPR from now on` } : { ok: false, text: r.error ?? "Couldn't add to the crew" });
-    if (r.ok) setFind("");
+    if (r.ok) setPick("");
   }
   const { work } = useWork();
   // The Admin enters the DPR for a supervisor (attendance tabs, PPE, work from the plan)
@@ -111,26 +114,29 @@ export function DprForm({
     );
     return { crew: own, others: rest };
   }, [state.labourers, work.planLines, value.submitterId, value.submitterType, value.siteId, value.plant, value.date, all]);
-  // Anyone else on the site (mostly people on no crew yet), found by name or EP
+  // Owner, 2026-11-16: labour is added to the crew from a pop-up, found by EP number or name — the
+  // site's other labourers aren't listed on the DPR itself
   const [find, setFind] = useState("");
+  const [pickOpen, setPickOpen] = useState(false);
+  const [pick, setPick] = useState("");
+  const canPick = !readOnly && (canCrew || all) && value.submitterType !== "safety" && value.submitterType !== "store";
   const found = useMemo(() => {
-    const q = find.trim().toLowerCase();
-    if (!all || q.length < 2) return [];
-    // People already on the list are found by the filter above; this adds the rest of the site
-    const shown = new Set([...crew, ...others].map((l) => l.id).concat(value.labourMarks.map((m) => m.labourerId)));
-    return state.labourers
-      .filter((l) => l.active && l.siteId === value.siteId && !shown.has(l.id) && (l.name.toLowerCase().includes(q) || l.epNumber.toLowerCase().includes(q)))
-      .slice(0, 8);
-  }, [find, all, crew, others, state.labourers, value.siteId, value.labourMarks]);
-  // Others already marked on this DPR stay listed even if the plant changes
+    const q = pick.trim().toLowerCase();
+    const crewIds = new Set(crew.map((l) => l.id));
+    const marked = new Set(value.labourMarks.map((m) => m.labourerId));
+    // Nothing typed: the crews planned at this plant; typed: anyone active on this site
+    const pool = q.length < 2 ? others : state.labourers.filter((l) => l.active && l.siteId === value.siteId && (l.name.toLowerCase().includes(q) || l.epNumber.toLowerCase().includes(q)));
+    return pool.filter((l) => !crewIds.has(l.id)).slice(0, 30).map((l) => ({ l, marked: marked.has(l.id) }));
+  }, [pick, crew, others, state.labourers, value.siteId, value.labourMarks]);
+  // The crew, plus anyone else already marked on this DPR (kept even if the plant changes)
   const listed = useMemo(() => {
-    const ids = new Set([...crew, ...others].map((l) => l.id));
+    const ids = new Set(crew.map((l) => l.id));
     const marked = state.labourers.filter((l) => !ids.has(l.id) && value.labourMarks.some((m) => m.labourerId === l.id));
-    const rows = [...crew.map((l) => ({ l, own: true })), ...others.map((l) => ({ l, own: false })), ...marked.map((l) => ({ l, own: false }))];
+    const rows = [...crew.map((l) => ({ l, own: true })), ...marked.map((l) => ({ l, own: false }))];
     // Owner, 2026-11-14: the search box narrows the list by name or EP
     const q = find.trim().toLowerCase();
     return q ? rows.filter(({ l }) => l.name.toLowerCase().includes(q) || l.epNumber.toLowerCase().includes(q)) : rows;
-  }, [crew, others, state.labourers, value.labourMarks, find]);
+  }, [crew, state.labourers, value.labourMarks, find]);
 
   const equipment = state.equipment.filter((e) => e.siteId === value.siteId);
   // The DPR's site plants (docs §3: every DPR picks one of its site's plants)
@@ -238,8 +244,19 @@ export function DprForm({
     onChange({ ...value, requests: [...value.requests, req] });
   }
 
+  // Owner, 2026-11-16: one DPR per supervisor · plant · day — say so before anything is typed in
+  const twin =
+    !readOnly && value.plant.trim() && value.submitterId
+      ? work.reports.find((r) => r.id !== value.id && sameDay(r, { ...value, admin: value.enteredBy === "admin" }))
+      : undefined;
   return (
     <div className="space-y-4">
+      {twin ? (
+        <div className="rounded-md border border-[var(--sge-crit)] bg-[var(--sge-paper)] px-3 py-2 text-sm text-[var(--sge-crit)]">
+          {state.staff.find((x) => x.id === value.submitterId)?.name ?? "This supervisor"} already has a DPR on {value.plant} for {value.date} ({twin.status.replace("_", " ")}).{" "}
+          <a className="font-semibold underline" href={`/dpr/${twin.id}`}>Open that one</a> — a second DPR for the same supervisor and plant won&apos;t save.
+        </div>
+      ) : null}
       <Panel>
         <h3 className="mb-3 font-heading text-sm font-bold uppercase tracking-wide text-[var(--sge-ink-3)]">
           Header
@@ -319,14 +336,22 @@ export function DprForm({
               />
               Work permit seen and in force
             </label>
-            <label className="flex items-center gap-2 text-sm">
-              <Checkbox
-                disabled={readOnly}
-                checked={!!value.tbtDone}
-                onCheckedChange={(c) => onChange({ ...value, tbtDone: !!c })}
-              />
-              Toolbox talk (TBT) held
-            </label>
+            {value.permitOk ? (
+              // Owner, 2026-11-16: the permit's number once it's in force (TBT is the safety officer's report)
+              <div>
+                <Label htmlFor="dpr-permit-no">Permit number</Label>
+                <Input
+                  id="dpr-permit-no"
+                  className="mt-1"
+                  disabled={readOnly}
+                  value={value.permitNo ?? value.permitNos?.join(", ") ?? ""}
+                  placeholder="e.g. WP-2611-0457"
+                  onChange={(e) => onChange({ ...value, permitNo: e.target.value })}
+                />
+              </div>
+            ) : (
+              <div />
+            )}
             <div>
               <Label>Reason, if no quantity today</Label>
               <Input
@@ -356,73 +381,118 @@ export function DprForm({
       {value.submitterType !== "store" && value.submitterType !== "safety" ? (
         <Panel>
           <h3 className="mb-3 font-heading text-sm font-bold uppercase tracking-wide text-[var(--sge-ink-3)]">
-            Labour attendance{all ? ` · crew ${crew.length}${others.length ? ` + ${others.length} others at ${value.plant || "this site"}` : ""}` : ""}
+            Labour attendance{all ? ` · crew ${crew.length}` : ""}
           </h3>
           {crew.length === 0 ? (
             // B03: a new supervisor has no crew yet; say so instead of an empty panel
             <p className="text-sm text-[var(--sge-ink-3)]">
               No labourers are on this supervisor&apos;s crew yet.{" "}
-              {canCrew ? "Search above by name or EP and click Add to crew — they stay on this crew for every DPR. Or use " : "The SIC assigns them in "}
+              {canCrew ? "Click Add labour and find them by EP number or name — they stay on this crew for every DPR. Or use " : "The SIC assigns them in "}
               <a className="text-[var(--sge-brass-ink)] underline" href="/operations?p=crew">
                 Operations → Crews
               </a>
               {canCrew ? "." : " (or the supervisor requests them there, if allowed)."}
             </p>
           ) : null}
-          {all && !value.plant ? (
-            <p className="mb-2 text-xs text-[var(--sge-ink-3)]">Pick the plant to also list the crews planned there this month.</p>
-          ) : null}
-          {crew.length || others.length || all ? (
+          {listed.length || canPick ? (
             <div className="mb-2">
-              <Input
-                aria-label="Search labour by name or EP"
-                className="h-9 text-sm"
-                placeholder={all && !readOnly ? "Search labour — name or EP number (also finds others on this site to add)" : "Search labour — name or EP number"}
-                value={find}
-                onChange={(e) => setFind(e.target.value)}
-              />
-              {found.length ? (
-                <div className="mt-1 divide-y divide-[var(--sge-line)] rounded-md border border-[var(--sge-line)]">
-                  {found.map((l) => (
-                    <div key={l.id} className="flex items-center justify-between gap-2 px-2 py-1 text-xs">
-                      <span>
-                        <span className="font-semibold">{l.name}</span> · {l.epNumber} ·{" "}
-                        {l.supervisorId ? `crew of ${state.staff.find((x) => x.id === l.supervisorId)?.name ?? "?"}` : "not on a crew"}
-                      </span>
-                      <span className="flex gap-1">
-                        {canCrew ? (
-                          <Button type="button" size="sm" className="h-7" onClick={() => addToCrew(l.id)}>
-                            Add to crew
-                          </Button>
-                        ) : null}
-                        <Button type="button" size="sm" variant="outline" className="h-7" onClick={() => { setMark(l.id, "present"); setFind(""); }}>
-                          Today only
-                        </Button>
-                      </span>
-                    </div>
-                  ))}
-                </div>
-              ) : null}
+              <div className="flex flex-wrap items-center gap-2">
+                {listed.length > 5 ? (
+                  <Input
+                    aria-label="Filter this list by name or EP"
+                    className="h-9 min-w-0 flex-1 text-sm"
+                    placeholder="Filter this list — name or EP number"
+                    value={find}
+                    onChange={(e) => setFind(e.target.value)}
+                  />
+                ) : null}
+                {canPick ? (
+                  <Button type="button" size="sm" variant="outline" className="h-9" onClick={() => { setPick(""); setCrewMsg(null); setPickOpen(true); }}>
+                    + Add labour (EP / name)
+                  </Button>
+                ) : null}
+              </div>
               {crewMsg ? (
                 <p className={cn("mt-1 text-xs", crewMsg.ok ? "text-[var(--sge-ok)]" : "text-[var(--sge-crit)]")}>{crewMsg.text}</p>
               ) : null}
               {find.trim() ? (
                 <p className="mt-1 text-[11px] text-[var(--sge-ink-3)]">
                   {listed.length ? `${listed.length} on this DPR match` : "No one on this DPR matches"}
-                  {all && !readOnly && find.trim().length >= 2 ? (found.length ? ` · ${found.length} more at this site below` : " · no one else at this site matches") : ""}
                   {" · "}
                   <button type="button" className="underline" onClick={() => setFind("")}>clear</button>
                 </p>
               ) : null}
             </div>
           ) : null}
+          <Dialog open={pickOpen} onOpenChange={setPickOpen}>
+            <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-lg">
+              <DialogHeader>
+                <DialogTitle>Add labour</DialogTitle>
+                <DialogDescription>
+                  Find by EP number or name at this site.{" "}
+                  {canCrew
+                    ? `Add to crew keeps them on ${state.staff.find((x) => x.id === value.submitterId)?.name ?? "this supervisor"}'s crew for every DPR; Today only marks them present on this DPR.`
+                    : "Today only marks them present on this DPR."}
+                </DialogDescription>
+              </DialogHeader>
+              <Input
+                autoFocus
+                aria-label="Find labour by EP number or name"
+                placeholder="EP number or name — e.g. PP2025 or Ramesh"
+                value={pick}
+                onChange={(e) => setPick(e.target.value)}
+              />
+              {crewMsg ? (
+                <p className={cn("text-xs", crewMsg.ok ? "text-[var(--sge-ok)]" : "text-[var(--sge-crit)]")}>{crewMsg.text}</p>
+              ) : null}
+              <p className="text-[11px] text-[var(--sge-ink-3)]">
+                {pick.trim().length < 2
+                  ? others.length
+                    ? `Crews planned at ${value.plant || "this plant"} this month — or type 2+ characters to search the whole site`
+                    : "Type at least 2 characters"
+                  : found.length
+                    ? `${found.length}${found.length === 30 ? "+" : ""} found`
+                    : "No one at this site matches — new labourers are added in Master Data → Labourers"}
+              </p>
+              <div className="divide-y divide-[var(--sge-line)] rounded-md border border-[var(--sge-line)] empty:hidden">
+                {found.map(({ l, marked }) => (
+                  <div key={l.id} className="flex flex-wrap items-center justify-between gap-2 px-2 py-1.5 text-xs">
+                    <span>
+                      <span className="font-semibold">{l.name}</span> · {l.epNumber} ·{" "}
+                      {l.supervisorId ? `crew of ${state.staff.find((x) => x.id === l.supervisorId)?.name ?? "?"}` : "not on a crew"}
+                    </span>
+                    <span className="flex gap-1">
+                      {canCrew ? (
+                        <Button type="button" size="sm" className="h-7" onClick={() => addToCrew(l.id)}>
+                          Add to crew
+                        </Button>
+                      ) : null}
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        className="h-7"
+                        disabled={marked}
+                        onClick={() => {
+                          setMark(l.id, "present");
+                          setCrewMsg({ ok: true, text: `${l.name} marked present on this DPR` });
+                        }}
+                      >
+                        {marked ? "On this DPR" : "Today only"}
+                      </Button>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </DialogContent>
+          </Dialog>
           <div className="space-y-2">
             {listed.map(({ l, own }, i) => {
               const mark = value.labourMarks.find((m) => m.labourerId === l.id);
               const crewOf = l.supervisorId ? state.staff.find((x) => x.id === l.supervisorId)?.name : undefined;
               const heading =
                 all && i === 0 && own ? `Crew of ${state.staff.find((x) => x.id === value.submitterId)?.name ?? "this supervisor"}`
-                : all && !own && (i === 0 || listed[i - 1].own) ? `Others at ${value.plant || "this site"} — not on this crew`
+                : !own && (i === 0 || listed[i - 1].own) ? "Also on this DPR — not on this crew"
                 : null;
               return (
                 <div key={l.id}>
@@ -761,7 +831,7 @@ export function DprForm({
         )}
       </Panel>
 
-      {value.submitterType === "painting_blasting" ? <JobLines report={value} readOnly={readOnly} ensureSaved={all ? ensureSaved : undefined} /> : null}
+      {value.submitterType === "painting_blasting" ? <JobLines report={value} readOnly={readOnly} ensureSaved={ensureSaved} fromPlanAllowed={all} /> : null}
 
       {value.submitterType === "scaffolding" && value.scaffoldWork ? (
         <ScaffoldWorkEditor
@@ -870,7 +940,7 @@ export function DprForm({
  * each picks an open job on this plant and a stage, with measured members,
  * paint and crew — the same line the Work job card adds. They move the job on.
  */
-function JobLines({ report, readOnly, ensureSaved }: { report: DprReport; readOnly?: boolean; ensureSaved?: () => { ok: boolean; error?: string; doc?: DprReport } }) {
+function JobLines({ report, readOnly, ensureSaved, fromPlanAllowed }: { report: DprReport; readOnly?: boolean; ensureSaved?: () => { ok: boolean; error?: string; doc?: DprReport }; fromPlanAllowed?: boolean }) {
   const { state } = useStore();
   const { work, removeEntry } = useWork();
   const [adding, setAdding] = useState<string>("");
@@ -887,10 +957,23 @@ function JobLines({ report, readOnly, ensureSaved }: { report: DprReport; readOn
     return j.status === "open" && j.supervisorId === report.submitterId && line?.siteId === report.siteId && line.plant === report.plant;
   });
   const jobNo = (id: string) => work.jobs.find((j) => j.id === id)?.jobNo ?? id;
-  const editable = !readOnly && saved && reportOpen(report);
-  // Admin DPR: the plan's work can be added before the draft is saved (it saves itself first)
-  const planOpen = !!ensureSaved && !readOnly && reportOpen(report);
-  const job = jobs.find((j) => j.id === adding);
+  // Owner, 2026-11-16: job lines (and a new job) can be added before the draft is saved — it saves itself first
+  const canSave = !!ensureSaved && !readOnly && reportOpen(report);
+  const editable = !readOnly && reportOpen(report) && (saved || canSave);
+  // Admin DPR: the plan's work can be added without a job
+  const planOpen = canSave && !!fromPlanAllowed;
+  const [starting, setStarting] = useState(false);
+  const job = saved ? jobs.find((j) => j.id === adding) : undefined;
+  function saveFirst(): boolean {
+    if (saved) return true;
+    if (!report.plant) {
+      setMsg({ ok: false, msg: "Pick the plant first" });
+      return false;
+    }
+    const r = ensureSaved?.();
+    if (!r?.ok) setMsg({ ok: false, msg: r?.error ?? "Save the draft first" });
+    return !!r?.ok;
+  }
   return (
     <Panel>
       <h3 className="mb-3 font-heading text-sm font-bold uppercase tracking-wide text-[var(--sge-ink-3)]">
@@ -941,21 +1024,27 @@ function JobLines({ report, readOnly, ensureSaved }: { report: DprReport; readOn
           )}
         </div>
       ) : null}
-      {!saved && !readOnly && !planOpen ? (
+      {!saved && !readOnly && !canSave ? (
         <p className="text-xs text-[var(--sge-ink-3)]">Pick the plant and save the draft, then add job lines here.</p>
       ) : null}
-      {editable ? (
-        jobs.length === 0 ? (
-          planOpen ? null : <p className="text-xs text-[var(--sge-ink-3)]">No open jobs for this supervisor on {report.plant || "this plant"}. Start one in Work → Jobs &amp; DPR.</p>
-        ) : (
-          <div className="space-y-2">
-            <div className="flex flex-wrap items-end gap-2">
+      {editable && !report.plant ? (
+        <p className="text-xs text-[var(--sge-ink-3)]">Pick the plant above to see this supervisor&apos;s open jobs there, or start one.</p>
+      ) : null}
+      {editable && report.plant ? (
+        <div className="space-y-2">
+          <div className="flex flex-wrap items-end gap-2">
+            {jobs.length ? (
               <div>
                 <Label>Add a line for job</Label>
                 <select
                   className="mt-1 h-9 rounded-md border border-[var(--sge-line)] bg-[var(--sge-paper)] px-2 text-sm"
                   value={adding}
-                  onChange={(e) => setAdding(e.target.value)}
+                  onChange={(e) => {
+                    const id = e.target.value;
+                    if (id && !saveFirst()) return;
+                    setAdding(id);
+                    setStarting(false);
+                  }}
                 >
                   <option value="">Pick a job…</option>
                   {jobs.map((j) => (
@@ -963,7 +1052,28 @@ function JobLines({ report, readOnly, ensureSaved }: { report: DprReport; readOn
                   ))}
                 </select>
               </div>
-            </div>
+            ) : (
+              <p className="text-xs text-[var(--sge-ink-3)]">No open jobs for this supervisor on {report.plant}.</p>
+            )}
+            {!starting ? (
+              <Button type="button" size="sm" variant="outline" className="h-9" onClick={() => { setStarting(true); setAdding(""); setMsg(null); }}>
+                + Start a new job
+              </Button>
+            ) : null}
+          </div>
+          {starting ? (
+            <DprStartJob
+              report={report}
+              openJobs={jobs}
+              saveFirst={saveFirst}
+              onCancel={() => setStarting(false)}
+              onStarted={(id, m) => {
+                setStarting(false);
+                setAdding(id);
+                setMsg({ ok: true, msg: m });
+              }}
+            />
+          ) : null}
             {job ? (
               <JobEntryForm
                 job={job}
@@ -975,11 +1085,125 @@ function JobLines({ report, readOnly, ensureSaved }: { report: DprReport; readOn
                 }}
               />
             ) : null}
-          </div>
-        )
+        </div>
       ) : null}
       {msg ? <p className={msg.ok ? "mt-2 text-xs text-[var(--sge-ok)]" : "mt-2 text-xs text-[var(--sge-crit)]"}>{msg.msg}</p> : null}
     </Panel>
+  );
+}
+
+/**
+ * Owner, 2026-11-16: start the job from the DPR when it isn't there yet. The plan line is this
+ * supervisor's for this plant this month; the store refuses a second open job for the same
+ * supervisor, plant and location, and the open ones are shown here so they're used instead.
+ */
+function DprStartJob({
+  report,
+  openJobs,
+  saveFirst,
+  onCancel,
+  onStarted,
+}: {
+  report: DprReport;
+  openJobs: { id: string; jobNo: string; location: string }[];
+  saveFirst: () => boolean;
+  onCancel: () => void;
+  onStarted: (jobId: string, msg: string) => void;
+}) {
+  const { work, startJob } = useWork();
+  const { state } = useStore();
+  const month = report.date.slice(0, 7);
+  const plant = report.plant.trim().toUpperCase();
+  const lines = work.planLines.filter((l) => l.siteId === report.siteId && l.month === month && l.supervisorId === report.submitterId && l.plant.trim().toUpperCase() === plant);
+  const [picked, setPicked] = useState(lines[0]?.id ?? "");
+  const lineId = lines.some((l) => l.id === picked) ? picked : lines[0]?.id ?? "";
+  const line = lines.find((l) => l.id === lineId);
+  const item = line ? work.serviceItems.find((x) => x.code === line.serviceCode) : undefined;
+  const [location, setLocation] = useState("");
+  const [plannedM2, setPlannedM2] = useState("");
+  const [plannedEnd, setPlannedEnd] = useState("");
+  const [stages, setStages] = useState<Stage[] | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const chosen = stages ?? item?.defaultStages ?? ["prep", "coat1", "coat2", "final"];
+  const where = location.trim().toLowerCase();
+  const twin = where ? openJobs.find((j) => j.location.trim().toLowerCase() === where) : undefined;
+  const sup = state.staff.find((x) => x.id === report.submitterId)?.name ?? "this supervisor";
+  if (!lines.length) {
+    return (
+      <div className="rounded-md border border-dashed border-[var(--sge-line)] p-3 text-xs text-[var(--sge-ink-2)]">
+        {sup} has no plan line on {report.plant} for {month}, so a job can&apos;t start yet. The Admin adds the plan line in Work → Plan vs actual (the SIC approves it).{" "}
+        <button type="button" className="underline" onClick={onCancel}>Close</button>
+      </div>
+    );
+  }
+  return (
+    <div className="space-y-3 rounded-md border border-[var(--sge-line)] p-3">
+      <div className="text-xs font-semibold uppercase tracking-wide text-[var(--sge-ink-3)]">New job · {sup} · {report.plant} · starts {report.date}</div>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <div>
+          <Label>Plan line</Label>
+          <select className="mt-1 h-9 w-full rounded-md border border-[var(--sge-line)] bg-[var(--sge-paper)] px-2 text-sm" value={lineId} onChange={(e) => { setPicked(e.target.value); setStages(null); }}>
+            {lines.map((l) => (
+              <option key={l.id} value={l.id}>{lineLabel(l, work.serviceItems.find((x) => x.code === l.serviceCode))}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <Label htmlFor="dpr-job-loc">Location / area</Label>
+          <Input id="dpr-job-loc" className="mt-1" value={location} onChange={(e) => setLocation(e.target.value)} placeholder="e.g. TT4 NORTH SIDE SR NO. 269–276" />
+        </div>
+        <div>
+          <Label htmlFor="dpr-job-m2">Planned m² (final shade)</Label>
+          <Input id="dpr-job-m2" type="number" min={0} className="mt-1" value={plannedM2} onChange={(e) => setPlannedM2(e.target.value)} placeholder="e.g. 450" />
+        </div>
+        <div>
+          <Label htmlFor="dpr-job-end">Planned end date</Label>
+          <Input id="dpr-job-end" type="date" className="mt-1" min={report.date} value={plannedEnd} onChange={(e) => setPlannedEnd(e.target.value)} />
+        </div>
+      </div>
+      <div>
+        <Label>Stages (the last one is the final shade → JMS qty)</Label>
+        <div className="mt-1 flex flex-wrap gap-3">
+          {STAGES.map((x) => (
+            <label key={x.id} className="flex items-center gap-1.5 text-sm">
+              <input
+                type="checkbox"
+                checked={chosen.includes(x.id)}
+                onChange={(e) => setStages(e.target.checked ? STAGES.map((y) => y.id).filter((y) => y === x.id || chosen.includes(y)) : chosen.filter((y) => y !== x.id))}
+              />
+              {x.label}
+            </label>
+          ))}
+        </div>
+      </div>
+      {openJobs.length ? (
+        <p className={cn("text-xs", twin ? "font-semibold text-[var(--sge-crit)]" : "text-[var(--sge-ink-3)]")}>
+          {twin
+            ? `${twin.jobNo} is already open for ${sup} at ${report.plant} · ${twin.location} — pick it above instead of starting a duplicate.`
+            : `Already open for ${sup} on ${report.plant}: ${openJobs.map((j) => `${j.jobNo} (${j.location})`).join(", ")} — start a new job only for a different location.`}
+        </p>
+      ) : null}
+      {err ? <p className="text-xs text-[var(--sge-crit)]">{err}</p> : null}
+      <div className="flex gap-2">
+        <Button
+          type="button"
+          size="sm"
+          disabled={!!twin}
+          onClick={() => {
+            setErr(null);
+            if (!location.trim()) return setErr("Give the location / area");
+            if (!(Number(plannedM2) > 0) || !plannedEnd) return setErr("Give the planned m² and the planned end date");
+            if (!saveFirst()) return;
+            const r = startJob({ planLineId: lineId, location, stages: chosen, startDate: report.date, plannedM2: Number(plannedM2), plannedEnd });
+            if (!r.ok) return setErr(r.error);
+            onStarted(r.id!, "Job started (its plan goes to the SIC) — add today's line below.");
+          }}
+        >
+          Start job &amp; add today&apos;s line
+        </Button>
+        <Button type="button" size="sm" variant="ghost" onClick={onCancel}>Cancel</Button>
+      </div>
+    </div>
   );
 }
 

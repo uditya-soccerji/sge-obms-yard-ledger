@@ -86,7 +86,7 @@ function DprDetailPage() {
       setMsg(r.error);
       return;
     }
-    // docs §5: permit + TBT, every crew member marked, quantity or a reason
+    // docs §5: permit (+ its number), every crew member marked, quantity or a reason
     const sent = submitReport(doc.id);
     if (!sent.ok) {
       setProblems(sent.error.split(" · "));
