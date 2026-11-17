@@ -39,6 +39,8 @@ export interface SharedSyncOptions<S extends AnyState> {
   isDemo: (collection: string, id: string) => boolean;
   /** Combine a meta value from this browser with the server's (default: server wins) */
   mergeMeta?: Partial<Record<string, (local: unknown, server: unknown) => unknown>>;
+  /** Records keyed by something other than `id` (e.g. service items by `code`) */
+  keyOf?: Partial<Record<string, (r: Record<string, unknown>) => string>>;
   /** Order of a collection after merging (default: this browser's order, new ones at the end) */
   order?: Partial<Record<string, (a: Rec, b: Rec) => number>>;
 }
@@ -65,6 +67,8 @@ function writeJson(key: string, v: unknown) {
 export function useSharedSync<S extends AnyState>(o: SharedSyncOptions<S>): SharedSyncStatus {
   const opts = useRef(o);
   opts.current = o;
+  /** A record's key in its collection: `id`, or what keyOf says (service items: `code`) */
+  const kid = (col: string, r: Rec): string => String(opts.current.keyOf?.[col]?.(r) ?? r.id);
   const META = `${o.prefix}._meta`;
   const MOVED_KEY = `sge-shared-moved-${o.prefix}-v1`;
   const UNSENT_KEY = `sge-shared-unsent-${o.prefix}-v1`;
@@ -80,7 +84,7 @@ export function useSharedSync<S extends AnyState>(o: SharedSyncOptions<S>): Shar
   const reorder = (col: string, list: Rec[], localOrder: Map<string, number>) => {
     const by = opts.current.order?.[col];
     if (by) return [...list].sort(by);
-    return [...list].sort((a, b) => (localOrder.get(a.id) ?? Number.MAX_SAFE_INTEGER) - (localOrder.get(b.id) ?? Number.MAX_SAFE_INTEGER));
+    return [...list].sort((a, b) => (localOrder.get(kid(col, a)) ?? Number.MAX_SAFE_INTEGER) - (localOrder.get(kid(col, b)) ?? Number.MAX_SAFE_INTEGER));
   };
 
   /** Keys changed here and not on the server yet */
@@ -91,7 +95,7 @@ export function useSharedSync<S extends AnyState>(o: SharedSyncOptions<S>): Shar
     const cur = opts.current.stateRef.current as Record<string, unknown>;
     for (const col of opts.current.collections) {
       const m = s.get(col) ?? new Map<string, string>();
-      for (const r of (cur[col] as Rec[] | undefined) ?? []) if (m.get(r.id) !== print(r)) out.add(`${col}|${r.id}`);
+      for (const r of (cur[col] as Rec[] | undefined) ?? []) if (m.get(kid(col, r)) !== print(r)) out.add(`${col}|${kid(col, r)}`);
     }
     const mm = s.get("_meta") ?? new Map<string, string>();
     for (const k of opts.current.meta ?? []) if (mm.get(k) !== print(cur[k])) out.add(`_meta|${k}`);
@@ -117,11 +121,11 @@ export function useSharedSync<S extends AnyState>(o: SharedSyncOptions<S>): Shar
       const srv = server.get(col) ?? new Map<string, unknown>();
       nextSynced.set(col, new Map([...srv].map(([id, d]) => [id, print(d)])));
       const local = (cur[col] as Rec[] | undefined) ?? [];
-      const localOrder = new Map(local.map((r, i) => [r.id, i]));
+      const localOrder = new Map(local.map((r, i) => [kid(col, r), i]));
       // This browser's copy is kept where it hasn't reached the server: never-sent changes, and
       // (once per device) its own real records from before sharing
-      const keep = local.filter((r) => unsent.has(`${col}|${r.id}`) || (!moved && !srv.has(r.id) && !isDemo(col, r.id)));
-      const keepIds = new Set(keep.map((r) => r.id));
+      const keep = local.filter((r) => unsent.has(`${col}|${kid(col, r)}`) || (!moved && !srv.has(kid(col, r)) && !isDemo(col, kid(col, r))));
+      const keepIds = new Set(keep.map((r) => kid(col, r)));
       const merged = [...[...srv.entries()].filter(([id]) => !keepIds.has(id)).map(([, d]) => d as Rec), ...keep];
       patch[col] = reorder(col, merged, localOrder);
     }
@@ -157,13 +161,16 @@ export function useSharedSync<S extends AnyState>(o: SharedSyncOptions<S>): Shar
       const list = (cur[col] as Rec[] | undefined) ?? [];
       const ids = new Set<string>();
       for (const r of list) {
-        ids.add(r.id);
+        const id = kid(col, r);
+        // A record without a key can't be shared (it would be refused and block every other save)
+        if (!id || id === "undefined") continue;
+        ids.add(id);
         const p = print(r);
-        if (m.get(r.id) === p) continue;
-        if (!m.has(r.id) && isDemo(col, r.id)) continue;
+        if (m.get(id) === p) continue;
+        if (!m.has(id) && isDemo(col, id)) continue;
         const siteId = typeof r.siteId === "string" ? r.siteId : null;
-        rows.push({ collection: `${prefix}.${col}`, id: r.id, siteId, data: r });
-        apply.push(() => m.set(r.id, p));
+        rows.push({ collection: `${prefix}.${col}`, id, siteId, data: r });
+        apply.push(() => m.set(id, p));
       }
       for (const id of [...m.keys()]) {
         if (ids.has(id)) continue;
@@ -229,8 +236,8 @@ export function useSharedSync<S extends AnyState>(o: SharedSyncOptions<S>): Shar
         const m = s.get(col) ?? new Map<string, string>();
         s.set(col, m);
         const local = (cur[col] as Rec[] | undefined) ?? [];
-        const localOrder = new Map(local.map((r, i) => [r.id, i]));
-        const map = new Map(local.map((r) => [r.id, r]));
+        const localOrder = new Map(local.map((r, i) => [kid(col, r), i]));
+        const map = new Map(local.map((r) => [kid(col, r), r]));
         for (const r of rows) {
           if (r.deleted) {
             map.delete(r.id);

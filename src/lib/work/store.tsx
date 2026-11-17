@@ -270,8 +270,9 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
     const empty = createEmptyWork(today().slice(0, 7)) as unknown as Record<string, { id: string }[]>;
     const out = new Set<string>();
     for (const col of WORK_SHARED) {
-      const real = new Set((empty[col] ?? []).map((r) => r.id));
-      for (const r of seed[col] ?? []) if (!real.has(r.id)) out.add(`${col}|${r.id}`);
+      const key = (r: { id?: string; code?: string }) => (col === "serviceItems" ? r.code : r.id) ?? "";
+      const realKeys = new Set((empty[col] ?? []).map(key));
+      for (const r of seed[col] ?? []) if (!realKeys.has(key(r))) out.add(`${col}|${key(r)}`);
     }
     return out;
   }, []);
@@ -285,6 +286,8 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
     collections: WORK_SHARED,
     meta: ["siteMonths", "defaultMonth", "lastSeen"],
     isDemo: (col, id) => demoWorkIds.has(`${col}|${id}`),
+    // Service items have no id: their code is the key
+    keyOf: { serviceItems: (r) => String(r.code ?? "") },
     // What each person has read: the furthest point any of their devices reached
     mergeMeta: {
       lastSeen: (local, server) => {
