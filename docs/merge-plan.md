@@ -315,12 +315,12 @@ Each step is one GitHub PR off `main` (title **"Merge step N: …"**), leaves ev
 Three lists of DTA plants disagree today:
 | Where | DTA plants |
 |---|---|
-| Master Data → Sites (live in Supabase `sites.plants`; local seed in `src/lib/seed.ts`) | CPP, CPP-flare, ARMA |
+| Master Data → Sites (live in Supabase `sites.plants`; local seed in `src/lib/seed.ts`) | CPP, CPP-flare |
 | Work plan lines (`PlanLine.plant`, free text; `SUP_OF` in `src/lib/work/seed.ts`) | AROMATIC, CES, COKER, CRUDE, FCCU, HYDROGEN, HYDROTREATER, PP, PRU & HPIB, RTF, SULPHUR, UTILITY & ETP |
 | Old DPR desk (`dprDocuments`) | CPP |
 
 §3 says every DPR and request must pick a plant, and Master Data is the one list. Once Step 4 makes the DPR form pick plants from Master Data, no Work job would match. So:
-1. **Data step, no code (Owner / Super Admin):** in Master Data → Sites → DTA → Edit, add DTA's real plants from the Aug-26 job plan (the 12 above, spelled exactly the same, trimmed, §15 "plant names trimmed + matched"). Do the same for the other five sites when their job plans are shared. The Owner decides whether CPP, CPP-flare and ARMA stay (ARMA is also under MTF, which §3 allows). This writes the live `sites` row in the Yard Ledger Supabase project, so **confirm with the Owner first**.
+1. **Data step, no code (Owner / Super Admin):** in Master Data → Sites → DTA → Edit, add DTA's real plants from the Aug-26 job plan (the 12 above, spelled exactly the same, trimmed, §15 "plant names trimmed + matched"). Do the same for the other five sites when their job plans are shared. The Owner decides whether CPP and CPP-flare stay. This writes the live `sites` row in the Yard Ledger Supabase project, so **confirm with the Owner first**.
 2. **Code — done in #13:** the Work plan form picks plants from the site's Master Data list (`isSitePlant` in `src/lib/sites.ts`) and the local seed has DTA's 12 plants. Still to do in Step 2: `addPlanLine` in the Work store rejects a plant not on the list (the store has no site list today, so pass it in). Originally planned: `addPlanLine` in `src/lib/work/store.tsx` rejects a plant that isn't on the site's list. A pure `isSitePlant(sites, siteId, plant)` goes in `src/lib/site-scope.ts`. The plant field in `src/components/work/work-plan.tsx` today suggests Master Data plants plus any plant already typed on a plan line (`knownPlants`) and accepts free text. It becomes a Master Data-only dropdown. `src/lib/seed.ts` gets the same DTA plants so a local (non-Supabase) run matches.
 
 ### Step 2: DPR report header inside Work

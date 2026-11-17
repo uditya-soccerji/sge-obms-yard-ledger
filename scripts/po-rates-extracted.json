@@ -36,7 +36,7 @@
       ]
     },
     {
-      "file": "PO_560002718-MTF RP-5 ARMA.pdf",
+      "file": "PO_560002718-MTF RP-5.pdf",
       "po": "560002718",
       "sites": [
         "site-mtf"
@@ -54,7 +54,7 @@
           "uom": "m2",
           "rateInr": 46.59,
           "effectiveFrom": "2026-02-18",
-          "sourceFile": "PO_560002718-MTF RP-5 ARMA.pdf"
+          "sourceFile": "PO_560002718-MTF RP-5.pdf"
         },
         {
           "poNumber": "560002718",
@@ -66,7 +66,7 @@
           "uom": "m2",
           "rateInr": 328.91,
           "effectiveFrom": "2026-02-18",
-          "sourceFile": "PO_560002718-MTF RP-5 ARMA.pdf"
+          "sourceFile": "PO_560002718-MTF RP-5.pdf"
         }
       ]
     },
@@ -249,7 +249,7 @@
       ]
     },
     {
-      "file": "PO_260069430-DTA ARMA.pdf",
+      "file": "PO_260069430-DTA.pdf",
       "po": "260069430",
       "sites": [
         "site-dta"
@@ -267,7 +267,7 @@
           "uom": "m2",
           "rateInr": 48.93,
           "effectiveFrom": "2026-03-01",
-          "sourceFile": "PO_260069430-DTA ARMA.pdf"
+          "sourceFile": "PO_260069430-DTA.pdf"
         },
         {
           "poNumber": "260069430",
@@ -279,7 +279,7 @@
           "uom": "m2",
           "rateInr": 345.35,
           "effectiveFrom": "2026-03-01",
-          "sourceFile": "PO_260069430-DTA ARMA.pdf"
+          "sourceFile": "PO_260069430-DTA.pdf"
         }
       ]
     },
@@ -1362,7 +1362,7 @@
       "uom": "m2",
       "rateInr": 46.59,
       "effectiveFrom": "2026-02-18",
-      "sourceFile": "PO_560002718-MTF RP-5 ARMA.pdf"
+      "sourceFile": "PO_560002718-MTF RP-5.pdf"
     },
     {
       "poNumber": "560002718",
@@ -1374,7 +1374,7 @@
       "uom": "m2",
       "rateInr": 328.91,
       "effectiveFrom": "2026-02-18",
-      "sourceFile": "PO_560002718-MTF RP-5 ARMA.pdf"
+      "sourceFile": "PO_560002718-MTF RP-5.pdf"
     },
     {
       "poNumber": "560002718",
@@ -1386,7 +1386,7 @@
       "uom": "m2",
       "rateInr": 294.52,
       "effectiveFrom": "2026-02-18",
-      "sourceFile": "PO_560002718-MTF RP-5 ARMA.pdf"
+      "sourceFile": "PO_560002718-MTF RP-5.pdf"
     },
     {
       "poNumber": "560002718",
@@ -1398,7 +1398,7 @@
       "uom": "m2",
       "rateInr": 601.12,
       "effectiveFrom": "2026-02-18",
-      "sourceFile": "PO_560002718-MTF RP-5 ARMA.pdf"
+      "sourceFile": "PO_560002718-MTF RP-5.pdf"
     },
     {
       "poNumber": "560002718",
@@ -1410,7 +1410,7 @@
       "uom": "m2",
       "rateInr": 652.31,
       "effectiveFrom": "2026-02-18",
-      "sourceFile": "PO_560002718-MTF RP-5 ARMA.pdf"
+      "sourceFile": "PO_560002718-MTF RP-5.pdf"
     },
     {
       "poNumber": "560002718",
@@ -1422,7 +1422,7 @@
       "uom": "m2",
       "rateInr": 47.64,
       "effectiveFrom": "2026-02-18",
-      "sourceFile": "PO_560002718-MTF RP-5 ARMA.pdf"
+      "sourceFile": "PO_560002718-MTF RP-5.pdf"
     },
     {
       "poNumber": "560002716",
@@ -10427,7 +10427,7 @@
       "uom": "m2",
       "rateInr": 48.93,
       "effectiveFrom": "2026-03-01",
-      "sourceFile": "PO_260069430-DTA ARMA.pdf"
+      "sourceFile": "PO_260069430-DTA.pdf"
     },
     {
       "poNumber": "260069430",
@@ -10439,7 +10439,7 @@
       "uom": "m2",
       "rateInr": 345.35,
       "effectiveFrom": "2026-03-01",
-      "sourceFile": "PO_260069430-DTA ARMA.pdf"
+      "sourceFile": "PO_260069430-DTA.pdf"
     },
     {
       "poNumber": "260069430",
@@ -10451,7 +10451,7 @@
       "uom": "m2",
       "rateInr": 309.24,
       "effectiveFrom": "2026-03-01",
-      "sourceFile": "PO_260069430-DTA ARMA.pdf"
+      "sourceFile": "PO_260069430-DTA.pdf"
     },
     {
       "poNumber": "260069430",
@@ -10463,7 +10463,7 @@
       "uom": "m2",
       "rateInr": 631.17,
       "effectiveFrom": "2026-03-01",
-      "sourceFile": "PO_260069430-DTA ARMA.pdf"
+      "sourceFile": "PO_260069430-DTA.pdf"
     },
     {
       "poNumber": "260069430",
@@ -10475,7 +10475,7 @@
       "uom": "m2",
       "rateInr": 684.92,
       "effectiveFrom": "2026-03-01",
-      "sourceFile": "PO_260069430-DTA ARMA.pdf"
+      "sourceFile": "PO_260069430-DTA.pdf"
     },
     {
       "poNumber": "260069430",
@@ -10487,7 +10487,7 @@
       "uom": "m2",
       "rateInr": 50.03,
       "effectiveFrom": "2026-03-01",
-      "sourceFile": "PO_260069430-DTA ARMA.pdf"
+      "sourceFile": "PO_260069430-DTA.pdf"
     },
     {
       "poNumber": "230261547",

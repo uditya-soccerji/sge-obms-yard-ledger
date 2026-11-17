@@ -38,7 +38,7 @@ Screenshots, when saved as files, go in `docs/bugs/` as `B<nn>-<n>.png`. Never i
 - Reported: 2026-10-13 · Role: Super Admin · Site: All sites (JETTY entry) · Page: Master Data → Sites → Add site / Edit
 - Steps: Edit DTA (or Add site), click in **Plants (comma)**, type `, RTF` key by key.
 - Excel: DTA plants from the Aug-26 job plan (AROMATIC, CES, COKER, CRUDE, FCCU, HYDROGEN, HYDROTREATER, PP, PRU & HPIB, RTF, SULPHUR, UTILITY & ETP).
-- Expected: field shows `CPP, CPP-flare, ARMA, RTF`; Save stores 4 plants.
+- Expected: field shows `CPP, CPP-flare, RTF`; Save stores 3 plants.
 - Actual: the comma and the space vanish as they're typed, giving `CPP, CPP-flare, ARMARTF` (user's screenshot: a new site's field shows `RRTF`). Names with spaces such as `PRU & HPIB` or `UTILITY & ETP` can't be typed at all.
 - Screenshot: user's, localhost Master Data → Sites, DTA edit form open, Plants field reads `RRTF`.
 - Confirmed on the live site 2026-10-13 (typed key by key, then Cancel; nothing saved). Pasting the whole list in one go does work, because it arrives as a single change.
@@ -48,13 +48,13 @@ Screenshots, when saved as files, go in `docs/bugs/` as `B<nn>-<n>.png`. Never i
   - (a) **Save** does nothing, with no message, when Code is empty.
   - (b) `remoteSaveSite` (`src/lib/supabase/remote.ts`) only logs a failed Supabase save to the console. The screen shows the change, but it's gone after a reload. Show the error instead.
   - (c) Work plan lines upper-case plant names while Master Data keeps `CPP-flare` mixed case. Match plants ignoring case (merge plan, "Before PR 2").
-- Data done 2026-10-13 (user's request): the 12 DTA plants were added to live Master Data by pasting the full list (the workaround), keeping CPP, CPP-flare and ARMA. Checked in Supabase: `sites` DTA now has 15 plants (updated 21:38 UTC). Then, at the user's request, CPP and CPP-flare were removed: DTA now has 13 plants (ARMA + the 12), updated 21:41 UTC. The same list is in `src/lib/seed.ts` for local runs without Supabase. `STORAGE_KEY` was deliberately not bumped, since that would wipe testers' browser data; on production, sites come from Supabase at sign-in.
+- Data done 2026-10-13 (user's request): the 12 DTA plants were added to live Master Data by pasting the full list (the workaround), keeping CPP and CPP-flare. Checked in Supabase: `sites` DTA now has 15 plants (updated 21:38 UTC). Then, at the user's request, CPP and CPP-flare were removed: DTA now has the 12 plants, updated 21:41 UTC. The same list is in `src/lib/seed.ts` for local runs without Supabase. `STORAGE_KEY` was deliberately not bumped, since that would wipe testers' browser data; on production, sites come from Supabase at sign-in.
 - Fix (2026-10-13, branch `fix/bugs-2026-10-13`):
   - `SiteForm` keeps the plants as typed text; `parsePlants()` (new, `src/lib/site-scope.ts`) splits on Save: trims, collapses spaces, drops blanks, keeps duplicates (ignoring case) once. A live "N plants" counter shows under the field.
   - (a) `checkSiteCode()` (new): code required, 2–6 capital letters, unique (§3). Messages: "Site code is required", "…must be 2–6 capital letters", "Site code DTA is already used".
   - (b) `remoteSaveSite` returns the Supabase error; `upsertSite` is now async, saves to Supabase **first** and only then updates the screen, so a refused save shows "Not saved: …" instead of looking saved. Deactivate / Activate uses the same path.
   - (c) is left for B02 / merge plan PR 2 (plant matching ignoring case).
-- Verified on `npm run dev` (Super Admin, local data only, no Supabase): typed `, RT, X` one character at a time into DTA and got commas and spaces kept, counter 15; typed into MTF and got "MTF, ARMA, RRTF, NEW · 4 plants" (screenshot), then Cancel left it unchanged. Saving messy text `ARMA,  AROMATIC ,coker, COKER, PRU   &  HPIB, , ` gave "Saved DTA · 4 plants" = ARMA, AROMATIC, coker, PRU & HPIB, after which DTA's 13 plants were restored. Empty / bad / duplicate code messages shown. No console errors. `tsc` + `eslint src` clean; `npm run build` runs at deploy (it can't run beside the dev server).
+- Verified on `npm run dev` (Super Admin, local data only, no Supabase): typed `, RT, X` one character at a time into DTA and got commas and spaces kept, counter 15; typed into MTF and got "MTF, RRTF, NEW · 3 plants" (screenshot), then Cancel left it unchanged. Saving messy text `AROMATIC ,coker, COKER, PRU   &  HPIB, , ` gave "Saved DTA · 3 plants" = AROMATIC, coker, PRU & HPIB, after which DTA's plants were restored. Empty / bad / duplicate code messages shown. No console errors. `tsc` + `eslint src` clean; `npm run build` runs at deploy (it can't run beside the dev server).
 
 ### B02: Plant → location level, with RP on each (feature)
 - Reported: 2026-10-13 · Role: Super Admin · Site: MTF · Page: Master Data → Sites
@@ -77,24 +77,24 @@ Screenshots, when saved as files, go in `docs/bugs/` as `B<nn>-<n>.png`. Never i
 | RRTF | South culvert |
 | RRTF | Street-3 end culvert |
 
-- Done now (live, 2026-10-13): plant **RRTF** added to MTF, so MTF plants = MTF, ARMA, RRTF (checked in Supabase, updated 21:44 UTC). Same in `src/lib/seed.ts`. Locations are **not** stored yet, because there's nowhere to keep them.
+- Done now (live, 2026-10-13): plant **RRTF** added to MTF, so MTF plants = MTF, RRTF (checked in Supabase, updated 21:44 UTC). Same in `src/lib/seed.ts`. Locations are **not** stored yet, because there's nowhere to keep them.
 - Today: `sites.plants` is `text[]` (names only); `sites.rp_tags` is per site. Work jobs keep `location` as free text.
 - Plan (needs owner OK + a migration, applied to live only after confirming):
   1. Migration `supabase/migrations/<date>_site_plants_locations.sql`: a `site_plants` table (site_id, name, rp, active) and a `plant_locations` table (plant_id, name, rp, active), with RLS like `sites`. Keep `sites.plants` filled for one release so nothing breaks.
   2. Master Data → Sites: per site, a plant table (name, RP from the site's RP list) with locations under each (name, RP; default = the plant's RP).
   3. Work jobs and DPR lines pick plant → location from Master Data (fits merge plan PR 2 "one plant list per site").
-- Answers (2026-10-13): MTF is a **site**, not a plant. RRTF and ARMA are **plants**. The LPG/RIL cell is **five separate locations**. ARMA stays under **both** DTA and MTF (each site has its own ARMA plant, which §3 allows).
-- Answer (2026-10-13): **MTF is both the site and a plant** in it. Plant MTF has the 5 "MTF" locations; plant RRTF has 8. The live MTF plant list (MTF, ARMA, RRTF) is correct as it stands. ARMA has no locations listed yet.
-- RPs (2026-10-13): **MTF – RP5, RRTF – RP5, ARMA – RP2** (ARMA is RP2 at both MTF and DTA). Every location takes its plant's RP; none differ. DTA's other plants take the site's RP2 by default.
+- Answers (2026-10-13): MTF is a **site**, not a plant. RRTF is a **plant**. The LPG/RIL cell is **five separate locations**.
+- Answer (2026-10-13): **MTF is both the site and a plant** in it. Plant MTF has the 5 "MTF" locations; plant RRTF has 8. The live MTF plant list (MTF, RRTF) is correct as it stands.
+- RPs (2026-10-13): **MTF – RP5, RRTF – RP5**. Every location takes its plant's RP; none differ. DTA's other plants take the site's RP2 by default.
 - Status: all questions answered. Ready to build when the app folder is free. The migration needs a confirm before it's applied to the live database.
 - Fix (2026-10-13, branch `fix/bugs-2026-10-13`). Built smaller than the plan above: no new tables, one JSON column on the site row, so it saves with the site under the existing `sites_write` policy.
   - Data: `Site.plantDetails: { name, rp?, locations: { name, rp? }[] }[]` (`src/lib/types.ts`). A plant with no entry has no locations and takes the site's RP when the site runs one RP. A location with no RP takes its plant's.
   - Pure helpers in `src/lib/site-scope.ts`: `sitePlantDetails`, `plantRp`, `locationRp`, `buildPlantDetails` (trim, drop blank/duplicate locations, drop renamed/removed plants), `checkPlantRps` (every RP must be one the site runs), `parseRpTags`.
-  - Master Data → Sites → Edit: new **RPs run at this site** field, and under the plants a **Plants · RP · locations** editor. Each plant gets an RP picker (default "Site RP"); **Add location** rows each have name, RP ("Same as plant" or an override) and Remove. The table column now reads e.g. `MTF (RP5 · 5 loc), ARMA (RP2), RRTF (RP5 · 8 loc)`. Cell spacing fixed (codes / RP ran into the next column).
+  - Master Data → Sites → Edit: new **RPs run at this site** field, and under the plants a **Plants · RP · locations** editor. Each plant gets an RP picker (default "Site RP"); **Add location** rows each have name, RP ("Same as plant" or an override) and Remove. The table column now reads e.g. `MTF (RP5 · 5 loc), RRTF (RP5 · 8 loc)`. Cell spacing fixed (codes / RP ran into the next column).
   - Supabase: migration `supabase/migrations/20261013_001_site_plant_details.sql` adds `sites.plant_details jsonb not null default '[]'` (must be an array). `remote.ts` loads and saves it.
-  - Seed (`src/lib/seed.ts`): MTF = MTF RP5 (5 locations), ARMA RP2, RRTF RP5 (8 locations); DTA's ARMA RP2.
+  - Seed (`src/lib/seed.ts`): MTF = MTF RP5 (5 locations), RRTF RP5 (8 locations).
   - Not in B02: Work jobs / DPR lines picking plant → location from this list. That's B07 (painting line) and merge plan PR 2.
-- Verified on `npm run dev` as Super Admin (local data only): entered MTF's RPs and all 13 locations through the editor → "Saved MTF · 3 plants · 13 locations". After a page reload: RRTF RP5, RRTF location 6 "RIL-2", MTF location 2 "Saipem to DTA product (CT vicinity)" all kept. A location RP override saved and reloaded, then was removed again. Site RPs set to only RP5 → refused: "ARMA: RP2 isn't one of this site's RPs (RP5)". DTA's plants show RP2 from the site. No console errors; `tsc` + `eslint src` clean.
+- Verified on `npm run dev` as Super Admin (local data only): entered MTF's RPs and all 13 locations through the editor → "Saved MTF · 2 plants · 13 locations". After a page reload: RRTF RP5, RRTF location 6 "RIL-2", MTF location 2 "Saipem to DTA product (CT vicinity)" all kept. A location RP override saved and reloaded, then was removed again. Site RPs set to only RP5 → refused when a plant's RP isn't one of the site's RPs. DTA's plants show RP2 from the site. No console errors; `tsc` + `eslint src` clean.
 - **Before deploy:** apply the migration to the live Supabase project (`sge-obms`) **first**. Every site save now writes `plant_details`, so without the column all site saves would fail with "Not saved: …". Then enter MTF's RPs and locations on the live site (same steps as above).
 
 ### B03: New supervisor has no labourers to mark, and nobody can assign any
@@ -217,7 +217,7 @@ Screenshots, when saved as files, go in `docs/bugs/` as `B<nn>-<n>.png`. Never i
   - DPR form, painting line: Plant → **Location** (suggests the plant's Master Data locations from B02, or type a new spot) → Activity → Area m² → **MPS picked from a list** → **Total paint** with the norm beside it. A painting line gets a **Paint used** box: **Add paint** rows of paint type (suggested from that MPS) + litres, with Remove. New lines copy the previous line's plant and MPS.
   - Submit checks (`src/lib/dpr-validate.ts`): location required; painting needs an MPS; area > 0 needs at least one paint with litres; each paint row needs a type and litres > 0; no paint type twice.
   - Blasting lines don't ask for paint.
-- Verified on `npm run dev` as Super Admin, new painting DPR on MTF (V. Chauhan): plants MTF / ARMA / RRTF; MPS list MPS-1…29 incl. 6 and 23; RRTF location suggestions = its 8 locations; MPS-2 paint suggestions = Type 4, Type 5, Type 6, Thinner. A 100 m² line with 30 + 40 + 15 L showed "85 L · norm ~83.9 L"; 220 L showed "⚠ 220 L is 162% above the MPS-2 norm (~83.9 L for 100 m²)". Submit listed "the same paint type is entered twice" and, for an empty 2nd line, plant / location / paint messages. Nothing was saved (checks stop Submit first). No console errors; `tsc` + `eslint src` clean.
+- Verified on `npm run dev` as Super Admin, new painting DPR on MTF (V. Chauhan): plants MTF / RRTF; MPS list MPS-1…29 incl. 6 and 23; RRTF location suggestions = its 8 locations; MPS-2 paint suggestions = Type 4, Type 5, Type 6, Thinner. A 100 m² line with 30 + 40 + 15 L showed "85 L · norm ~83.9 L"; 220 L showed "⚠ 220 L is 162% above the MPS-2 norm (~83.9 L for 100 m²)". Submit listed "the same paint type is entered twice" and, for an empty 2nd line, plant / location / paint messages. Nothing was saved (checks stop Submit first). No console errors; `tsc` + `eslint src` clean.
 - Not done here: deducting litres from the supervisor's paint stock per type (§6). That's merge plan PR 8 (paint on `PaintBatch`).
 
 ### B08: Save and Submit notify SIC and Admin

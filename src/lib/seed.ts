@@ -481,7 +481,6 @@ export function createSeedState(): AppState {
         client: "Sikka Ports & Terminals Limited",
         enabled: true,
         rpTags: ["RP2", "RP5"],
-        // Owner, 2026-11-18: there is no plant named ARMA
         plants: ["MTF", "RRTF"],
         // From the owner's MTF location sheet (2026-10-13); every location takes its plant's RP
         plantDetails: [

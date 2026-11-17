@@ -1,15 +1,16 @@
-/** Auto-generated from PO PDF extract (pypdf). Do not edit by hand — re-run scripts/extract-po-rates.py */
+/** Auto-generated from PO PDF extract (pypdf). Do not edit by hand — re-run scripts/extract-po-rates.py
+ *  (owner, 2026-11-18: a plant name that doesn't exist is dropped from the two PO labels; the script does the same) */
 import type { RateLine } from "./types";
 
 export const PO_INGEST_SUMMARY = [
   { file: "PO_560002720 MARINE.pdf", po: "560002720", sites: ["site-marine"], status: "ok", count: 86 },
-  { file: "PO_560002718-MTF RP-5 ARMA.pdf", po: "560002718", sites: ["site-mtf"], status: "ok", count: 6 },
+  { file: "PO_560002718-MTF RP-5.pdf", po: "560002718", sites: ["site-mtf"], status: "ok", count: 6 },
   { file: "PO_560002716 -DTA-CPP.pdf", po: "560002716", sites: ["site-dta"], status: "ok", count: 147 },
   { file: "PO_560002714 RP5 MTF.pdf", po: "560002714", sites: ["site-mtf"], status: "ok", count: 147 },
   { file: "PO_560002711-MARIN PAINTING.pdf", po: "560002711", sites: ["site-marine"], status: "ok", count: 147 },
   { file: "PO_260069439 DTA-PCG (1).pdf", po: "260069439", sites: ["site-dta", "site-pcg"], status: "ok", count: 149 },
   { file: "PO_260069431 RP 2 DTA.pdf", po: "260069431", sites: ["site-dta"], status: "ok", count: 147 },
-  { file: "PO_260069430-DTA ARMA.pdf", po: "260069430", sites: ["site-dta"], status: "ok", count: 6 },
+  { file: "PO_260069430-DTA.pdf", po: "260069430", sites: ["site-dta"], status: "ok", count: 6 },
   { file: "PO_230261547 MANPOWER SEZ PCG.pdf", po: "230261547", sites: ["site-pcg"], status: "ok", count: 4 },
 ] as const;
 
@@ -101,12 +102,12 @@ export const SEED_RATE_LINES: Omit<RateLine, "id">[] = [
   { poNumber: "560002720", siteIds: ["site-marine"], itemKey: "3265785", description: "3265785 DISMANTLING-SCAFF ELEV 0-15M, WITH FIM", uom: "m3", rateInr: 25.93, effectiveFrom: "2026-04-16", sourceFile: "PO_560002720 MARINE.pdf", superseded: false },
   { poNumber: "560002720", siteIds: ["site-marine"], itemKey: "3265780", description: "3265780 ERECTION-SCAFF ELEV >30-45 M, WITH FIM", uom: "m3", rateInr: 53.06, effectiveFrom: "2026-04-16", sourceFile: "PO_560002720 MARINE.pdf", superseded: false },
   { poNumber: "560002720", siteIds: ["site-marine"], itemKey: "3265778", description: "3265778 ERECTION-SCAFF ELEV 0-15M, WITH FIM", uom: "m3", rateInr: 40.93, effectiveFrom: "2026-04-16", sourceFile: "PO_560002720 MARINE.pdf", superseded: false },
-  { poNumber: "560002718", siteIds: ["site-mtf"], itemKey: "3143998", description: "3143998 SURFACE PREP.MANUAL /MECH", uom: "m2", rateInr: 46.59, effectiveFrom: "2026-02-18", sourceFile: "PO_560002718-MTF RP-5 ARMA.pdf", superseded: false },
-  { poNumber: "560002718", siteIds: ["site-mtf"], itemKey: "3361261", description: "3361261 CHRG INTERNAL-CU SLAG BLAST ARMAMASTIC", uom: "m2", rateInr: 328.91, effectiveFrom: "2026-02-18", sourceFile: "PO_560002718-MTF RP-5 ARMA.pdf", superseded: false },
-  { poNumber: "560002718", siteIds: ["site-mtf"], itemKey: "3361276", description: "3361276 CHRG EXTERNAL-CU SLAG BLAST ARMAMASTIC", uom: "m2", rateInr: 294.52, effectiveFrom: "2026-02-18", sourceFile: "PO_560002718-MTF RP-5 ARMA.pdf", superseded: false },
-  { poNumber: "560002718", siteIds: ["site-mtf"], itemKey: "3378172", description: "3378172 APLY MPS10 - BLAST CLG- BRUSHROLLER APLY", uom: "m2", rateInr: 601.12, effectiveFrom: "2026-02-18", sourceFile: "PO_560002718-MTF RP-5 ARMA.pdf", superseded: false },
-  { poNumber: "560002718", siteIds: ["site-mtf"], itemKey: "3378317", description: "3378317 APLY MPS10 - BLAST CLG - SPRAY APLY", uom: "m2", rateInr: 652.31, effectiveFrom: "2026-02-18", sourceFile: "PO_560002718-MTF RP-5 ARMA.pdf", superseded: false },
-  { poNumber: "560002718", siteIds: ["site-mtf"], itemKey: "3144000", description: "3144000 SURFACE PREP.WATER JET", uom: "m2", rateInr: 47.64, effectiveFrom: "2026-02-18", sourceFile: "PO_560002718-MTF RP-5 ARMA.pdf", superseded: false },
+  { poNumber: "560002718", siteIds: ["site-mtf"], itemKey: "3143998", description: "3143998 SURFACE PREP.MANUAL /MECH", uom: "m2", rateInr: 46.59, effectiveFrom: "2026-02-18", sourceFile: "PO_560002718-MTF RP-5.pdf", superseded: false },
+  { poNumber: "560002718", siteIds: ["site-mtf"], itemKey: "3361261", description: "3361261 CHRG INTERNAL-CU SLAG BLAST ARMAMASTIC", uom: "m2", rateInr: 328.91, effectiveFrom: "2026-02-18", sourceFile: "PO_560002718-MTF RP-5.pdf", superseded: false },
+  { poNumber: "560002718", siteIds: ["site-mtf"], itemKey: "3361276", description: "3361276 CHRG EXTERNAL-CU SLAG BLAST ARMAMASTIC", uom: "m2", rateInr: 294.52, effectiveFrom: "2026-02-18", sourceFile: "PO_560002718-MTF RP-5.pdf", superseded: false },
+  { poNumber: "560002718", siteIds: ["site-mtf"], itemKey: "3378172", description: "3378172 APLY MPS10 - BLAST CLG- BRUSHROLLER APLY", uom: "m2", rateInr: 601.12, effectiveFrom: "2026-02-18", sourceFile: "PO_560002718-MTF RP-5.pdf", superseded: false },
+  { poNumber: "560002718", siteIds: ["site-mtf"], itemKey: "3378317", description: "3378317 APLY MPS10 - BLAST CLG - SPRAY APLY", uom: "m2", rateInr: 652.31, effectiveFrom: "2026-02-18", sourceFile: "PO_560002718-MTF RP-5.pdf", superseded: false },
+  { poNumber: "560002718", siteIds: ["site-mtf"], itemKey: "3144000", description: "3144000 SURFACE PREP.WATER JET", uom: "m2", rateInr: 47.64, effectiveFrom: "2026-02-18", sourceFile: "PO_560002718-MTF RP-5.pdf", superseded: false },
   { poNumber: "560002716", siteIds: ["site-dta"], itemKey: "3378186", description: "3378186 APLY MPS18 - BLAST CLG - SPRAY APLY", uom: "m2", rateInr: 574.68, effectiveFrom: "2026-02-18", sourceFile: "PO_560002716 -DTA-CPP.pdf", superseded: false },
   { poNumber: "560002716", siteIds: ["site-dta"], itemKey: "3378225", description: "3378225 APLY MPS18 - BLAST CLG- BRUSHROLLER APLY", uom: "m2", rateInr: 631.18, effectiveFrom: "2026-02-18", sourceFile: "PO_560002716 -DTA-CPP.pdf", superseded: false },
   { poNumber: "560002716", siteIds: ["site-dta"], itemKey: "3378254", description: "3378254 APLY MPS18 - POWERTOOL CLG - SPRAY CLG", uom: "m2", rateInr: 177.78, effectiveFrom: "2026-02-18", sourceFile: "PO_560002716 -DTA-CPP.pdf", superseded: false },
@@ -844,12 +845,12 @@ export const SEED_RATE_LINES: Omit<RateLine, "id">[] = [
   { poNumber: "260069431", siteIds: ["site-dta"], itemKey: "3400827", description: "3400827 APLY MPS23-PTCLG-SPY APLY RPE AC DFT 50M", uom: "m2", rateInr: 283.29, effectiveFrom: "2026-03-06", sourceFile: "PO_260069431 RP 2 DTA.pdf", superseded: false },
   { poNumber: "260069431", siteIds: ["site-dta"], itemKey: "3400818", description: "3400818 APLY MPS23-HT-BRSH ROL ROP AC DFT 50 MIC", uom: "m2", rateInr: 282.33, effectiveFrom: "2026-03-06", sourceFile: "PO_260069431 RP 2 DTA.pdf", superseded: false },
   { poNumber: "260069431", siteIds: ["site-dta"], itemKey: "3400858", description: "3400858 APLY MPS23-HTCLG-SPY APLY ROP AC DFT 50", uom: "m2", rateInr: 240.08, effectiveFrom: "2026-03-06", sourceFile: "PO_260069431 RP 2 DTA.pdf", superseded: false },
-  { poNumber: "260069430", siteIds: ["site-dta"], itemKey: "3143998", description: "3143998 SURFACE PREP.MANUAL /MECH", uom: "m2", rateInr: 48.93, effectiveFrom: "2026-03-01", sourceFile: "PO_260069430-DTA ARMA.pdf", superseded: false },
-  { poNumber: "260069430", siteIds: ["site-dta"], itemKey: "3361261", description: "3361261 CHRG INTERNAL-CU SLAG BLAST ARMAMASTIC", uom: "m2", rateInr: 345.35, effectiveFrom: "2026-03-01", sourceFile: "PO_260069430-DTA ARMA.pdf", superseded: false },
-  { poNumber: "260069430", siteIds: ["site-dta"], itemKey: "3361276", description: "3361276 CHRG EXTERNAL-CU SLAG BLAST ARMAMASTIC", uom: "m2", rateInr: 309.24, effectiveFrom: "2026-03-01", sourceFile: "PO_260069430-DTA ARMA.pdf", superseded: false },
-  { poNumber: "260069430", siteIds: ["site-dta"], itemKey: "3378172", description: "3378172 APLY MPS10 - BLAST CLG- BRUSHROLLER APLY", uom: "m2", rateInr: 631.17, effectiveFrom: "2026-03-01", sourceFile: "PO_260069430-DTA ARMA.pdf", superseded: false },
-  { poNumber: "260069430", siteIds: ["site-dta"], itemKey: "3378317", description: "3378317 APLY MPS10 - BLAST CLG - SPRAY APLY", uom: "m2", rateInr: 684.92, effectiveFrom: "2026-03-01", sourceFile: "PO_260069430-DTA ARMA.pdf", superseded: false },
-  { poNumber: "260069430", siteIds: ["site-dta"], itemKey: "3144000", description: "3144000 SURFACE PREP.WATER JET", uom: "m2", rateInr: 50.03, effectiveFrom: "2026-03-01", sourceFile: "PO_260069430-DTA ARMA.pdf", superseded: false },
+  { poNumber: "260069430", siteIds: ["site-dta"], itemKey: "3143998", description: "3143998 SURFACE PREP.MANUAL /MECH", uom: "m2", rateInr: 48.93, effectiveFrom: "2026-03-01", sourceFile: "PO_260069430-DTA.pdf", superseded: false },
+  { poNumber: "260069430", siteIds: ["site-dta"], itemKey: "3361261", description: "3361261 CHRG INTERNAL-CU SLAG BLAST ARMAMASTIC", uom: "m2", rateInr: 345.35, effectiveFrom: "2026-03-01", sourceFile: "PO_260069430-DTA.pdf", superseded: false },
+  { poNumber: "260069430", siteIds: ["site-dta"], itemKey: "3361276", description: "3361276 CHRG EXTERNAL-CU SLAG BLAST ARMAMASTIC", uom: "m2", rateInr: 309.24, effectiveFrom: "2026-03-01", sourceFile: "PO_260069430-DTA.pdf", superseded: false },
+  { poNumber: "260069430", siteIds: ["site-dta"], itemKey: "3378172", description: "3378172 APLY MPS10 - BLAST CLG- BRUSHROLLER APLY", uom: "m2", rateInr: 631.17, effectiveFrom: "2026-03-01", sourceFile: "PO_260069430-DTA.pdf", superseded: false },
+  { poNumber: "260069430", siteIds: ["site-dta"], itemKey: "3378317", description: "3378317 APLY MPS10 - BLAST CLG - SPRAY APLY", uom: "m2", rateInr: 684.92, effectiveFrom: "2026-03-01", sourceFile: "PO_260069430-DTA.pdf", superseded: false },
+  { poNumber: "260069430", siteIds: ["site-dta"], itemKey: "3144000", description: "3144000 SURFACE PREP.WATER JET", uom: "m2", rateInr: 50.03, effectiveFrom: "2026-03-01", sourceFile: "PO_260069430-DTA.pdf", superseded: false },
   { poNumber: "230261547", siteIds: ["site-pcg"], itemKey: "3118288", description: "3118288 SUPERVISOR - 12 HRS WORKING", uom: "mdy", rateInr: 3500.0, effectiveFrom: "2026-07-31", sourceFile: "PO_230261547 MANPOWER SEZ PCG.pdf", superseded: false },
   { poNumber: "230261547", siteIds: ["site-pcg"], itemKey: "3119975", description: "3119975 SAFETY SUPERVISOR", uom: "mdy", rateInr: 3500.0, effectiveFrom: "2026-07-31", sourceFile: "PO_230261547 MANPOWER SEZ PCG.pdf", superseded: false },
   { poNumber: "230261547", siteIds: ["site-pcg"], itemKey: "3098418", description: "3098418 H809-MECH.MANPOWER-RIGGER", uom: "mdy", rateInr: 3000.0, effectiveFrom: "2026-07-31", sourceFile: "PO_230261547 MANPOWER SEZ PCG.pdf", superseded: false },

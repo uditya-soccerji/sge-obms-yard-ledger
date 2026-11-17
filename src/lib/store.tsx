@@ -399,6 +399,10 @@ function migrateState(parsed: Partial<AppState>): AppState {
   const firstImport = importAudit
     ? { by: (parsed.users ?? []).find((u) => u.id === importAudit.userId)?.name || importAudit.username, at: importAudit.at, file: /from (.+?)( ·|$)/.exec(importAudit.detail)?.[1] ?? "upload" }
     : null;
+  // Owner, 2026-11-18: a plant name that doesn't exist is dropped from saved rate-book source labels
+  if (parsed.rateLines?.some((r) => / ARMA\.pdf$/.test(r.sourceFile ?? ""))) {
+    parsed = { ...parsed, rateLines: parsed.rateLines.map((r) => (/ ARMA\.pdf$/.test(r.sourceFile ?? "") ? { ...r, sourceFile: r.sourceFile.replace(/ ARMA\.pdf$/, ".pdf") } : r)) };
+  }
   return {
     ...seed,
     ...parsed,

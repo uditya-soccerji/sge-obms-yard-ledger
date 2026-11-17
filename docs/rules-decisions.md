@@ -273,7 +273,7 @@ Taken without a fresh Owner answer; change here if the Owner disagrees.
 - **Equipment:** supervisors report a fault with a note; only the Store marks it repaired.
 - **Ledger entries** (§8) need date, time, category (fixed list), paid to / received from, payment mode and a remark.
 - **Switched-off sites** stay in the site picker marked "(off)" and are read-only; Master Data and users still work there so the site can be switched back on.
-- **Site codes** are 2–6 capital letters and unique; a site needs a name and at least one plant. **DTA's plants** are the 12 from the Aug-26 job plan (the old CPP / CPP-flare / ARMA demo plants are gone from the local seed; the live Supabase row is changed by the Owner in Master Data).
+- **Site codes** are 2–6 capital letters and unique; a site needs a name and at least one plant. **DTA's plants** are the 12 from the Aug-26 job plan (the old CPP / CPP-flare demo plants are gone from the local seed; the live Supabase row is changed by the Owner in Master Data).
 - **Super Admin protection** (§2): only a Super Admin creates or changes a Super Admin, nobody deactivates themselves, and one active Super Admin always remains — checked in the app and in the admin-users function. Deactivated users are banned in auth and signed out within ~3 minutes.
 - **Labourers:** EP (PP + 10 digits) unique; Aadhaar optional, 12 digits, unique, visible to Owner / Super Admin / HR only; mobile optional; contractor, supervisor, site and a wage above zero required. Gate pass is no longer shown. Owner / Super Admin may delete a labourer with no attendance, wages or login; otherwise deactivate.
 - **Reset** asks first and resets the Work data as well.
@@ -421,7 +421,7 @@ Process page: "Store module — process" (Claude doc). Decisions there: reorder 
 - Existing sites keep their ids (DTA, MTF = 3611 RP2, Marine → Marine Ops, Jetty → Jetty Mech, PCG); new: MTF5 (3622 MTF RP5), SWRO, CPP, PCCS, HPIB. Gagva isn't on the list: switched off (data kept, Master Data → Sites). The header lists only active sites.
 - `Site.plantCode` (RIL plant code; empty when none) is edited in Master Data → Sites. Site codes may now have digits after the first letter (MTF5).
 - The list is applied once per saved site (`applySiteList`), so later edits in Master Data stay.
-- MTF's plants (MTF, RRTF; owner 2026-11-18: there is no plant ARMA — removed from DTA too) stay under **3611 MTF** with their per-plant RP (owner, 2026-11-13); 3622 MTF RP5 starts with only a placeholder plant "MTF" and no data.
+- MTF's plants (MTF, RRTF) stay under **3611 MTF** with their per-plant RP (owner, 2026-11-13); 3622 MTF RP5 starts with only a placeholder plant "MTF" and no data.
 - CPP and HPIB are sites of their own, not DTA plants (owner, 2026-11-13): DTA's "PRU & HPIB" is renamed **PRU** in the site list and in Work's plan lines, DPRs, RIL JMS and plan requests (`PLANT_RENAMES_2026_11`, `renameWorkPlants`). CPP was never on DTA's list.
 - **Same list on every device (2026-11-14):** the list is applied at sign-in too (not only when a browser reloads its saved copy), and sites on the list that the shared database doesn't have yet (MTF5, SWRO, CPP, PCCS, HPIB) are saved to it the next time an Owner / Super Admin signs in.
 - **Master Data wins (2026-11-14):** the database now holds the agreed names and RPs (3611 site named **OMSH**, RP2 — owner, 2026-11-14 — Jetty Mech, Marine Ops, PCG RP2, Gagva off). At sign-in the app only adds plant codes (and any listed site the database lacks); names, RPs and on / off are whatever Master Data → Sites says (`withPlantCodes`).
@@ -477,6 +477,6 @@ Process page: "Store module — process" (Claude doc). Decisions there: reorder 
 - **Attendance** has its own table (migration 008, §32) and is now in the app too (it had stayed on a branch).
 - **Test tools:** Reset, Load demo, scenarios and Start fresh are off while data is shared (they'd overwrite every device's real records). View as stays.
 - **Overtime:** no in / out times on the DPR (§36), so marking **Overtime** asks for **OT hours** (½-hour steps, up to 16), required to submit; pay = daily wage ÷ 8 per hour (§17). Saved on the attendance day (`ot_hours`).
-- **Plants:** there is no plant ARMA (owner) — removed from DTA. Marine and SWRO stay plants under OMSH. Solar / NEI stays a site.
+- **Plants:** a plant the owner says doesn't exist was removed from DTA, MTF, the docs and the rate-book labels (owner, 2026-11-18). Marine and SWRO stay plants under OMSH. Solar / NEI stays a site.
 - **Staff sync fix:** a fetch compared this device's copy with the new server copy, so changes made elsewhere looked like local edits and the old copy was written back (the 14 staff EPs set on 2026-11-16 were lost that way; restored).
 - **Crews from the WhatsApp DTA reports:** proposed per labourer (`imports/whatsapp-dta/3-proposed-crews.xlsx`), applied only after the owner's review.

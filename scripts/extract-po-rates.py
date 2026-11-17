@@ -113,8 +113,10 @@ def main():
             summary.append({"file": fname, "status": "MISSING", "count": 0})
             continue
         text = extract_text(path)
-        parsed = parse_inr_lines(text, po, sites, fname) or parse_manpower(
-            text, po, sites, ef, fname
+        # Owner, 2026-11-18: the label drops a plant name that doesn't exist (the PDF keeps its name on disk)
+        label = fname.replace(" ARMA.pdf", ".pdf")
+        parsed = parse_inr_lines(text, po, sites, label) or parse_manpower(
+            text, po, sites, ef, label
         )
         seen = set()
         unique = []
@@ -127,7 +129,7 @@ def main():
         all_lines.extend(unique)
         summary.append(
             {
-                "file": fname,
+                "file": fname.replace(" ARMA.pdf", ".pdf"),
                 "po": po,
                 "sites": sites,
                 "status": "ok",
