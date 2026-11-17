@@ -305,7 +305,8 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
   const markNotified = React.useRef(markWageChangesNotified);
   markNotified.current = markWageChangesNotified;
   useEffect(() => {
-    if (!hydrated) return;
+    // Shared data: wait for other devices' alerts first, or every device posts the same ones (owner, 2026-11-18)
+    if (!hydrated || (supabase && !shared.loaded)) return;
     const tick = () => {
       const now = Date.now();
       const due = wageReqs.filter((r) => r.status === "pending" && !r.notified && now - Date.parse(r.requestedAt) >= WAGE_UNDO_MS);
@@ -325,13 +326,14 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
     tick();
     const t = setInterval(tick, 10_000);
     return () => clearInterval(t);
-  }, [hydrated, wageReqs, log]);
+  }, [hydrated, shared.loaded, wageReqs, log]);
 
   const markPlanRef = React.useRef<(ids: string[], patch: { notified?: boolean }) => void>(() => {});
   // Plan lines: after the Undo window, one alert per site to its SIC (and Owner / SA), with the count
   const planReqs = work.planRequests;
   useEffect(() => {
-    if (!hydrated) return;
+    // Shared data: wait for other devices' alerts first, or every device posts the same ones (owner, 2026-11-18)
+    if (!hydrated || (supabase && !shared.loaded)) return;
     const tick = () => {
       const now = Date.now();
       const due = planReqs.filter((r) => r.status === "pending" && !r.notified && now - Date.parse(r.requestedAt) >= WAGE_UNDO_MS);
@@ -346,14 +348,15 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
     tick();
     const t = setInterval(tick, 10_000);
     return () => clearInterval(t);
-  }, [hydrated, planReqs, log]);
+  }, [hydrated, shared.loaded, planReqs, log]);
 
   // Same for Trades / Rate book / Materials / Units: one alert per sheet after the Undo window
   const masterReqs = fullState.masterChangeRequests;
   const markMaster = React.useRef(markMasterChanges);
   markMaster.current = markMasterChanges;
   useEffect(() => {
-    if (!hydrated) return;
+    // Shared data: wait for other devices' alerts first, or every device posts the same ones (owner, 2026-11-18)
+    if (!hydrated || (supabase && !shared.loaded)) return;
     const tick = () => {
       const now = Date.now();
       const due = masterReqs.filter((r) => r.status === "pending" && !r.notified && now - Date.parse(r.requestedAt) >= WAGE_UNDO_MS);
@@ -376,11 +379,12 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
     tick();
     const t = setInterval(tick, 10_000);
     return () => clearInterval(t);
-  }, [hydrated, masterReqs, log]);
+  }, [hydrated, shared.loaded, masterReqs, log]);
 
   const passLabourers = fullState.labourers;
   useEffect(() => {
-    if (!hydrated) return;
+    // Shared data: wait for other devices' alerts first, or every device posts the same ones (owner, 2026-11-18)
+    if (!hydrated || (supabase && !shared.loaded)) return;
     const sent = new Set(ref.current.events.filter((e) => e.kind === "pass_expiring").map((e) => e.refId));
     for (const p of passesNeedingAction(passLabourers, today())) {
       const l = p.labourer;
@@ -397,7 +401,7 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
         refId,
       });
     }
-  }, [hydrated, passLabourers, log]);
+  }, [hydrated, shared.loaded, passLabourers, log]);
 
   const addPlanLine = useCallback<WorkApi["addPlanLine"]>((input) => {
     if (!rights().canPlan) return NOT_ALLOWED;
