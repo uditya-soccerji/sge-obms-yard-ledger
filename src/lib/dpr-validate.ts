@@ -48,6 +48,7 @@ export function validateDprForSubmit(
       const t = timeProblem(m.inTime, m.outTime);
       const who = crew.find((l) => l.id === m.labourerId)?.name ?? m.labourerId;
       if (t) out.push(`${who}: ${t.toLowerCase()}`);
+      if (m.status === "overtime" && !(m.otHours && m.otHours > 0) && !m.outTime) out.push(`${who}: enter the overtime hours`);
     }
     if (unmarked.length) {
       const names = unmarked.slice(0, 5).map((l) => l.name).join(", ");

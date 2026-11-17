@@ -22,8 +22,27 @@ import { SAFETY_CHECKLIST_SEED } from "./safety-dpr";
 import { seedMasterCatalog } from "./master/seed-catalog";
 import { inStore, pickLots } from "./equipment-register";
 import { supabase } from "./supabase/client";
+import { useSharedSync } from "./shared-sync";
 import { partsOf, remoteLoadLabourers, remoteSaveLabourers, type LabourerParts } from "./supabase/labourers";
 import { remoteLoadStaff, remoteSaveStaff, STAFF_WRITE_ROLES, staffPrint } from "./supabase/staff";
+import { attendancePrint, attendanceWindowStart, remoteAttendanceChanges, remoteLoadAttendance, remoteSaveAttendance } from "./supabase/attendance";
+
+/**
+ * Attendance this browser held before the shared register (migration 008). Kept apart
+ * so the main copy stops growing; Owner / SA / HR move it up once from the HR page.
+ */
+const LOCAL_ATTENDANCE_KEY = "sge-attendance-before-shared";
+/** Marks made here that haven't reached the server yet (survive a reload while offline) */
+const UNSENT_ATTENDANCE_KEY = "sge-attendance-unsent";
+const MOVE_ATTENDANCE_ROLES: RoleId[] = ["super_admin", "owner", "hr"];
+function readLocalAttendance(): AttendanceRecord[] {
+  try {
+    const raw = localStorage.getItem(LOCAL_ATTENDANCE_KEY);
+    return raw ? (JSON.parse(raw) as AttendanceRecord[]) : [];
+  } catch {
+    return [];
+  }
+}
 import {
   remoteAudit,
   remoteCreateUser,
@@ -103,6 +122,12 @@ interface StoreApi {
   currentAccount: UserAccount | null;
   /** Shared labourer register (migration 006): last save problem, null when fine */
   labourerSync: { loaded: boolean; error: string | null };
+  /** Shared attendance (migration 008): loaded yet, last save problem, marks still only in this browser */
+  /** Store, equipment, safety and wage records in the shared database (owner, 2026-11-18) */
+  opsSync: { loaded: boolean; error: string | null; waiting: number };
+  attendanceSync: { shared: boolean; loaded: boolean; error: string | null; localWaiting: number; moving: string | null };
+  /** Owner / SA / HR: send this browser's older attendance to the shared register (once) */
+  moveLocalAttendance: () => Promise<{ ok: boolean; message: string }>;
   login: (
     username: string,
     password: string
@@ -309,6 +334,15 @@ export type RequestAction = "approve" | "start" | "fulfil" | "part_fill" | "canc
 
 const StoreContext = createContext<StoreApi | null>(null);
 
+/** Records kept in the shared database (owner, 2026-11-18); attendance, labourers, staff, sites and Master Data have their own tables */
+const OPS_SHARED = [
+  "equipment", "equipmentRequests", "crewRequests", "kitLots", "kitIssues", "equipmentReturns", "storeItems", "storeMoves",
+  "wageChangeRequests", "masterChangeRequests", "safetyDays", "safetyObservations", "leaves", "advances", "vendorBills", "wageLedger",
+  "workPlans", "transfers", "compliance", "rateCards", "rateLines", "tradeCatalogue", "wageBands", "financeAlerts", "telegramDrafts", "vendors",
+] as const satisfies readonly (keyof AppState)[];
+/** Of those, the ones whose built-in records are demo data (the rest — store items, rate book, trades, wage bands — are real lists) */
+const OPS_SHARED_DEMO = ["equipment", "equipmentRequests", "workPlans", "safetyDays", "compliance", "transfers", "vendors", "wageLedger", "acplPunches", "acplMatches"];
+
 function uid(prefix: string) {
   return `${prefix}-${Math.random().toString(36).slice(2, 9)}`;
 }
@@ -470,6 +504,20 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw) as Partial<AppState>;
+        // Shared attendance (migration 008): marks saved in this browser before move to their own
+        // key (shrink the main copy first, so the two never need room at the same time)
+        if (supabase && parsed.attendance?.length) {
+          const before = readLocalAttendance();
+          const ids = new Set(before.map((a) => a.id));
+          const kept = [...before, ...parsed.attendance.filter((a) => !ids.has(a.id))];
+          parsed.attendance = [];
+          try {
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
+            localStorage.setItem(LOCAL_ATTENDANCE_KEY, JSON.stringify(kept));
+          } catch {
+            /* storage blocked — the marks stay in the main copy until next time */
+          }
+        }
         // This tab's own sign-in survives a reload even if another tab signed in as someone else
         const mine = sessionStorage.getItem(TAB_SESSION_KEY);
         setState({ ...migrateState(parsed), ...(mine ? (JSON.parse(mine) as Partial<AppState>) : {}) });
@@ -495,7 +543,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       try {
         const incoming = migrateState(JSON.parse(e.newValue) as Partial<AppState>);
         fromOtherTab.current = true;
-        setState((s) => ({ ...incoming, ...tabSession(s) }));
+        // Shared attendance isn't in the saved copy; each tab keeps its own loaded window
+        setState((s) => ({ ...incoming, ...tabSession(s), ...(supabase ? { attendance: s.attendance } : {}) }));
       } catch {
         /* unreadable copy — keep ours */
       }
@@ -510,7 +559,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       fromOtherTab.current = false;
       return;
     }
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    // Shared attendance (migration 008) lives in the database, not in this copy
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(supabase ? { ...state, attendance: [] } : state));
+    if (supabase && attSynced.current) {
+      try {
+        localStorage.setItem(UNSENT_ATTENDANCE_KEY, JSON.stringify(attPending()));
+      } catch {
+        /* full / blocked */
+      }
+    }
   }, [state, hydrated]);
   useEffect(() => {
     if (!hydrated) return;
@@ -819,8 +876,14 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       // Later loads keep local records not sent yet
       extra = cur.staff.filter((x) => !onServer.has(x.id) && !demoStaffIds.has(x.id) && staffSynced.current?.get(x.id) !== staffPrint(x));
     }
+    // A local edit not sent yet = differs from the copy last loaded (not from the new one): comparing with
+    // the new copy made every change made elsewhere look like a local edit, and the stale copy was then
+    // written back over it (lost the staff EPs set on 2026-11-16)
+    const before = staffSynced.current;
+    const pendingIds = new Set(first || !before ? [] : cur.staff.filter((x) => onServer.has(x.id) && before.has(x.id) && before.get(x.id) !== staffPrint(x)).map((x) => x.id));
     staffSynced.current = new Map(rows.map((x) => [x.id, staffPrint(x)]));
-    const pendingIds = new Set(cur.staff.filter((x) => onServer.has(x.id) && staffSynced.current?.get(x.id) !== staffPrint(x) && !first).map((x) => x.id));
+    // Our pending edits stay unsent-looking so they go up
+    for (const id of pendingIds) staffSynced.current.set(id, before!.get(id)!);
     setState((s) => ({ ...s, staff: [...rows.map((r) => upgrade.get(r.id) ?? (pendingIds.has(r.id) ? s.staff.find((x) => x.id === r.id) ?? r : r)), ...extra] }));
     setStaffLoaded(true);
   }, [demoStaffIds]);
@@ -854,6 +917,164 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (staffLoaded) void pushStaff();
   }, [state.staff, staffLoaded, pushStaff]);
+
+  // ---- Store, equipment, safety, crew and wage records in the shared database (owner, 2026-11-18) ----
+  // Before this they stayed in the browser that entered them (a PPE request from a supervisor's
+  // phone never reached the store keeper). Built-in demo records are never sent up.
+  const demoOpsIds = useMemo(() => {
+    const seed = createSeedState() as unknown as Record<string, { id: string }[]>;
+    const out = new Set<string>();
+    for (const col of OPS_SHARED_DEMO) for (const r of seed[col] ?? []) out.add(`${col}|${r.id}`);
+    return out;
+  }, []);
+  const opsLoginId = state.impersonatorAccountId ?? state.currentAccountId ?? "";
+  const opsShared = useSharedSync<AppState>({
+    enabled: hydrated && !!supabase && !!opsLoginId,
+    sessionKey: opsLoginId,
+    state,
+    stateRef,
+    setState,
+    prefix: "ops",
+    collections: OPS_SHARED,
+    isDemo: (col, id) => demoOpsIds.has(`${col}|${id}`),
+  });
+
+  // ---- Attendance in the shared database (owner, 2026-11-12, migration 008) ----
+  // Loads the recent window at sign-in, then only what changed each minute (a full
+  // reload every 10 minutes also picks up deletions). Every change here is sent back.
+  // Until the first load nothing local is pushed, so demo marks never reach the server.
+  const attSynced = React.useRef<Map<string, string> | null>(null);
+  const attCursor = React.useRef<string | null>(null);
+  const attBusy = React.useRef(false);
+  const attAgain = React.useRef(false);
+  const [attendanceSync, setAttendanceSync] = useState<StoreApi["attendanceSync"]>({ shared: !!supabase, loaded: false, error: null, localWaiting: 0, moving: null });
+
+  /** Local marks not yet on the server (new, or changed since the last load) */
+  const attPending = () => {
+    const synced = attSynced.current;
+    if (!synced) return [];
+    return stateRef.current.attendance.filter((a) => synced.get(a.id) !== attendancePrint(a));
+  };
+
+  const pullAttendance = useCallback(async (full: boolean) => {
+    if (!supabase || attBusy.current) return;
+    const from = attendanceWindowStart();
+    if (full || !attCursor.current || !attSynced.current) {
+      const res = await remoteLoadAttendance(from);
+      if (!res) return setAttendanceSync((x) => ({ ...x, error: "Couldn't load attendance from the shared register" }));
+      // First load after sign-in / reload: marks that didn't reach the server last time go again
+      let unsent: AttendanceRecord[] = [];
+      if (!attSynced.current) {
+        try {
+          unsent = JSON.parse(localStorage.getItem(UNSENT_ATTENDANCE_KEY) ?? "[]") as AttendanceRecord[];
+        } catch {
+          unsent = [];
+        }
+      }
+      const unsentIds = new Set(unsent.map((a) => a.id));
+      const pending = [...attPending().filter((a) => !unsentIds.has(a.id)), ...unsent];
+      const pendingIds = new Set(pending.map((a) => a.id));
+      attSynced.current = new Map(res.records.map((a) => [a.id, attendancePrint(a)]));
+      attCursor.current = res.cursor ?? new Date(0).toISOString();
+      setState((s) => ({ ...s, attendance: [...res.records.filter((a) => !pendingIds.has(a.id)), ...pending] }));
+    } else {
+      const res = await remoteAttendanceChanges(from, attCursor.current);
+      if (!res) return setAttendanceSync((x) => ({ ...x, error: "Couldn't load attendance changes" }));
+      attCursor.current = res.cursor;
+      if (res.records.length) {
+        const pendingIds = new Set(attPending().map((a) => a.id));
+        const incoming = res.records.filter((a) => !pendingIds.has(a.id));
+        for (const a of incoming) attSynced.current.set(a.id, attendancePrint(a));
+        const byId = new Map(incoming.map((a) => [a.id, a]));
+        setState((s) => ({ ...s, attendance: [...s.attendance.filter((a) => !byId.has(a.id)), ...incoming] }));
+      }
+    }
+    setAttendanceSync((x) => ({ ...x, loaded: true, error: null, localWaiting: readLocalAttendance().length }));
+  }, []);
+
+  useEffect(() => {
+    attSynced.current = null;
+    attCursor.current = null;
+    setAttendanceSync((x) => ({ ...x, loaded: false, error: null }));
+    if (!supabase || !accountId || !hydrated) return;
+    void pullAttendance(true);
+    let tick = 0;
+    const t = setInterval(() => { tick += 1; void pullAttendance(tick % 10 === 0); }, 60 * 1000);
+    const onFocus = () => void pullAttendance(false);
+    window.addEventListener("focus", onFocus);
+    return () => { clearInterval(t); window.removeEventListener("focus", onFocus); };
+  }, [accountId, hydrated, pullAttendance]);
+
+  const pushAttendance = useCallback(async () => {
+    const synced = attSynced.current;
+    if (!supabase || !synced) return;
+    if (attBusy.current) { attAgain.current = true; return; }
+    const cur = stateRef.current;
+    const ids = new Set(cur.attendance.map((a) => a.id));
+    const changed = cur.attendance.filter((a) => synced.get(a.id) !== attendancePrint(a));
+    const removed = [...synced.keys()].filter((id) => !ids.has(id));
+    if (!changed.length && !removed.length) return;
+    attBusy.current = true;
+    const roles = cur.users.find((x) => x.id === cur.currentAccountId)?.roles ?? [];
+    const res = await remoteSaveAttendance(roles, changed, removed);
+    attBusy.current = false;
+    if (res.ok) {
+      for (const a of changed) synced.set(a.id, attendancePrint(a));
+      for (const id of removed) synced.delete(id);
+      setAttendanceSync((x) => ({ ...x, error: null }));
+    } else setAttendanceSync((x) => ({ ...x, error: res.error ?? "Attendance didn't save" }));
+    if (attAgain.current) { attAgain.current = false; void pushAttendance(); }
+  }, []);
+
+  useEffect(() => {
+    if (attendanceSync.loaded) void pushAttendance();
+  }, [state.attendance, attendanceSync.loaded, pushAttendance]);
+
+  const moveLocalAttendance = useCallback<StoreApi["moveLocalAttendance"]>(async () => {
+    if (!supabase) return { ok: false, message: "No shared register on this copy of the app" };
+    const cur = stateRef.current;
+    const roles = cur.users.find((x) => x.id === cur.currentAccountId)?.roles ?? [];
+    if (!roles.some((r) => MOVE_ATTENDANCE_ROLES.includes(r))) return { ok: false, message: "Only the Owner, Super Admin or HR can move attendance" };
+    if (!attSynced.current || !labSynced.current) return { ok: false, message: "Still loading the shared register — try again in a moment" };
+    if (attBusy.current) return { ok: false, message: "Attendance is saving — try again in a moment" };
+    const local = readLocalAttendance();
+    if (!local.length) return { ok: true, message: "Nothing left to move" };
+    // Only labourers in the shared register and real sites; a day the server already has stays as it is
+    const labs = new Set(labSynced.current.keys());
+    const sites = new Set(cur.sites.map((x) => x.id));
+    const onServer = new Set(cur.attendance.map((a) => `${a.labourerId}|${a.date}`));
+    const send: AttendanceRecord[] = [];
+    let noLabourer = 0;
+    let already = 0;
+    for (const a of local) {
+      if (!labs.has(a.labourerId) || !sites.has(a.siteId)) noLabourer += 1;
+      else if (onServer.has(`${a.labourerId}|${a.date}`)) already += 1;
+      else { send.push(a); onServer.add(`${a.labourerId}|${a.date}`); }
+    }
+    attBusy.current = true;
+    const res = await remoteSaveAttendance(roles, send, [], (done, total) =>
+      setAttendanceSync((x) => ({ ...x, moving: `${done.toLocaleString("en-IN")} of ${total.toLocaleString("en-IN")}` }))
+    );
+    attBusy.current = false;
+    setAttendanceSync((x) => ({ ...x, moving: null }));
+    if (!res.ok) return { ok: false, message: res.error ?? "Attendance didn't save — nothing was removed from this browser" };
+    try {
+      localStorage.removeItem(LOCAL_ATTENDANCE_KEY);
+    } catch {
+      /* blocked */
+    }
+    setState((s) => ({
+      ...s,
+      auditLog: [makeAudit(s, "hr", "attendance", `Moved ${send.length} attendance marks from this browser to the shared register (${already} days already there, ${noLabourer} not in the register)`), ...s.auditLog],
+    }));
+    await pullAttendance(true);
+    return {
+      ok: true,
+      message: `Moved ${send.length.toLocaleString("en-IN")} marks.` +
+        (already ? ` ${already.toLocaleString("en-IN")} days were already in the shared register and kept as they are.` : "") +
+        (noLabourer ? ` ${noLabourer.toLocaleString("en-IN")} belonged to labourers not in the shared register (demo or removed) and were left out.` : ""),
+    };
+  }, [pullAttendance]);
   useEffect(() => {
     if (!supabase || !signedIn) return;
     const check = async () => {
@@ -1010,6 +1231,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const resetSeed = useCallback(() => {
+    // Shared data: a reset here would wipe every device's real records (owner, 2026-11-18)
+    if (supabase) return;
     const fresh = createSeedState();
     localStorage.setItem(STORAGE_KEY, JSON.stringify(fresh));
     setState(fresh);
@@ -3049,6 +3272,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       hydrated,
       currentAccount,
       labourerSync,
+      attendanceSync,
+      opsSync: opsShared,
+      moveLocalAttendance,
       login,
       switchRole,
       logout,
@@ -3131,6 +3357,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     }),
     [
       labourerSync,
+      attendanceSync,
+      opsShared,
+      moveLocalAttendance,
       state,
       scopedState,
       hydrated,

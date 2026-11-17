@@ -205,7 +205,7 @@ export function attendanceFromApprovedDpr(
   dprId: string,
   date: string,
   siteId: string,
-  marks: { labourerId: string; status: AttendanceStatus; inTime?: string; outTime?: string; note?: string }[],
+  marks: { labourerId: string; status: AttendanceStatus; inTime?: string; outTime?: string; otHours?: number; note?: string }[],
   markedBy: string
 ): AttendanceRecord[] {
   return marks.map((m) => ({
@@ -215,6 +215,7 @@ export function attendanceFromApprovedDpr(
     status: m.status,
     inTime: m.inTime,
     outTime: m.outTime,
+    ...(m.status === "overtime" && m.otHours ? { otHours: m.otHours } : {}),
     note: m.note,
     markedBy,
     siteId,

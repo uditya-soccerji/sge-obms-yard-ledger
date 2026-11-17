@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/select";
 import { useStore } from "@/lib/store";
 import { skillLabel } from "@/lib/labour-import";
-import { otHours } from "@/lib/attendance";
+import { markOtHours } from "@/lib/attendance";
 import { passState, showDate } from "@/lib/gate-pass";
 import { today } from "@/lib/today";
 import type { WageLedgerEntry } from "@/lib/types";
@@ -80,7 +80,7 @@ function LabourerHomePage() {
   const inMonth = history.filter((a) => a.date.startsWith(month));
   const count = (...st: string[]) => inMonth.filter((a) => st.includes(a.status)).length;
   const presentDays = count("present", "overtime") + 0.5 * count("half");
-  const otTotal = inMonth.reduce((n, a) => n + otHours(a.inTime, a.outTime), 0);
+  const otTotal = inMonth.reduce((n, a) => n + markOtHours(a), 0);
   const monthLedger = ledger.filter((w) => w.date.startsWith(month));
   const sumOf = (k: WageLedgerEntry["kind"]) => monthLedger.filter((w) => w.kind === k).reduce((n, w) => n + w.amount, 0);
   // An uploaded wage for the month (docs §24) replaces the days × rate estimate

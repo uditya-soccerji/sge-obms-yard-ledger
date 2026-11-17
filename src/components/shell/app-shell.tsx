@@ -149,6 +149,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     resetSeed,
     endImpersonation,
     labourerSync,
+    attendanceSync,
+    opsSync,
   } = useStore();
   const router = useRouter();
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -158,8 +160,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     ? state.users.find((u) => u.id === state.impersonatorAccountId) ?? null
     : null;
   const viewingAs = !!impersonator && !!currentAccount;
-  const showReset = canUseTestTools(role, viewingAs);
-  const { resetWork } = useWork();
+  const { resetWork, shared: workSync } = useWork();
+  // No Reset while the data is shared — it would wipe every device's real records (owner, 2026-11-18)
+  const showReset = canUseTestTools(role, viewingAs) && !workSync.loaded;
   // X6: ask first, and reset both the main and the Work data
   const resetAll = () => {
     if (!window.confirm("Reset all demo data? This signs everyone out and restores the seed for every module, including Work.")) return false;
@@ -377,6 +380,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           // Shared labourer register (migration 006): say so when a change didn't reach the server
           <div role="alert" className="mb-3 rounded-sm border border-[var(--sge-crit)]/40 bg-[var(--sge-crit-wash)] px-3 py-2 text-sm text-[var(--sge-crit)]">
             {labourerSync.error}. Your change is kept on this device and will be sent again — check your connection.
+          </div>
+        ) : null}
+        {attendanceSync.error ? (
+          // Shared attendance (migration 008)
+          <div role="alert" className="mb-3 rounded-sm border border-[var(--sge-crit)]/40 bg-[var(--sge-crit-wash)] px-3 py-2 text-sm text-[var(--sge-crit)]">
+            {attendanceSync.error}. Marks made here are kept on this device and sent again — check your connection.
+          </div>
+        ) : null}
+        {workSync.error || opsSync.error ? (
+          // Shared DPRs, jobs, requests (migration 011)
+          <div role="alert" className="mb-3 rounded-sm border border-[var(--sge-crit)]/40 bg-[var(--sge-crit-wash)] px-3 py-2 text-sm text-[var(--sge-crit)]">
+            {workSync.error || opsSync.error}. What you enter is kept on this device and sent again — check your connection.
           </div>
         ) : null}
         {children}

@@ -9,6 +9,8 @@ import { daysAgo, nowTime, setDemoToday, today } from "../today";
 import { applyScenario, type ScenarioId } from "./scenarios";
 import { useStore } from "../store";
 import { remoteAudit } from "../supabase/remote";
+import { supabase } from "../supabase/client";
+import { useSharedSync, type SharedSyncStatus } from "../shared-sync";
 import type { RoleId } from "../types";
 import { reasonText, type WorkEvent } from "./events";
 import { entryArea } from "./logic";
@@ -32,6 +34,8 @@ type Result = { ok: true; id?: string; requested?: boolean } | { ok: false; erro
 interface WorkApi {
   work: WorkState;
   hydrated: boolean;
+  /** Shared database link for DPRs, jobs, plans… (loaded / error / waiting to save) */
+  shared: SharedSyncStatus;
   /** Owner / Super Admin Excel import for a Work sheet (after duplicate preview) */
   importExcel: (kind: WorkTransferId, rows: TransferPreviewRow[]) => { ok: boolean; error?: string; added?: number; updated?: number };
   addPlanLine: (input: Omit<PlanLine, "id" | "carriedM2" | "month"> & { month?: string }) => Result;
@@ -123,6 +127,9 @@ function uid(prefix: string) {
   return `${prefix}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
+/** Work collections kept in the shared database (owner, 2026-11-18) */
+const WORK_SHARED = ["serviceItems", "workOrders", "planLines", "jobs", "reports", "dprs", "jms", "submissions", "paint", "paintSteps", "planRequests", "expenses", "events"] as const;
+
 const NOT_ALLOWED: Result = { ok: false, error: "Your role can't do this" };
 
 /** DTA's "PRU & HPIB" became "PRU" (owner, 2026-11-13): rename it where Work keeps the plant by name */
@@ -182,11 +189,12 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
   /** Append one activity-log / notification event (docs §19). */
   const log = useCallback((e: Omit<WorkEvent, "id" | "seq" | "at" | "day" | "actorName" | "actorRole" | "actorAccountId">) => {
     setWork((s) => {
-      const seq = (s.events[s.events.length - 1]?.seq ?? 0) + 1;
+      // Time-based, so events made on different devices never share a number (owner, 2026-11-18)
+      const seq = Math.max((s.events[s.events.length - 1]?.seq ?? 0) + 1, Date.now());
       // Pass alerts come from the clock, not from whoever happened to open the app (docs §24)
       // …and so does the wage-request alert after the Undo window, whichever tab is open
       const system = e.kind === "pass_expiring" || e.kind === "wage_change_requested" || e.kind === "change_requested" || e.kind === "plan_requested";
-      const ev: WorkEvent = { ...e, id: `ev-${seq}`, seq, at: new Date().toISOString(), day: today(), actorName: system ? "System" : actor.current.name, actorRole: system ? null : actor.current.role, actorAccountId: system ? undefined : actor.current.accountId || undefined, impersonatedBy: system ? undefined : actor.current.impersonatedBy };
+      const ev: WorkEvent = { ...e, id: `ev-${seq}-${Math.random().toString(36).slice(2, 6)}`, seq, at: new Date().toISOString(), day: today(), actorName: system ? "System" : actor.current.name, actorRole: system ? null : actor.current.role, actorAccountId: system ? undefined : actor.current.accountId || undefined, impersonatedBy: system ? undefined : actor.current.impersonatedBy };
       return { ...s, events: [...s.events, ev] };
     });
     // Merge plan Step 11: the same event goes to the shared audit_log (Test tools reset never touches it)
@@ -253,6 +261,42 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
       /* storage full / blocked */
     }
   }, [work, hydrated]);
+
+  // Owner, 2026-11-18: DPRs, jobs, plan lines, JMS, paint, requests and alerts are shared by every
+  // device (app_records, migration 011) — before this they stayed in the browser that entered them.
+  const loginId = fullState.impersonatorAccountId ?? fullState.currentAccountId ?? "";
+  const demoWorkIds = useMemo(() => {
+    const seed = createWorkSeed() as unknown as Record<string, { id: string }[]>;
+    const empty = createEmptyWork(today().slice(0, 7)) as unknown as Record<string, { id: string }[]>;
+    const out = new Set<string>();
+    for (const col of WORK_SHARED) {
+      const real = new Set((empty[col] ?? []).map((r) => r.id));
+      for (const r of seed[col] ?? []) if (!real.has(r.id)) out.add(`${col}|${r.id}`);
+    }
+    return out;
+  }, []);
+  const shared = useSharedSync<WorkState>({
+    enabled: hydrated && !!supabase && !!loginId,
+    sessionKey: loginId,
+    state: work,
+    stateRef: ref,
+    setState: setWork,
+    prefix: "work",
+    collections: WORK_SHARED,
+    meta: ["siteMonths", "defaultMonth", "lastSeen"],
+    isDemo: (col, id) => demoWorkIds.has(`${col}|${id}`),
+    // What each person has read: the furthest point any of their devices reached
+    mergeMeta: {
+      lastSeen: (local, server) => {
+        const a = (local ?? {}) as Record<string, number>;
+        const b = (server ?? {}) as Record<string, number>;
+        const out: Record<string, number> = { ...b };
+        for (const [k, v] of Object.entries(a)) out[k] = Math.max(v, out[k] ?? 0);
+        return out;
+      },
+    },
+    order: { events: (a, b) => ((a.seq as number) ?? 0) - ((b.seq as number) ?? 0) },
+  });
 
   // docs §24: a RIL pass within 10 days of expiry (or expired) alerts HR, Admin and the
   // labourer's supervisor once per pass — a new expiry date from the RIL upload alerts again
@@ -1294,13 +1338,15 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
 
   /** Test helper: load a prepared state on top of the demo data, on the demo date. */
   const loadScenario = useCallback((id: ScenarioId) => {
-    if (!rights().isBoss) return;
+    // Shared data: test tools would overwrite every device's real DPRs and jobs (owner, 2026-11-18)
+    if (!rights().isBoss || supabase) return;
     setDemoToday(WORK_TODAY);
     setWork(applyScenario(createWorkSeed(), id));
   }, []);
 
   const loadDemo = useCallback(() => {
-    if (!rights().isBoss) return;
+    // Shared data: test tools would overwrite every device's real DPRs and jobs (owner, 2026-11-18)
+    if (!rights().isBoss || supabase) return;
     setDemoToday(WORK_TODAY);
     setWork(createWorkSeed());
   }, []);
@@ -1310,7 +1356,8 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const resetWork = useCallback(() => {
-    if (!rights().isBoss) return;
+    // Shared data: test tools would overwrite every device's real DPRs and jobs (owner, 2026-11-18)
+    if (!rights().isBoss || supabase) return;
     setDemoToday(null);
     setWork(createEmptyWork(today().slice(0, 7)));
   }, []);
@@ -1328,8 +1375,8 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const api = useMemo<WorkApi>(
-    () => ({ work, hydrated, importExcel, editExpense, receivePaint, advancePaintLifecycle, recoMonth, postMonth, setRilRef, uploadSubmission, linkSubmission, unlinkSubmission, addPlanLine, updatePlanLine, removePlanLine, decidePlanRequest, withdrawPlanRequest, markPlanRequests, startJob, decideJobPlan, adminApproveJms, adminReturnJms, addDpr, addPlanEntry, handlePpe, removeEntry, saveReport, submitReport, reviewReport, unlockReport, telegramToReport, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork, notify: log }),
-    [work, hydrated, importExcel, editExpense, receivePaint, advancePaintLifecycle, recoMonth, postMonth, setRilRef, uploadSubmission, linkSubmission, unlinkSubmission, addPlanLine, updatePlanLine, removePlanLine, decidePlanRequest, withdrawPlanRequest, markPlanRequests, startJob, decideJobPlan, adminApproveJms, adminReturnJms, addDpr, addPlanEntry, handlePpe, removeEntry, saveReport, submitReport, reviewReport, unlockReport, telegramToReport, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork, log]
+    () => ({ work, hydrated, shared, importExcel, editExpense, receivePaint, advancePaintLifecycle, recoMonth, postMonth, setRilRef, uploadSubmission, linkSubmission, unlinkSubmission, addPlanLine, updatePlanLine, removePlanLine, decidePlanRequest, withdrawPlanRequest, markPlanRequests, startJob, decideJobPlan, adminApproveJms, adminReturnJms, addDpr, addPlanEntry, handlePpe, removeEntry, saveReport, submitReport, reviewReport, unlockReport, telegramToReport, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork, notify: log }),
+    [work, hydrated, shared, importExcel, editExpense, receivePaint, advancePaintLifecycle, recoMonth, postMonth, setRilRef, uploadSubmission, linkSubmission, unlinkSubmission, addPlanLine, updatePlanLine, removePlanLine, decidePlanRequest, withdrawPlanRequest, markPlanRequests, startJob, decideJobPlan, adminApproveJms, adminReturnJms, addDpr, addPlanEntry, handlePpe, removeEntry, saveReport, submitReport, reviewReport, unlockReport, telegramToReport, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork, log]
   );
   return <WorkContext.Provider value={api}>{children}</WorkContext.Provider>;
 }

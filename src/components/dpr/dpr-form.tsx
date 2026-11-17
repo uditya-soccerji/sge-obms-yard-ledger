@@ -144,6 +144,11 @@ export function DprForm({
   const plants = state.sites.find((x) => x.id === value.siteId)?.plants ?? [];
   const supervisors = state.staff.filter((x) => x.role === "supervisor" && worksAt(x, value.siteId));
 
+  function setOt(labourerId: string, raw: string) {
+    const n = raw === "" ? undefined : Math.max(0, Math.min(16, Math.round(Number(raw) * 2) / 2));
+    onChange({ ...value, labourMarks: value.labourMarks.map((m) => (m.labourerId === labourerId ? { ...m, otHours: n } : m)) });
+  }
+
   function setMark(labourerId: string, status: AttendanceStatus) {
     const existing = value.labourMarks.find((m) => m.labourerId === labourerId);
     const labourMarks = existing
@@ -155,6 +160,7 @@ export function DprForm({
                 // Owner, 2026-11-14: no in / out times on labour attendance — a status only
                 inTime: undefined,
                 outTime: undefined,
+                otHours: status === "overtime" ? m.otHours : undefined,
               }
             : m
         )
@@ -546,6 +552,25 @@ export function DprForm({
                           ))}
                         </select>
                       </div>
+                      {mark?.status === "overtime" ? (
+                        // Owner, 2026-11-18: no in / out times, so overtime is entered as hours (paid daily wage ÷ 8 per hour)
+                        <label className="inline-flex items-center gap-1 text-xs font-semibold text-[var(--sge-ink-2)]">
+                          OT
+                          <Input
+                            type="number"
+                            inputMode="decimal"
+                            min={0.5}
+                            max={16}
+                            step={0.5}
+                            disabled={readOnly}
+                            aria-label={`Overtime hours ${l.name}`}
+                            className="h-8 w-16 text-xs"
+                            value={mark.otHours ?? ""}
+                            onChange={(e) => setOt(l.id, e.target.value)}
+                          />
+                          h
+                        </label>
+                      ) : null}
                       <div role="group" aria-label={`PPE ${l.name}`} className="inline-flex items-center overflow-hidden rounded-md border border-[var(--sge-line)] text-xs">
                         <span className="bg-[var(--sge-paper-2)] px-2 py-1.5 font-semibold text-[var(--sge-ink-3)]">PPE</span>
                         {PPE_OPTIONS.map((o) => (

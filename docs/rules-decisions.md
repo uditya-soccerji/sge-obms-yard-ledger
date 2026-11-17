@@ -30,7 +30,7 @@ Answers from the module-by-module review. Not built yet; implemented together at
 - **Site code:** no preference given → default: 2–6 capital letters, unique (e.g. `DTA`, `MARINE`).
 - **Add / switch off a site:** Owner and Super Admin.
 - **Switched-off site:** stays listed, greyed out, read-only — can be opened, no new entries.
-- **Plants:** every site needs at least one plant; the same plant name may sit under two sites (e.g. ARMA under DTA and MTF); every DPR and request must pick a plant. Duplicate plant names within one site: not blocked (not chosen).
+- **Plants:** every site needs at least one plant; the same plant name may sit under two sites (e.g. MTF under OMSH and 3622 MTF); every DPR and request must pick a plant. Duplicate plant names within one site: not blocked (not chosen).
 
 ## 4. Attendance
 - **Statuses:** Present, Half day, Absent, Leave, Weekly off, Overtime.
@@ -409,12 +409,19 @@ Process page: "Store module — process" (Claude doc). Decisions there: reorder 
 - **Work → Plan layout (2026-10-27):** the **Add to plan** form sits **above** the plan table and stays **pinned** under the header while the list scrolls (the header publishes its height as `--sge-header-h`). Every plan line has **Edit** (plant, service item, plan m², supervisor; plant + item lock once work is on it; Remove when empty) for Admin / SIC / Owner / SA.
 - **Every plan change is in the audit log:** add → `plan_added`, correction → `plan_changed` (what changed: plant / item / plan m² before → after / supervisor), removal → `plan_removed`; each with who and when, shown on the Audit page (and the shared audit log on the live site).
 
+
+## 32. Attendance in the shared database (decided 2026-11-12)
+- **Why:** attendance lived in each browser, so HR, the SIC and the Owner saw different registers, and a browser filled up after about two months of DTA attendance (the WhatsApp import for 5 Oct – 11 Nov alone was ~2.4 MB of a ~5 MB limit).
+- **Table** `attendance` (migration 008): one row per labourer per day, the app's own ids, linked to `labourers` and `sites`. No unique (labourer, day) rule in the database — the app keeps one mark per day, and a clash between two browsers must not block later saves.
+- **Who:** every staff role reads; a labourer login reads only its own days. HR, Admin, SIC, supervisors (DPR submit), Owner and SA write and delete.
+- **In the browser:** only the last 3 months + this month are loaded (pay and the profile month picker look back that far). Changes are fetched every minute (and on focus), a full reload every 10 minutes also catches deletions. Attendance is no longer written to `localStorage`; marks not yet sent are kept in a small separate slot and sent again after a reload.
+- **Moving old marks:** each browser's attendance from before is set aside on first load. On the HR page the Owner, SA or HR clicks **Move to shared register** once: only labourers in the shared register, and a day the shared register already has is kept as it is. The move is in the audit log.
 ## 33. Site list with RIL plant codes (decided 2026-11-13)
 - The header site pickers read **plant code - site - server (RP)**, e.g. `3611 - DTA - RP2`, after **All sites**: 3611 DTA RP2 · 3611 MTF RP2 · 3622 MTF RP5 · 3611 SWRO RP2 · 3622 Jetty Mech RP5 · 3622 Marine Ops RP5 · 36AG CPP RP5 · 36KK PCG RP2 · ---- PCG (PCCS) RP2 · 36IY HPIB RP2.
 - Existing sites keep their ids (DTA, MTF = 3611 RP2, Marine → Marine Ops, Jetty → Jetty Mech, PCG); new: MTF5 (3622 MTF RP5), SWRO, CPP, PCCS, HPIB. Gagva isn't on the list: switched off (data kept, Master Data → Sites). The header lists only active sites.
 - `Site.plantCode` (RIL plant code; empty when none) is edited in Master Data → Sites. Site codes may now have digits after the first letter (MTF5).
 - The list is applied once per saved site (`applySiteList`), so later edits in Master Data stay.
-- MTF's plants (MTF, ARMA, RRTF) stay under **3611 MTF** with their per-plant RP (owner, 2026-11-13); 3622 MTF RP5 starts with only a placeholder plant "MTF" and no data.
+- MTF's plants (MTF, RRTF; owner 2026-11-18: there is no plant ARMA — removed from DTA too) stay under **3611 MTF** with their per-plant RP (owner, 2026-11-13); 3622 MTF RP5 starts with only a placeholder plant "MTF" and no data.
 - CPP and HPIB are sites of their own, not DTA plants (owner, 2026-11-13): DTA's "PRU & HPIB" is renamed **PRU** in the site list and in Work's plan lines, DPRs, RIL JMS and plan requests (`PLANT_RENAMES_2026_11`, `renameWorkPlants`). CPP was never on DTA's list.
 - **Same list on every device (2026-11-14):** the list is applied at sign-in too (not only when a browser reloads its saved copy), and sites on the list that the shared database doesn't have yet (MTF5, SWRO, CPP, PCCS, HPIB) are saved to it the next time an Owner / Super Admin signs in.
 - **Master Data wins (2026-11-14):** the database now holds the agreed names and RPs (3611 site named **OMSH**, RP2 — owner, 2026-11-14 — Jetty Mech, Marine Ops, PCG RP2, Gagva off). At sign-in the app only adds plant codes (and any listed site the database lacks); names, RPs and on / off are whatever Master Data → Sites says (`withPlantCodes`).
@@ -462,3 +469,14 @@ Process page: "Store module — process" (Claude doc). Decisions there: reorder 
 - **Crew:** the DPR lists the supervisor's crew (plus anyone else already marked). Others are added through **+ Add labour (EP / name)** — a pop-up that, empty, shows the crews planned at this plant this month and, with 2+ characters, searches active labourers on the site by EP or name. **Add to crew** (Admin / SIC / Owner / SA) keeps them on the crew; **Today only** marks them present on this DPR.
 - **Job lines before saving:** every role sees the job lines panel once the plant is picked; picking a job or starting one saves the draft first. **+ Start a new job** uses this supervisor's plan line for this plant this month (start date = DPR date, planned m² and end date as in §24). No plan line → says the Admin adds one in Plan vs actual.
 - **No duplicates:** a second open job for the same supervisor, plant and location is refused (the form names the open one and disables Start); a second DPR for the same supervisor · site · plant · date · type (Admin's entry counted separately, §5b) won't save, and the form warns with a link to the existing one as soon as the plant is picked.
+
+## 41. Everything shared between devices; review of all instructions (decided 2026-11-18)
+- **Why:** DPRs, jobs, plan lines, JMS, paint, alerts, store / PPE / equipment requests, safety DPRs, crew and wage requests lived only in the browser that entered them, so a supervisor's DPR never reached the Admin, SIC or store, and the duplicate checks (§40) only saw one device.
+- **Table** `app_records` (migration 011): one row per record (collection + the app's own id, the record as JSON). Every active staff login reads and writes (labourer logins don't); what each role may do stays checked by the app. Deletions are kept as `deleted` so every device drops them.
+- **In the app** (`src/lib/shared-sync.ts`): loaded at sign-in, changes sent ~1 s after they're made, others' changes fetched every 15 s and on focus. A record changed here and not yet sent wins. Once per device its own real records from before sharing go up (demo records never). Work: plan lines, jobs, DPR reports and lines, JMS, RIL submissions, paint, plan requests, costs, alerts, plan months, read marks. Main: equipment and its requests / returns / kit, store items and moves, crew / wage / Master Data requests, safety days and observations, leaves, advances, vendor bills, wage ledger, rate book, trades, wage bands.
+- **Attendance** has its own table (migration 008, §32) and is now in the app too (it had stayed on a branch).
+- **Test tools:** Reset, Load demo, scenarios and Start fresh are off while data is shared (they'd overwrite every device's real records). View as stays.
+- **Overtime:** no in / out times on the DPR (§36), so marking **Overtime** asks for **OT hours** (½-hour steps, up to 16), required to submit; pay = daily wage ÷ 8 per hour (§17). Saved on the attendance day (`ot_hours`).
+- **Plants:** there is no plant ARMA (owner) — removed from DTA. Marine and SWRO stay plants under OMSH. Solar / NEI stays a site.
+- **Staff sync fix:** a fetch compared this device's copy with the new server copy, so changes made elsewhere looked like local edits and the old copy was written back (the 14 staff EPs set on 2026-11-16 were lost that way; restored).
+- **Crews from the WhatsApp DTA reports:** proposed per labourer (`imports/whatsapp-dta/3-proposed-crews.xlsx`), applied only after the owner's review.

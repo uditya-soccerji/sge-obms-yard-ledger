@@ -27,7 +27,16 @@ export type DayMark = {
   status: AttendanceStatus;
   inTime?: string;
   outTime?: string;
+  /** Entered hours win over hours worked out from times (owner, 2026-11-18) */
+  otHours?: number;
 };
+
+/** OT hours of a day: the hours entered with an Overtime mark, else from in / out times (docs §17). */
+export function markOtHours(mark: DayMark): number {
+  if (!WORKING.includes(mark.status)) return 0;
+  if (mark.otHours != null && mark.otHours > 0) return mark.otHours;
+  return otHours(mark.inTime, mark.outTime);
+}
 
 export function minutesOf(t?: string): number | null {
   const m = t ? /^(\d{1,2}):(\d{2})$/.exec(t) : null;
@@ -75,7 +84,7 @@ export const otPay = (dailyWage: number, hours: number) => (dailyWage / 8) * hou
  */
 export function dayWage(dailyWage: number, mark: DayMark): { cost: number; labourDays: number; ot: number } {
   const fraction = payableFraction(mark);
-  const ot = WORKING.includes(mark.status) ? otHours(mark.inTime, mark.outTime) : 0;
+  const ot = markOtHours(mark);
   const cost = Math.round((dailyWage * fraction + otPay(dailyWage, ot)) * 100) / 100;
   const labourDays = Math.round((fraction + ot / 8) * 1000) / 1000;
   return { cost, labourDays, ot };

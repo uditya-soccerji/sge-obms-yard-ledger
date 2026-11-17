@@ -504,6 +504,8 @@ export interface AttendanceRecord {
   status: AttendanceStatus;
   inTime?: string;
   outTime?: string;
+  /** Overtime hours entered on the DPR / HR (owner, 2026-11-18); else worked out from times */
+  otHours?: number;
   markedBy: string;
   siteId: string;
   note?: string;
@@ -630,6 +632,8 @@ export interface DprLabourMark {
   status: AttendanceStatus;
   inTime?: string;
   outTime?: string;
+  /** Overtime hours when marked Overtime (no in / out times on the DPR, owner 2026-11-18) */
+  otHours?: number;
   note?: string;
   /** PPE on the day (Admin DPR, 2026-10-27); damaged / due / urgent go to the store keeper on submit
    *  and, since 2026-11-14, each one is also a line in the DPR's requests to the store */

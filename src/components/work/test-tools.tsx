@@ -29,7 +29,7 @@ const VIEW_AS = [
  */
 export function TestTools() {
   const { state, fullState, startImpersonation } = useStore();
-  const { loadScenario, loadDemo, resetWork } = useWork();
+  const { loadScenario, loadDemo, resetWork, shared } = useWork();
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [viewAs, setViewAs] = useState(VIEW_AS[0].id);
@@ -71,6 +71,9 @@ export function TestTools() {
             </div>
           ) : null}
 
+          {shared.loaded ? (
+            <div className="text-[11px] text-[var(--sge-ink-3)]">Demo data, scenarios and Start fresh are off: DPRs, jobs and requests are shared by every device, and these would overwrite the real ones.</div>
+          ) : (
           <div>
             <div className="mb-1.5 text-[11px] uppercase tracking-wide text-[var(--sge-ink-3)]">Demo data</div>
             <div className="mb-3 flex flex-wrap items-center gap-2">
@@ -115,6 +118,7 @@ export function TestTools() {
               ))}
             </div>
           </div>
+          )}
 
           <div>
             <div className="mb-1.5 text-[11px] uppercase tracking-wide text-[var(--sge-ink-3)]">App date</div>

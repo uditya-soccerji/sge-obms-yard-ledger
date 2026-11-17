@@ -1,7 +1,7 @@
 "use client";
 
 import { useParams } from "next/navigation";
-import { otHours, attendanceLabel } from "@/lib/attendance";
+import { markOtHours, attendanceLabel } from "@/lib/attendance";
 import { reasonLabel } from "@/lib/requests";
 import { useStore } from "@/lib/store";
 import { entryArea, round3 } from "@/lib/work/logic";
@@ -173,7 +173,7 @@ function DprPrint() {
                 <td className={td}>{attendanceLabel(m.status)}</td>
                 <td className={td}>{m.inTime ?? "—"}</td>
                 <td className={td}>{m.outTime ?? "—"}</td>
-                <td className={`${td} text-right`}>{otHours(m.inTime, m.outTime) || "—"}</td>
+                <td className={`${td} text-right`}>{markOtHours(m) || "—"}</td>
               </tr>
             ))}
           </tbody>
