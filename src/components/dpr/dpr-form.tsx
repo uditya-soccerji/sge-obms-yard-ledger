@@ -92,6 +92,7 @@ export function DprForm({
   const { work } = useWork();
   // The Admin enters the DPR for a supervisor (attendance tabs, PPE, work from the plan)
   const all = !!value.allSections;
+  const fieldCrew = value.submitterType === "painting_blasting" || value.submitterType === "scaffolding";
   // Owner, 2026-11-14: the supervisor's own crew first, then the others working at this site and
   // plant — labourers not on any crew yet, and the crews of supervisors planned at this plant this
   // month. Only the supervisor's own crew must be marked to submit (docs §36).
@@ -514,8 +515,10 @@ export function DprForm({
                       ) : null}
                     </div>
                   </div>
-                  {all ? (
-                    // Admin DPR (2026-10-27): attendance as tabs, optional times, PPE status
+                  {all || fieldCrew ? (
+                    // Admin DPR (2026-10-27): attendance as tabs and PPE status; owner 2026-11-16: on every
+                    // Painting & Blasting / Scaffolding DPR too, whoever fills it
+
                     <div className="flex flex-wrap items-center gap-2">
                       <div role="group" aria-label={`Attendance ${l.name}`} className="inline-flex overflow-hidden rounded-md border border-[var(--sge-line)] text-xs">
                         {(["present", "absent"] as const).map((st) => (
