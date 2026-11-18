@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { EmptyState, Panel, SectionHeader, StatusPill } from "@/components/shared/ui-bits";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,6 +9,9 @@ import { entrySiteId } from "@/lib/site-scope";
 import { useStore } from "@/lib/store";
 import type { RoleId, StaffMember } from "@/lib/types";
 import { cn } from "@/lib/utils";
+import { loadStaffSalaries, SALARY_ROLES, type StaffSalary } from "@/lib/supabase/staff-salary";
+import { StaffSalaryPanel } from "@/components/hr/staff-salary-panel";
+import { formatINR } from "@/components/shared/ui-bits";
 
 /** Staff roles HR keeps records for (labourers have their own register) */
 const STAFF_ROLES = ROLES.filter((r) => r.id !== "labourer" && r.id !== "super_admin");
@@ -30,10 +33,20 @@ export function StaffRegister() {
   const siteCode = (id: string) => fullState.sites.find((s) => s.id === id)?.code ?? id;
   const roleLabel = (id: RoleId) => ROLES.find((r) => r.id === id)?.label ?? id;
   const linked = (id: string) => fullState.users.find((u) => u.staffId === id);
+  // Owner, 2026-11-18: monthly salary from the staff salary sheet — Owner, SA, HR and Finance only
+  const canPay = SALARY_ROLES.includes(state.currentRole as RoleId);
+  const [salaries, setSalaries] = useState<StaffSalary[]>([]);
+  const [openPay, setOpenPay] = useState<string | null>(null);
+  useEffect(() => {
+    if (!canPay) return;
+    void loadStaffSalaries().then((r) => r && setSalaries(r));
+  }, [canPay]);
+  const payOf = (id: string) => salaries.filter((x) => x.staffId === id);
+  const rateOf = (id: string) => payOf(id)[0]?.monthlyRate;
 
   const rows = state.staff
     .filter((s) => showInactive || s.active !== false)
-    .filter((s) => !q.trim() || `${s.name} ${s.designation ?? ""} ${s.employeeCode ?? ""} ${s.phone ?? ""} ${s.role}`.toLowerCase().includes(q.trim().toLowerCase()))
+    .filter((s) => !q.trim() || `${s.name} ${s.designation ?? ""} ${s.employeeCode ?? ""} ${s.epNumber ?? ""} ${s.phone ?? ""} ${s.role}`.toLowerCase().includes(q.trim().toLowerCase()))
     .sort((a, b) => a.name.localeCompare(b.name));
 
   const blank = (): Draft => ({ name: "", role: "supervisor", siteId: entrySiteId(state), designation: "", phone: "", employeeCode: "", joinedOn: "", active: true });
@@ -62,7 +75,7 @@ export function StaffRegister() {
       {msg ? <p className={cn("text-sm", msg.ok ? "text-[var(--sge-ok)]" : "text-[var(--sge-crit)]")}>{msg.text}</p> : null}
       <Panel>
         <div className="mb-3 flex flex-wrap items-end gap-2">
-          <Input className="h-9 max-w-xs" placeholder="Search name, code, designation…" value={q} onChange={(e) => setQ(e.target.value)} />
+          <Input className="h-9 max-w-xs" placeholder="Search name, EP, code, designation…" value={q} onChange={(e) => setQ(e.target.value)} />
           <label className="flex items-center gap-1.5 text-sm">
             <input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} /> Show inactive
           </label>
@@ -100,20 +113,24 @@ export function StaffRegister() {
           <div className="overflow-x-auto">
             <table className="w-full min-w-[760px] text-left text-sm">
               <thead className="text-[11px] uppercase text-[var(--sge-ink-3)]">
-                <tr><th className="py-1">Name</th><th>Role</th><th>Designation</th><th>Site</th><th>Code</th><th>Mobile</th><th>Joined</th><th>Login</th><th /></tr>
+                <tr><th className="py-1">Name</th><th>EP</th><th>Role</th><th>Designation</th><th>Site</th>{canPay ? <th className="text-right">Basic / month</th> : null}<th>Mobile</th><th>Login</th><th /></tr>
               </thead>
               <tbody>
                 {rows.map((s) => (
-                  <tr key={s.id} className="border-t border-[var(--sge-line)]">
+                  <Fragment key={s.id}>
+                  <tr className="border-t border-[var(--sge-line)]">
                     <td className="py-1.5 font-semibold">{s.name}</td>
+                    <td className="font-mono text-xs">{s.epNumber ?? "—"}</td>
                     <td>{roleLabel(s.role)}</td>
                     <td className="text-[var(--sge-ink-2)]">{s.designation ?? "—"}</td>
                     <td>{siteCode(s.siteId)}</td>
-                    <td className="font-mono text-xs">{s.employeeCode ?? "—"}</td>
+                    {canPay ? <td className="text-right font-mono text-xs">{rateOf(s.id) ? formatINR(Math.round(rateOf(s.id)!)) : "—"}</td> : null}
                     <td className="font-mono text-xs">{s.phone ?? "—"}</td>
-                    <td className="font-mono text-xs">{s.joinedOn ?? "—"}</td>
                     <td>{linked(s.id) ? <StatusPill tone="ok">@{linked(s.id)!.username}</StatusPill> : <span className="text-xs text-[var(--sge-ink-3)]">none</span>}</td>
                     <td className="whitespace-nowrap text-right">
+                      {canPay && payOf(s.id).length ? (
+                        <Button size="sm" variant="ghost" onClick={() => setOpenPay(openPay === s.id ? null : s.id)}>{openPay === s.id ? "Hide salary" : "Salary"}</Button>
+                      ) : null}
                       <Button size="sm" variant="ghost" onClick={() => setForm({ ...s })}>Edit</Button>
                       <Button
                         size="sm"
@@ -127,6 +144,10 @@ export function StaffRegister() {
                       </Button>
                     </td>
                   </tr>
+                  {openPay === s.id ? (
+                    <tr><td colSpan={canPay ? 9 : 8} className="pb-3"><StaffSalaryPanel rows={payOf(s.id)} /></td></tr>
+                  ) : null}
+                  </Fragment>
                 ))}
               </tbody>
             </table>
