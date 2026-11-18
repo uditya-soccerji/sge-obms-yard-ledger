@@ -35,10 +35,26 @@ const LOCAL_ATTENDANCE_KEY = "sge-attendance-before-shared";
 /** Marks made here that haven't reached the server yet (survive a reload while offline) */
 const UNSENT_ATTENDANCE_KEY = "sge-attendance-unsent";
 const MOVE_ATTENDANCE_ROLES: RoleId[] = ["super_admin", "owner", "hr"];
+/** Built-in demo marks (and marks of demo labourers): never set aside or moved (owner, 2026-11-18) */
+let demoMarkKeys: { ids: Set<string>; labourers: Set<string> } | null = null;
+function isDemoMark(a: AttendanceRecord): boolean {
+  if (!demoMarkKeys) {
+    const seed = createSeedState();
+    demoMarkKeys = { ids: new Set(seed.attendance.map((x) => x.id)), labourers: new Set(seed.labourers.map((l) => l.id)) };
+  }
+  return demoMarkKeys.ids.has(a.id) || demoMarkKeys.labourers.has(a.labourerId);
+}
 function readLocalAttendance(): AttendanceRecord[] {
   try {
     const raw = localStorage.getItem(LOCAL_ATTENDANCE_KEY);
-    return raw ? (JSON.parse(raw) as AttendanceRecord[]) : [];
+    const all = raw ? (JSON.parse(raw) as AttendanceRecord[]) : [];
+    const real = all.filter((a) => !isDemoMark(a));
+    // Demo marks set aside by an earlier version: drop them so the "move" box doesn't show for them
+    if (real.length !== all.length) {
+      if (real.length) localStorage.setItem(LOCAL_ATTENDANCE_KEY, JSON.stringify(real));
+      else localStorage.removeItem(LOCAL_ATTENDANCE_KEY);
+    }
+    return real;
   } catch {
     return [];
   }
@@ -513,11 +529,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         if (supabase && parsed.attendance?.length) {
           const before = readLocalAttendance();
           const ids = new Set(before.map((a) => a.id));
-          const kept = [...before, ...parsed.attendance.filter((a) => !ids.has(a.id))];
+          const kept = [...before, ...parsed.attendance.filter((a) => !ids.has(a.id) && !isDemoMark(a))];
           parsed.attendance = [];
           try {
             localStorage.setItem(STORAGE_KEY, JSON.stringify(parsed));
-            localStorage.setItem(LOCAL_ATTENDANCE_KEY, JSON.stringify(kept));
+            if (kept.length) localStorage.setItem(LOCAL_ATTENDANCE_KEY, JSON.stringify(kept));
           } catch {
             /* storage blocked — the marks stay in the main copy until next time */
           }
