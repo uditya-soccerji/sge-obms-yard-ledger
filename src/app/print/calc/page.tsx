@@ -1,5 +1,6 @@
 "use client";
 
+import { effectiveWage } from "@/lib/wages";
 import { Suspense } from "react";
 import { useSearchParams } from "next/navigation";
 import { estimateCost } from "@/lib/estimate";
@@ -89,8 +90,8 @@ function CalcPrint() {
     const kind = (["pipeline", "structures", "tanks", "scaffolding"].includes(q.get("kind") ?? "") ? q.get("kind") : "pipeline") as RateCardKind;
     const qty = n(q.get("qty"));
     const r = estimateCost(state.rateCards, { kind, quantity: qty, siteId: entrySiteId(state), rateLines: state.rateLines });
-    const active = state.labourers.filter((l) => l.active && l.wageDaily > 0);
-    const avg = active.length ? Math.round(active.reduce((s, l) => s + l.wageDaily, 0) / active.length) : 0;
+    const rates = state.labourers.filter((l) => l.active).map((l) => effectiveWage(l, state.wageBands)?.wage ?? 0).filter((w) => w > 0);
+    const avg = rates.length ? Math.round(rates.reduce((s, w) => s + w, 0) / rates.length) : 0;
     title = "Cost & manpower estimate";
     inputs.push(["Scope type", kind], ["Quantity", `${fmt(qty)} ${kind === "scaffolding" ? "m³" : "m²"}`]);
     // Round 2: the store's estimate shows quantities only — no rates or money

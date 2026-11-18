@@ -77,7 +77,7 @@ export function attendanceWindowStart(today = new Date()): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-01`;
 }
 
-const COLS = "id,date,labourer_id,status,in_time,out_time,marked_by,site_id,note,source_dpr_id,reconciled,corrected_from,updated_at";
+const COLS = "id,date,labourer_id,status,in_time,out_time,ot_hours,marked_by,site_id,note,source_dpr_id,reconciled,corrected_from,updated_at";
 
 /** Page through (PostgREST returns 1,000 rows per request); null when the read failed */
 async function pages(build: (from: number) => PromiseLike<{ data: unknown[] | null; error: { message: string } | null }>): Promise<AttendanceRow[] | null> {
@@ -100,6 +100,14 @@ export async function remoteLoadAttendance(from: string): Promise<{ records: Att
   const rows = await pages((at) => sb.from("attendance").select(COLS).gte("date", from).order("id").range(at, at + 999));
   if (!rows) return null;
   return { records: rows.map(fromRow), cursor: latest(rows, null) };
+}
+
+/** Rows for an older stretch (owner, 2026-11-18: months before the window, loaded when someone picks them) */
+export async function remoteLoadAttendanceRange(from: string, to: string): Promise<AttendanceRecord[] | null> {
+  const sb = supabase;
+  if (!sb) return null;
+  const rows = await pages((at) => sb.from("attendance").select(COLS).gte("date", from).lt("date", to).order("id").range(at, at + 999));
+  return rows ? rows.map(fromRow) : null;
 }
 
 /** Rows changed since `cursor` (inside the window). Deletions show up at the next full load. */

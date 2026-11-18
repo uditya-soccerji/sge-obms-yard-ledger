@@ -480,3 +480,16 @@ Process page: "Store module — process" (Claude doc). Decisions there: reorder 
 - **Plants:** a plant the owner says doesn't exist was removed from DTA, MTF, the docs and the rate-book labels (owner, 2026-11-18). Marine and SWRO stay plants under OMSH. Solar / NEI stays a site.
 - **Staff sync fix:** a fetch compared this device's copy with the new server copy, so changes made elsewhere looked like local edits and the old copy was written back (the 14 staff EPs set on 2026-11-16 were lost that way; restored).
 - **Crews from the WhatsApp DTA reports:** proposed per labourer (`imports/whatsapp-dta/3-proposed-crews.xlsx`), applied only after the owner's review.
+
+## 42. Logic review fixes (owner, 2026-11-18)
+- **Wages:** pay, P&L, the estimator and the labourer page use the labourer's own daily wage, else the wage table's rate for trade × skill × experience (unknown skill = semi skilled, unknown experience = experienced); "rate from wage table" shows where it applies. P&L still falls back to ₹800 when neither exists.
+- **Crew on every site:** the DPR lists the supervisor's whole crew, wherever each person is registered (a supervisor on two sites). Attendance is recorded at the DPR's site.
+- **Staff are not crew:** a labourer record with the same EP as a staff member (a login) is left off DPR crews and the add-labour search. Staff EPs added for 11 more supervisors (name match with the WhatsApp reports / RIL list); Pawan and Niraj were on their own crews and were taken off.
+- **New version reloads open tabs:** every 5 minutes (and when a tab comes back into view) the app asks `/api/version`; a tab on an older version reloads once nothing is waiting to be saved.
+- **Conflicting saves (migration 013):** each save carries the version it started from; if someone else saved since, the save is not applied, the newer copy comes back and a note says so. Approving / returning a DPR needs SIC, Admin, Owner or SA; unlocking an approved DPR needs Owner or SA; deciding a plan line needs SIC, Owner or SA; wage and Master Data requests need Owner or SA — enforced in the database too.
+- **Job and JMS numbers** come from a database counter (`next_counter`); the number shown at once is corrected within a second if another device took it.
+- **Unread alerts** are kept per alert for a 10-minute window, so an alert arriving late from another device still shows as new.
+- **Older attendance:** the labourer page offers the last 12 months and Labour pay any month; months before the loaded window (3 months) are fetched when picked. OT hours are now loaded back from the shared register (they were saved but not read).
+- **Trades:** 25 trades used in the register (technician, supervisor, marine crew, safety supervisor …) added to the trade list. Their wage bands are still to be entered by the Owner.
+- **Supervisor types:** Pawan, Sudheer, rajan, Shivnath Shah set to Scaffolding (their crews / the EP master are scaffolders).
+- **Still open:** RIL pass expiry dates (need the RIL gate-pass export with validity), wage bands for the new trades, and the type of 6 supervisors without a crew.

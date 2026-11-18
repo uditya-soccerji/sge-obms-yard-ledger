@@ -372,6 +372,12 @@ export interface WorkState {
   /** Last event seq each account has seen (keyed by account id) */
   lastSeen: Record<string, number>;
   /**
+   * Alerts each account has read that are newer than its lastSeen mark (owner, 2026-11-18): an alert
+   * from another device can arrive a few seconds after "mark read", with an older time — it must
+   * still count as new, so "read" is kept per alert for the recent window.
+   */
+  readIds?: Record<string, string[]>;
+  /**
    * Plan months per site (docs §15): each site closes and carries forward its
    * own month. A site with no entry is on `defaultMonth` with nothing closed.
    */

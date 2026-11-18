@@ -1,5 +1,6 @@
 "use client";
 
+import { staffEpSet } from "@/lib/dpr-validate";
 import { useEffect, useMemo, useState } from "react";
 import { today as todayDate } from "@/lib/today";
 import { Panel, StatusPill } from "@/components/shared/ui-bits";
@@ -78,13 +79,18 @@ export function DprForm({
   /** Admin DPR: save the draft (if new) before a work line is added */
   ensureSaved?: () => { ok: boolean; error?: string; doc?: DprReport };
 }) {
-  const { state, assignCrew } = useStore();
+  const { state, fullState, assignCrew } = useStore();
+  // Owner, 2026-11-18: the whole register, not just the header's site — a supervisor on two sites has
+  // crew members registered at either, and all of them belong on the DPR
+  // …and a labourer record that is really a staff member (same EP as a login) is not crew (owner, 2026-11-18)
+  const staffEps = useMemo(() => staffEpSet(fullState.staff), [fullState.staff]);
+  const labs = useMemo(() => fullState.labourers.filter((l) => !staffEps.has(l.epNumber)), [fullState.labourers, staffEps]);
   // Owner, 2026-11-15: the Admin / SIC / Owner / SA put a labourer on this supervisor's crew from the DPR (§38)
   const canCrew = ["admin", "sic", "owner", "super_admin"].includes(state.currentRole ?? "") && value.submitterType !== "safety" && value.submitterType !== "store";
   const [crewMsg, setCrewMsg] = useState<{ ok: boolean; text: string } | null>(null);
   function addToCrew(labourerId: string) {
     const r = assignCrew([labourerId], value.submitterId);
-    const name = state.labourers.find((l) => l.id === labourerId)?.name ?? "Labourer";
+    const name = labs.find((l) => l.id === labourerId)?.name ?? "Labourer";
     const sup = state.staff.find((x) => x.id === value.submitterId)?.name ?? "this supervisor";
     setCrewMsg(r.ok ? { ok: true, text: `${name} is now on ${sup}'s crew — listed on their DPR from now on` } : { ok: false, text: r.error ?? "Couldn't add to the crew" });
     if (r.ok) setPick("");
@@ -97,9 +103,9 @@ export function DprForm({
   // plant — labourers not on any crew yet, and the crews of supervisors planned at this plant this
   // month. Only the supervisor's own crew must be marked to submit (docs §36).
   const { crew, others } = useMemo(() => {
-    const own = state.labourers.filter((l) => l.active && l.supervisorId === value.submitterId);
+    const own = labs.filter((l) => l.active && l.supervisorId === value.submitterId);
     if (!all || value.submitterType === "safety" || value.submitterType === "store") {
-      return { crew: value.submitterType === "safety" || value.submitterType === "store" ? state.labourers.filter((l) => l.active) : own, others: [] as typeof own };
+      return { crew: value.submitterType === "safety" || value.submitterType === "store" ? labs.filter((l) => l.active && l.siteId === value.siteId) : own, others: [] as typeof own };
     }
     const month = (value.date || "").slice(0, 7);
     const plant = value.plant.trim().toUpperCase();
@@ -110,11 +116,11 @@ export function DprForm({
     );
     const ownIds = new Set(own.map((l) => l.id));
     // Crews of the supervisors planned at this plant; people on no crew are found with the search below
-    const rest = state.labourers.filter(
+    const rest = labs.filter(
       (l) => l.active && !ownIds.has(l.id) && l.siteId === value.siteId && !!l.supervisorId && atPlant.has(l.supervisorId)
     );
     return { crew: own, others: rest };
-  }, [state.labourers, work.planLines, value.submitterId, value.submitterType, value.siteId, value.plant, value.date, all]);
+  }, [labs, work.planLines, value.submitterId, value.submitterType, value.siteId, value.plant, value.date, all]);
   // Owner, 2026-11-16: labour is added to the crew from a pop-up, found by EP number or name — the
   // site's other labourers aren't listed on the DPR itself
   const [find, setFind] = useState("");
@@ -126,18 +132,18 @@ export function DprForm({
     const crewIds = new Set(crew.map((l) => l.id));
     const marked = new Set(value.labourMarks.map((m) => m.labourerId));
     // Nothing typed: the crews planned at this plant; typed: anyone active on this site
-    const pool = q.length < 2 ? others : state.labourers.filter((l) => l.active && l.siteId === value.siteId && (l.name.toLowerCase().includes(q) || l.epNumber.toLowerCase().includes(q)));
+    const pool = q.length < 2 ? others : labs.filter((l) => l.active && l.siteId === value.siteId && (l.name.toLowerCase().includes(q) || l.epNumber.toLowerCase().includes(q)));
     return pool.filter((l) => !crewIds.has(l.id)).slice(0, 30).map((l) => ({ l, marked: marked.has(l.id) }));
-  }, [pick, crew, others, state.labourers, value.siteId, value.labourMarks]);
+  }, [pick, crew, others, labs, value.siteId, value.labourMarks]);
   // The crew, plus anyone else already marked on this DPR (kept even if the plant changes)
   const listed = useMemo(() => {
     const ids = new Set(crew.map((l) => l.id));
-    const marked = state.labourers.filter((l) => !ids.has(l.id) && value.labourMarks.some((m) => m.labourerId === l.id));
+    const marked = labs.filter((l) => !ids.has(l.id) && value.labourMarks.some((m) => m.labourerId === l.id));
     const rows = [...crew.map((l) => ({ l, own: true })), ...marked.map((l) => ({ l, own: false }))];
     // Owner, 2026-11-14: the search box narrows the list by name or EP
     const q = find.trim().toLowerCase();
     return q ? rows.filter(({ l }) => l.name.toLowerCase().includes(q) || l.epNumber.toLowerCase().includes(q)) : rows;
-  }, [crew, state.labourers, value.labourMarks, find]);
+  }, [crew, labs, value.labourMarks, find]);
 
   const equipment = state.equipment.filter((e) => e.siteId === value.siteId);
   // The DPR's site plants (docs §3: every DPR picks one of its site's plants)
@@ -177,7 +183,7 @@ export function DprForm({
   function setPpe(labourerId: string, ppe: NonNullable<DprLabourMark["ppe"]>) {
     const has = value.labourMarks.some((m) => m.labourerId === labourerId);
     // Owner, 2026-11-14: damaged / due / urgent PPE is a request to the store on this DPR
-    const l = state.labourers.find((x) => x.id === labourerId);
+    const l = labs.find((x) => x.id === labourerId);
     const others = value.requests.filter((r) => r.ppeFor !== labourerId);
     const kept = value.requests.find((r) => r.ppeFor === labourerId);
     const reason: DprRequest["reason"] = ppe === "urgent" ? "urgent" : ppe === "due" ? "replacement" : "damaged";

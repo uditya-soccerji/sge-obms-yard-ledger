@@ -1,5 +1,6 @@
 "use client";
 
+import { effectiveWage } from "@/lib/wages";
 import { PayUploadPanel } from "@/components/hr/pay-upload";
 import { JmsAdminQueue } from "@/components/work/jms-admin-queue";
 import { guarded } from "@/components/shared/require-module";
@@ -146,7 +147,7 @@ function AdminHomePage() {
             Math.round(
               state.labourers
                 .filter((l) => l.active)
-                .reduce((s, l) => s + l.wageDaily, 0) /
+                .reduce((s, l) => s + (effectiveWage(l, state.wageBands)?.wage ?? 0), 0) /
                 Math.max(1, state.labourers.filter((l) => l.active).length)
             )
           )}

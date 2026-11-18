@@ -1,5 +1,6 @@
 "use client";
 
+import { effectiveWage } from "@/lib/wages";
 import { cn } from "@/lib/utils";
 import { ALL_SITES, entrySiteId } from "@/lib/site-scope";
 import { useStore } from "@/lib/store";
@@ -25,7 +26,8 @@ export const tdCls = "px-2.5 py-2 align-top";
 export function useWorkScope() {
   const { state, fullState } = useStore();
   const { work } = useWork();
-  const wages = new Map(fullState.labourers.map((l) => [l.id, l.wageDaily]));
+  // Owner, 2026-11-18: own wage, else the wage table's rate for trade × skill × experience
+  const wages = new Map(fullState.labourers.map((l) => [l.id, effectiveWage(l, fullState.wageBands)?.wage ?? 0]));
   // A missing or ₹0 wage is costed at the default, so labour never shows as free
   const wageOf = (id: string) => {
     const w = wages.get(id);

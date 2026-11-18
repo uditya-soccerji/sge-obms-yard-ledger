@@ -1,5 +1,6 @@
 "use client";
 
+import { effectiveWage } from "@/lib/wages";
 import { guarded } from "@/components/shared/require-module";
 import {
   EmptyState,
@@ -23,7 +24,7 @@ import { passState, showDate } from "@/lib/gate-pass";
 import { today } from "@/lib/today";
 import type { WageLedgerEntry } from "@/lib/types";
 import { useSearchParams } from "next/navigation";
-import { Suspense, useMemo, useState } from "react";
+import { Suspense, useMemo, useState, useEffect } from "react";
 
 /** Pay lines on the profile, in this order; empty ones are hidden (docs §24) */
 const EARN: { kind: WageLedgerEntry["kind"]; label: string }[] = [
@@ -46,7 +47,7 @@ const monthName = (m: string) => {
 };
 
 function LabourerHomePage() {
-  const { state, currentAccount, updateLabourer } = useStore();
+  const { state, currentAccount, updateLabourer, loadAttendanceMonth } = useStore();
   const isLabourerOnly = state.currentRole === "labourer";
   const lockedId = isLabourerOnly
     ? currentAccount?.labourerId ?? state.currentUserId
@@ -72,11 +73,13 @@ function LabourerHomePage() {
   // Month view (docs §24): attendance counts and the month's pay
   const ledger = useMemo(() => state.wageLedger.filter((w) => w.labourerId === effectiveId), [state.wageLedger, effectiveId]);
   const months = useMemo(
-    () => [...new Set([today().slice(0, 7), ...history.map((a) => a.date.slice(0, 7)), ...ledger.map((w) => w.date.slice(0, 7))])].sort().reverse(),
+    // Owner, 2026-11-18: the last 12 months are always offered; older ones load when picked
+    () => [...new Set([...lastMonths(12), ...history.map((a) => a.date.slice(0, 7)), ...ledger.map((w) => w.date.slice(0, 7))])].sort().reverse(),
     [history, ledger]
   );
   const [pickedMonth, setMonth] = useState<string | null>(null);
   const month = pickedMonth && months.includes(pickedMonth) ? pickedMonth : (months.find((m) => history.some((a) => a.date.startsWith(m))) ?? months[0]);
+  useEffect(() => { void loadAttendanceMonth(month); }, [month, loadAttendanceMonth]);
   const inMonth = history.filter((a) => a.date.startsWith(month));
   const count = (...st: string[]) => inMonth.filter((a) => st.includes(a.status)).length;
   const presentDays = count("present", "overtime") + 0.5 * count("half");
@@ -84,9 +87,11 @@ function LabourerHomePage() {
   const monthLedger = ledger.filter((w) => w.date.startsWith(month));
   const sumOf = (k: WageLedgerEntry["kind"]) => monthLedger.filter((w) => w.kind === k).reduce((n, w) => n + w.amount, 0);
   // An uploaded wage for the month (docs §24) replaces the days × rate estimate
-  const wage = labourer && sumOf("salary") === 0 ? labourer.wageDaily * presentDays : 0;
+  // Owner, 2026-11-18: own wage, else the wage table's rate (trade × skill × experience)
+  const rate = labourer ? effectiveWage(labourer, state.wageBands) : null;
+  const wage = labourer && rate && sumOf("salary") === 0 ? rate.wage * presentDays : 0;
   const earnLines = [
-    ...(wage > 0 ? [{ label: `Wage (${presentDays} days × ${formatINR(labourer!.wageDaily)})`, amount: wage }] : []),
+    ...(wage > 0 ? [{ label: `Wage (${presentDays} days × ${formatINR(rate!.wage)}${rate!.source === "band" ? " · rate from wage table" : ""})`, amount: wage }] : []),
     ...EARN.map((e) => ({ label: e.label, amount: sumOf(e.kind) })),
   ].filter((l) => l.amount !== 0);
   const cutLines = CUT.map((e) => ({ label: e.label, amount: Math.abs(sumOf(e.kind)) })).filter((l) => l.amount !== 0);
@@ -419,6 +424,12 @@ function LabourerHome() {
       <LabourerHomePage />
     </Suspense>
   );
+}
+
+/** This month and the n−1 before it, as YYYY-MM */
+function lastMonths(n: number): string[] {
+  const [y, m] = today().slice(0, 7).split("-").map(Number);
+  return Array.from({ length: n }, (_, i) => { const d = new Date(y, m - 1 - i, 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; });
 }
 
 export default guarded("labourer", LabourerHome);

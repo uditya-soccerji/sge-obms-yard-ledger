@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { EmptyState, formatINR, Panel, SectionHeader } from "@/components/shared/ui-bits";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -17,8 +17,10 @@ const CUTS: PayKind[] = ["advance", "pf", "room_rent", "travel", "food", "deduct
  * the net — HR and Finance, with an Excel export for payroll / the bank.
  */
 export function LabourPay() {
-  const { state } = useStore();
+  const { state, loadAttendanceMonth } = useStore();
   const [month, setMonth] = useState(today().slice(0, 7));
+  // Owner, 2026-11-18: months older than the loaded window are fetched when picked
+  useEffect(() => { void loadAttendanceMonth(month); }, [month, loadAttendanceMonth]);
   const [q, setQ] = useState("");
   const site = (id?: string) => state.sites.find((s) => s.id === id)?.code ?? "";
 

@@ -20,6 +20,7 @@ import { canUseTestTools } from "@/lib/permissions";
 import { ALL_SITES, canSeeAllSites, canSwitchSites, entrySiteId, isCentralStore } from "@/lib/site-scope";
 import { useStore } from "@/lib/store";
 import { useWork } from "@/lib/work/store";
+import { VersionCheck } from "@/components/shell/version-check";
 import { NAV_ICON, useQueueCounts } from "@/lib/queues";
 import type { RoleId } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -386,6 +387,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           // Shared attendance (migration 008)
           <div role="alert" className="mb-3 rounded-sm border border-[var(--sge-crit)]/40 bg-[var(--sge-crit-wash)] px-3 py-2 text-sm text-[var(--sge-crit)]">
             {attendanceSync.error}. Marks made here are kept on this device and sent again — check your connection.
+          </div>
+        ) : null}
+        <VersionCheck busy={workSync.waiting > 0 || opsSync.waiting > 0} />
+        {workSync.notice || opsSync.notice ? (
+          // A save refused because someone else changed the record first (migration 013)
+          <div role="status" className="mb-3 rounded-sm border border-[var(--sge-brass)]/50 bg-[var(--sge-brass-wash)] px-3 py-2 text-sm">
+            {workSync.notice || opsSync.notice}
           </div>
         ) : null}
         {workSync.error || opsSync.error ? (

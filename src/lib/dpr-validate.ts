@@ -7,9 +7,15 @@ import { timeProblem, WORKING } from "./attendance";
 export const MAX_LINE_M2 = 2000;
 
 /** Crew a DPR must account for: the submitter's active labourers. */
-export function dprCrew(doc: Pick<DprReport, "submitterId" | "submitterType">, labourers: Labourer[]): Labourer[] {
+export function dprCrew(doc: Pick<DprReport, "submitterId" | "submitterType">, labourers: Labourer[], staffEps?: Set<string>): Labourer[] {
   if (doc.submitterType === "safety" || doc.submitterType === "store") return [];
-  return labourers.filter((l) => l.active && l.supervisorId === doc.submitterId);
+  // Owner, 2026-11-18: a labourer record that is really a staff member (same EP as a login) isn't crew
+  return labourers.filter((l) => l.active && l.supervisorId === doc.submitterId && !staffEps?.has(l.epNumber));
+}
+
+/** EP numbers of active staff (logins): their labourer records are not crew or labour cost */
+export function staffEpSet(staff: { epNumber?: string; active?: boolean }[]): Set<string> {
+  return new Set(staff.filter((x) => x.active !== false && x.epNumber).map((x) => x.epNumber!));
 }
 
 /**

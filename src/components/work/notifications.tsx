@@ -66,7 +66,9 @@ export function useMyEvents() {
   };
   const mine = work.events.filter((e) => isFor(e, viewer));
   const seen = currentAccount ? work.lastSeen[currentAccount.id] ?? 0 : 0;
-  return { mine, seen, accountId: currentAccount?.id ?? "" };
+  // Read one by one for the recent window (alerts from other devices can arrive late)
+  const readIds = new Set((currentAccount ? work.readIds?.[currentAccount.id] : undefined) ?? []);
+  return { mine, seen, readIds, accountId: currentAccount?.id ?? "" };
 }
 
 export function NotificationBell() {
@@ -74,7 +76,8 @@ export function NotificationBell() {
   const { state } = useStore();
   const { markSeen } = useWork();
   const waiting = useWaitingForMe();
-  const { mine, seen, accountId } = useMyEvents();
+  const { mine, seen, readIds, accountId } = useMyEvents();
+  const isUnread = (e: { id: string; seq: number; actorAccountId?: string }) => e.seq > seen && !readIds.has(e.id) && e.actorAccountId !== accountId;
   const [open, setOpen] = useState(false);
   const box = useRef<HTMLDivElement>(null);
   const isBoss = state.currentRole === "owner" || state.currentRole === "super_admin";
@@ -109,7 +112,7 @@ export function NotificationBell() {
   }, [open]);
 
   // What you did yourself is never "new" to you
-  const unread = mine.filter((e) => e.seq > seen && e.actorAccountId !== accountId);
+  const unread = mine.filter(isUnread);
   const instantNew = unread.filter(isInstant).filter((e) => !problemsOnly || e.problem);
   const badge = waiting.length + instantNew.length;
   const list = (problemsOnly ? mine.filter((e) => e.problem) : mine).slice().reverse();
@@ -178,7 +181,7 @@ export function NotificationBell() {
 
             <Section title="Approvals & problems (instant)">
               {instant.length === 0 ? <Empty text="No approvals or problems." /> : null}
-              {instant.map((e) => <EventRow key={e.id} e={e} isNew={e.seq > seen && e.actorAccountId !== accountId} onClick={() => go(e.tab)} />)}
+              {instant.map((e) => <EventRow key={e.id} e={e} isNew={isUnread(e)} onClick={() => go(e.tab)} />)}
             </Section>
 
             <Section title="Daily summary">
@@ -195,7 +198,7 @@ export function NotificationBell() {
                           .join(", ")})
                       </span>
                     </summary>
-                    {evs.map((e) => <EventRow key={e.id} e={e} isNew={e.seq > seen && e.actorAccountId !== accountId} onClick={() => go(e.tab)} compact />)}
+                    {evs.map((e) => <EventRow key={e.id} e={e} isNew={isUnread(e)} onClick={() => go(e.tab)} compact />)}
                   </details>
                 );
               })}

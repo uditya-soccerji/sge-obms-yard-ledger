@@ -21,6 +21,8 @@ export interface SharedSyncStatus {
   error: string | null;
   /** Records changed here and not yet saved to the shared database */
   waiting: number;
+  /** A save was refused (someone else changed the record first); shown once */
+  notice?: string | null;
 }
 
 export interface SharedSyncOptions<S extends AnyState> {
@@ -45,7 +47,13 @@ export interface SharedSyncOptions<S extends AnyState> {
   order?: Partial<Record<string, (a: Rec, b: Rec) => number>>;
 }
 
-const print = (v: unknown) => JSON.stringify(v ?? null);
+/** Order-independent JSON: the database stores objects with its own key order */
+function stable(v: unknown): unknown {
+  if (Array.isArray(v)) return v.map(stable);
+  if (v && typeof v === "object") return Object.fromEntries(Object.keys(v as object).sort().filter((k) => (v as Record<string, unknown>)[k] !== undefined).map((k) => [k, stable((v as Record<string, unknown>)[k])]));
+  return v;
+}
+const print = (v: unknown) => JSON.stringify(stable(v ?? null));
 
 function readJson<T>(key: string, fallback: T): T {
   try {
@@ -75,6 +83,8 @@ export function useSharedSync<S extends AnyState>(o: SharedSyncOptions<S>): Shar
   /** collection → id → print of the server's copy */
   const synced = useRef<Map<string, Map<string, string>> | null>(null);
   const cursor = useRef<string>(new Date(0).toISOString());
+  /** "collection|id" → server time of the copy this device last saw (sent with each save, migration 013) */
+  const ver = useRef<Map<string, string>>(new Map());
   const busy = useRef(false);
   const again = useRef(false);
   const [status, setStatus] = useState<SharedSyncStatus>({ loaded: false, error: null, waiting: 0 });
@@ -110,8 +120,10 @@ export function useSharedSync<S extends AnyState>(o: SharedSyncOptions<S>): Shar
     const moved = readJson<boolean>(MOVED_KEY, false);
     const unsent = new Set(readJson<string[]>(UNSENT_KEY, []));
     const server = new Map<string, Map<string, unknown>>();
+    ver.current = new Map();
     for (const r of res.rows) {
       const col = r.collection === META ? "_meta" : r.collection.slice(prefix.length + 1);
+      if (r.updatedAt) ver.current.set(`${col}|${r.id}`, r.updatedAt);
       if (!server.has(col)) server.set(col, new Map());
       server.get(col)!.set(r.id, r.data);
     }
@@ -169,12 +181,12 @@ export function useSharedSync<S extends AnyState>(o: SharedSyncOptions<S>): Shar
         if (m.get(id) === p) continue;
         if (!m.has(id) && isDemo(col, id)) continue;
         const siteId = typeof r.siteId === "string" ? r.siteId : null;
-        rows.push({ collection: `${prefix}.${col}`, id, siteId, data: r });
+        rows.push({ collection: `${prefix}.${col}`, id, siteId, data: r, base: ver.current.get(`${col}|${id}`) ?? null });
         apply.push(() => m.set(id, p));
       }
       for (const id of [...m.keys()]) {
         if (ids.has(id)) continue;
-        rows.push({ collection: `${prefix}.${col}`, id, data: {}, deleted: true });
+        rows.push({ collection: `${prefix}.${col}`, id, data: {}, deleted: true, base: ver.current.get(`${col}|${id}`) ?? null });
         apply.push(() => m.delete(id));
       }
     }
@@ -198,6 +210,40 @@ export function useSharedSync<S extends AnyState>(o: SharedSyncOptions<S>): Shar
     busy.current = false;
     if (res.ok) {
       for (const f of apply) f();
+      // A save refused by the database (someone else saved first, or the role may not approve):
+      // take the stored copy back at once (migration 013)
+      const sent = new Map(rows.map((r) => [`${r.collection}|${r.id}`, r]));
+      const refused: SharedRow[] = [];
+      for (const r of res.saved) {
+        const col = r.collection === META ? "_meta" : r.collection.slice(prefix.length + 1);
+        if (r.updatedAt) ver.current.set(`${col}|${r.id}`, r.updatedAt);
+        const mine = sent.get(`${r.collection}|${r.id}`);
+        if (!mine || r.collection === META) continue;
+        if (!!mine.deleted !== !!r.deleted || (!r.deleted && print(mine.data) !== print(r.data))) refused.push(r);
+      }
+      if (refused.length) {
+        opts.current.setState((st) => {
+          const cur2 = st as Record<string, unknown>;
+          const patch: Record<string, unknown> = {};
+          for (const r of refused) {
+            const col = r.collection.slice(prefix.length + 1);
+            const m = s.get(col) ?? new Map<string, string>();
+            s.set(col, m);
+            const list = (patch[col] as Rec[] | undefined) ?? ((cur2[col] as Rec[] | undefined) ?? []);
+            const without = list.filter((x) => kid(col, x) !== r.id);
+            if (r.deleted) {
+              m.delete(r.id);
+              patch[col] = without;
+            } else {
+              m.set(r.id, print(r.data));
+              const at = list.findIndex((x) => kid(col, x) === r.id);
+              patch[col] = at >= 0 ? list.map((x, i) => (i === at ? (r.data as Rec) : x)) : [...list, r.data as Rec];
+            }
+          }
+          return { ...st, ...patch };
+        });
+        setStatus((x) => ({ ...x, notice: `${refused.length} change${refused.length === 1 ? " was" : "s were"} not saved — someone else had changed ${refused.length === 1 ? "it" : "them"} first (or it needs another role). The latest copy is shown.` }));
+      }
       writeJson(MOVED_KEY, true);
       writeJson(UNSENT_KEY, null);
       setStatus((x) => ({ ...x, error: null, waiting: 0 }));
@@ -239,6 +285,7 @@ export function useSharedSync<S extends AnyState>(o: SharedSyncOptions<S>): Shar
         const localOrder = new Map(local.map((r, i) => [kid(col, r), i]));
         const map = new Map(local.map((r) => [kid(col, r), r]));
         for (const r of rows) {
+          if (r.updatedAt) ver.current.set(`${col}|${r.id}`, r.updatedAt);
           if (r.deleted) {
             map.delete(r.id);
             m.delete(r.id);
@@ -281,6 +328,13 @@ export function useSharedSync<S extends AnyState>(o: SharedSyncOptions<S>): Shar
       window.removeEventListener("focus", onFocus);
     };
   }, [o.enabled, o.sessionKey, fullLoad, pull]);
+
+  // A "not saved" notice stays 30 s
+  useEffect(() => {
+    if (!status.notice) return;
+    const t = setTimeout(() => setStatus((x) => ({ ...x, notice: null })), 30 * 1000);
+    return () => clearTimeout(t);
+  }, [status.notice]);
 
   // Send changes made here (shortly after the last one)
   useEffect(() => {

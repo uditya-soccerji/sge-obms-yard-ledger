@@ -90,3 +90,17 @@ export function seedWageBands(): WageBand[] {
   }
   return rows;
 }
+
+/**
+ * The daily wage pay and costs use (owner, 2026-11-18): the labourer's own wage when set, else
+ * the wage table's rate for their trade × skill × experience (skill unknown = semi skilled,
+ * experience unknown = experienced). Null when neither exists — callers use their default.
+ */
+export function effectiveWage(
+  l: { wageDaily?: number; trade: string; skill?: SkillLevel; experience?: ExperienceLevel },
+  bands: WageBand[]
+): { wage: number; source: "own" | "band" } | null {
+  if ((l.wageDaily ?? 0) > 0) return { wage: l.wageDaily!, source: "own" };
+  const w = suggestedWage(bands, l.trade, l.skill ?? "semi_skilled", l.experience ?? "experienced");
+  return w ? { wage: w, source: "band" } : null;
+}

@@ -21,7 +21,7 @@ import { inStock, LIFECYCLE, LIFECYCLE_LABEL, paintUsedInMonth, stepVariance } f
 import type { PaintBatch, PaintStep } from "./types";
 import { blankReport, entriesOf, isLate, pendingReports, reportOpen, sameDay } from "./reports";
 import { effectivePermission } from "../permissions";
-import { dprCrew, validateDprForSubmit } from "../dpr-validate";
+import { dprCrew, staffEpSet, validateDprForSubmit } from "../dpr-validate";
 import type { DprSubmitterType, ModuleId, PermissionAction } from "../types";
 import { STAGES } from "./types";
 import { passesNeedingAction, showDate } from "../gate-pass";
@@ -126,6 +126,9 @@ const WorkContext = createContext<WorkApi | null>(null);
 function uid(prefix: string) {
   return `${prefix}-${Math.random().toString(36).slice(2, 9)}`;
 }
+
+/** Alerts newer than "read up to" minus this still count as unread unless read one by one */
+export const READ_WINDOW_MS = 10 * 60 * 1000;
 
 /** Work collections kept in the shared database (owner, 2026-11-18) */
 const WORK_SHARED = ["serviceItems", "workOrders", "planLines", "jobs", "reports", "dprs", "jms", "submissions", "paint", "paintSteps", "planRequests", "expenses", "events"] as const;
@@ -262,6 +265,31 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
     }
   }, [work, hydrated]);
 
+  // Owner, 2026-11-18: job and JMS numbers come from the database (migration 013), so two devices
+  // starting a job in the same few seconds never get the same number. The number shown at once is
+  // this device's guess; it's corrected within a second if another device took it.
+  const toNumber = React.useRef(new Map<string, { kind: "job" | "jms"; key: string }>());
+  useEffect(() => {
+    if (!supabase || !toNumber.current.size) return;
+    const client = supabase;
+    for (const [id, t] of [...toNumber.current]) {
+      const rec = t.kind === "job" ? work.jobs.find((j) => j.id === id) : work.jms.find((j) => j.id === id);
+      if (!rec) continue;
+      toNumber.current.delete(id);
+      const cur = t.kind === "job" ? (rec as Job).jobNo : (rec as Jms).jmsNo;
+      const n = Number(t.kind === "job" ? cur.slice(cur.lastIndexOf("-") + 1) : cur) || 0;
+      void client.rpc("next_counter", { counter_key: t.key, at_least: Math.max(0, n - 1) }).then(({ data, error }) => {
+        if (error || typeof data !== "number" || data === n) return;
+        if (t.kind === "job") {
+          const no = `${cur.slice(0, cur.lastIndexOf("-") + 1)}${String(data).padStart(4, "0")}`;
+          setWork((s) => ({ ...s, jobs: s.jobs.map((j) => (j.id === id ? { ...j, jobNo: no } : j)) }));
+        } else {
+          setWork((s) => ({ ...s, jms: s.jms.map((j) => (j.id === id ? { ...j, jmsNo: String(data) } : j)) }));
+        }
+      });
+    }
+  }, [work.jobs, work.jms]);
+
   // Owner, 2026-11-18: DPRs, jobs, plan lines, JMS, paint, requests and alerts are shared by every
   // device (app_records, migration 011) — before this they stayed in the browser that entered them.
   const loginId = fullState.impersonatorAccountId ?? fullState.currentAccountId ?? "";
@@ -284,12 +312,19 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
     setState: setWork,
     prefix: "work",
     collections: WORK_SHARED,
-    meta: ["siteMonths", "defaultMonth", "lastSeen"],
+    meta: ["siteMonths", "defaultMonth", "lastSeen", "readIds"],
     isDemo: (col, id) => demoWorkIds.has(`${col}|${id}`),
     // Service items have no id: their code is the key
     keyOf: { serviceItems: (r) => String(r.code ?? "") },
     // What each person has read: the furthest point any of their devices reached
     mergeMeta: {
+      readIds: (local, server) => {
+        const a = (local ?? {}) as Record<string, string[]>;
+        const b = (server ?? {}) as Record<string, string[]>;
+        const out: Record<string, string[]> = { ...b };
+        for (const [k, v] of Object.entries(a)) out[k] = [...new Set([...(out[k] ?? []), ...v])].slice(-500);
+        return out;
+      },
       lastSeen: (local, server) => {
         const a = (local ?? {}) as Record<string, number>;
         const b = (server ?? {}) as Record<string, number>;
@@ -574,6 +609,7 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
       supervisorId: line.supervisorId,
       ...(planned ? { plannedM2: round3(input.plannedM2!), plannedEnd: input.plannedEnd, planStatus: "pending" as const } : {}),
     };
+    toNumber.current.set(job.id, { kind: "job", key: `job:${siteCode}` });
     setWork((s) => ({ ...s, jobs: [...s.jobs, job] }));
     log({ kind: "job_started", siteId: line.siteId, subjectStaffId: job.supervisorId, title: `${job.jobNo} started`, detail: `${line.plant} · ${job.location}`, tab: "jobs", refId: job.id });
     if (planned) log({ kind: "job_plan", siteId: line.siteId, subjectStaffId: job.supervisorId, title: `${job.jobNo} plan: ${job.plannedM2} m² by ${job.plannedEnd}`, detail: `${line.plant} · ${job.location} · from ${job.startDate} — approve or send back`, tab: "jobs", refId: job.id });
@@ -821,6 +857,7 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
     if (!wo) return { ok: false, error: `No valid work order covers ${line.serviceCode} on ${periodTo} — add or extend the work order first` };
     const last = Math.max(0, ...w.jms.map((j) => Number(j.jmsNo) || 0));
     const id = uid("jms");
+    toNumber.current.set(id, { kind: "jms", key: "jms" });
     const row: Jms = {
       id,
       jmsNo: String(last + 1),
@@ -913,7 +950,7 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
     if (!reportOpen(r)) return { ok: false, error: "Already submitted" };
     if (actor.current.role === "supervisor" && r.submitterId !== actor.current.staffId) return { ok: false, error: "That DPR belongs to another supervisor" };
     const plants = sitesRef.current.find((x) => x.id === r.siteId)?.plants ?? [];
-    const problems = validateDprForSubmit(r, dprCrew(r, labourersRef.current), plants, entriesOf(w, id));
+    const problems = validateDprForSubmit(r, dprCrew(r, labourersRef.current, staffEpSet(staffRef.current)), plants, entriesOf(w, id));
     if (problems.length) return { ok: false, error: problems.join(" · ") };
     const at = new Date().toISOString();
     // Stamped on the app date (the demo date when one is set), India time, for the 10:00 deadline
@@ -1359,7 +1396,13 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const markSeen = useCallback((accountId: string) => {
-    setWork((s) => ({ ...s, lastSeen: { ...s.lastSeen, [accountId]: s.events[s.events.length - 1]?.seq ?? 0 } }));
+    setWork((s) => {
+      const top = s.events[s.events.length - 1]?.seq ?? 0;
+      // Time-based numbers (shared data): keep a 10-minute window open for alerts still on their way
+      const mark = top > 1e12 ? top - READ_WINDOW_MS : top;
+      const ids = s.events.filter((e) => e.seq > mark).map((e) => e.id);
+      return { ...s, lastSeen: { ...s.lastSeen, [accountId]: Math.max(mark, s.lastSeen[accountId] ?? 0) }, readIds: { ...(s.readIds ?? {}), [accountId]: ids } };
+    });
   }, []);
 
   const resetWork = useCallback(() => {

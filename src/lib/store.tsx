@@ -25,7 +25,7 @@ import { supabase } from "./supabase/client";
 import { useSharedSync } from "./shared-sync";
 import { partsOf, remoteLoadLabourers, remoteSaveLabourers, type LabourerParts } from "./supabase/labourers";
 import { remoteLoadStaff, remoteSaveStaff, STAFF_WRITE_ROLES, staffPrint } from "./supabase/staff";
-import { attendancePrint, attendanceWindowStart, remoteAttendanceChanges, remoteLoadAttendance, remoteSaveAttendance } from "./supabase/attendance";
+import { attendancePrint, attendanceWindowStart, remoteLoadAttendanceRange, remoteAttendanceChanges, remoteLoadAttendance, remoteSaveAttendance } from "./supabase/attendance";
 
 /**
  * Attendance this browser held before the shared register (migration 008). Kept apart
@@ -140,10 +140,12 @@ interface StoreApi {
   labourerSync: { loaded: boolean; error: string | null };
   /** Shared attendance (migration 008): loaded yet, last save problem, marks still only in this browser */
   /** Store, equipment, safety and wage records in the shared database (owner, 2026-11-18) */
-  opsSync: { loaded: boolean; error: string | null; waiting: number };
+  opsSync: { loaded: boolean; error: string | null; waiting: number; notice?: string | null };
   attendanceSync: { shared: boolean; loaded: boolean; error: string | null; localWaiting: number; moving: string | null };
   /** Owner / SA / HR: send this browser's older attendance to the shared register (once) */
   moveLocalAttendance: () => Promise<{ ok: boolean; message: string }>;
+  /** Fetch a month older than the loaded window (owner, 2026-11-18) */
+  loadAttendanceMonth: (month: string) => Promise<void>;
   login: (
     username: string,
     password: string
@@ -967,6 +969,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const attCursor = React.useRef<string | null>(null);
   const attBusy = React.useRef(false);
   const attAgain = React.useRef(false);
+  /** Marks of months before the window, loaded when someone picks such a month (id → print) */
+  const attOlder = React.useRef(new Map<string, string>());
+  const attOlderMonths = React.useRef(new Set<string>());
   const [attendanceSync, setAttendanceSync] = useState<StoreApi["attendanceSync"]>({ shared: !!supabase, loaded: false, error: null, localWaiting: 0, moving: null });
 
   /** Local marks not yet on the server (new, or changed since the last load) */
@@ -994,9 +999,10 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       const unsentIds = new Set(unsent.map((a) => a.id));
       const pending = [...attPending().filter((a) => !unsentIds.has(a.id)), ...unsent];
       const pendingIds = new Set(pending.map((a) => a.id));
-      attSynced.current = new Map(res.records.map((a) => [a.id, attendancePrint(a)]));
+      // Older months loaded on request (before the window) stay, and count as saved
+      attSynced.current = new Map([...attOlder.current, ...res.records.map((a) => [a.id, attendancePrint(a)] as const)]);
       attCursor.current = res.cursor ?? new Date(0).toISOString();
-      setState((s) => ({ ...s, attendance: [...res.records.filter((a) => !pendingIds.has(a.id)), ...pending] }));
+      setState((s) => ({ ...s, attendance: [...s.attendance.filter((a) => a.date < from && attOlder.current.has(a.id) && !pendingIds.has(a.id)), ...res.records.filter((a) => !pendingIds.has(a.id)), ...pending] }));
     } else {
       const res = await remoteAttendanceChanges(from, attCursor.current);
       if (!res) return setAttendanceSync((x) => ({ ...x, error: "Couldn't load attendance changes" }));
@@ -1049,6 +1055,25 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (attendanceSync.loaded) void pushAttendance();
   }, [state.attendance, attendanceSync.loaded, pushAttendance]);
+
+  // Owner, 2026-11-18: a month before the loaded window (3 months back) is fetched when someone picks it
+  const loadAttendanceMonth = useCallback<StoreApi["loadAttendanceMonth"]>(async (month) => {
+    if (!supabase || !/^\d{4}-\d{2}$/.test(month)) return;
+    const from = attendanceWindowStart();
+    const start = `${month}-01`;
+    if (start >= from || attOlderMonths.current.has(month)) return;
+    const [y, m] = month.split("-").map(Number);
+    const next = m === 12 ? `${y + 1}-01-01` : `${y}-${String(m + 1).padStart(2, "0")}-01`;
+    const rows = await remoteLoadAttendanceRange(start, next);
+    if (!rows) return;
+    attOlderMonths.current.add(month);
+    for (const a of rows) {
+      attOlder.current.set(a.id, attendancePrint(a));
+      attSynced.current?.set(a.id, attendancePrint(a));
+    }
+    const ids = new Set(rows.map((a) => a.id));
+    setState((s) => ({ ...s, attendance: [...s.attendance.filter((a) => !ids.has(a.id)), ...rows] }));
+  }, []);
 
   const moveLocalAttendance = useCallback<StoreApi["moveLocalAttendance"]>(async () => {
     if (!supabase) return { ok: false, message: "No shared register on this copy of the app" };
@@ -3295,6 +3320,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       attendanceSync,
       opsSync: opsShared,
       moveLocalAttendance,
+      loadAttendanceMonth,
       login,
       switchRole,
       logout,
@@ -3380,6 +3406,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       attendanceSync,
       opsShared,
       moveLocalAttendance,
+      loadAttendanceMonth,
       state,
       scopedState,
       hydrated,

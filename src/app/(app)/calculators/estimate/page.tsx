@@ -1,5 +1,6 @@
 "use client";
 
+import { effectiveWage } from "@/lib/wages";
 import { guarded } from "@/components/shared/require-module";
 import { useMemo, useState } from "react";
 import {
@@ -43,8 +44,8 @@ function CostEstimatePage() {
   // Round 2 (owner, 2026-10-21): the store estimates quantities, never sees rates or money
   const noRates = state.currentRole === "store";
   // Average daily wage of active labourers — a rough labour cost next to the billing value
-  const active = state.labourers.filter((l) => l.active && l.wageDaily > 0);
-  const avgWage = active.length ? active.reduce((s, l) => s + l.wageDaily, 0) / active.length : 0;
+  const rates = state.labourers.filter((l) => l.active).map((l) => effectiveWage(l, state.wageBands)?.wage ?? 0).filter((w) => w > 0);
+  const avgWage = rates.length ? rates.reduce((s, w) => s + w, 0) / rates.length : 0;
 
   const result = useMemo(
     () =>

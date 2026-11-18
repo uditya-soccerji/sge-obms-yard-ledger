@@ -11,6 +11,10 @@ export interface SharedRow {
   siteId?: string | null;
   data: unknown;
   deleted?: boolean;
+  /** Server time of this copy (from the database) */
+  updatedAt?: string;
+  /** Saving: the server time of the copy this change started from (stale saves are refused, migration 013) */
+  base?: string | null;
 }
 
 interface DbRow {
@@ -43,7 +47,7 @@ export async function loadSharedRecords(collections: string[]): Promise<{ rows: 
     }
     for (const r of (data ?? []) as DbRow[]) {
       if (r.updated_at > cursor) cursor = r.updated_at;
-      if (!r.deleted) rows.push({ collection: r.collection, id: r.id, siteId: r.site_id, data: r.data });
+      if (!r.deleted) rows.push({ collection: r.collection, id: r.id, siteId: r.site_id, data: r.data, updatedAt: r.updated_at });
     }
     if (!data || data.length < PAGE) return { rows, cursor };
   }
@@ -65,19 +69,22 @@ export async function sharedRecordChanges(collections: string[], cursor: string)
     if (error) return null;
     for (const r of (data ?? []) as DbRow[]) {
       if (r.updated_at > next) next = r.updated_at;
-      rows.push({ collection: r.collection, id: r.id, siteId: r.site_id, data: r.data, deleted: r.deleted });
+      rows.push({ collection: r.collection, id: r.id, siteId: r.site_id, data: r.data, deleted: r.deleted, updatedAt: r.updated_at });
     }
     if (!data || data.length < PAGE) return { rows, cursor: next };
   }
 }
 
-export async function saveSharedRecords(rows: SharedRow[]): Promise<{ ok: boolean; error?: string }> {
-  if (!supabase || !rows.length) return { ok: true };
+export async function saveSharedRecords(rows: SharedRow[]): Promise<{ ok: boolean; error?: string; saved: SharedRow[] }> {
+  if (!supabase || !rows.length) return { ok: true, saved: [] };
+  const saved: SharedRow[] = [];
   for (let i = 0; i < rows.length; i += 300) {
-    const { error } = await supabase.from("app_records").upsert(
-      rows.slice(i, i + 300).map((r) => ({ collection: r.collection, id: r.id, site_id: r.siteId ?? null, data: r.deleted ? {} : r.data, deleted: !!r.deleted }))
-    );
-    if (error) return { ok: false, error: `Didn't save to the shared database: ${error.message}` };
+    const { data, error } = await supabase
+      .from("app_records")
+      .upsert(rows.slice(i, i + 300).map((r) => ({ collection: r.collection, id: r.id, site_id: r.siteId ?? null, data: r.deleted ? {} : r.data, deleted: !!r.deleted, base_updated_at: r.base ?? null })))
+      .select("collection,id,site_id,data,deleted,updated_at");
+    if (error) return { ok: false, error: `Didn't save to the shared database: ${error.message}`, saved };
+    for (const r of (data ?? []) as DbRow[]) saved.push({ collection: r.collection, id: r.id, siteId: r.site_id, data: r.data, deleted: r.deleted, updatedAt: r.updated_at });
   }
-  return { ok: true };
+  return { ok: true, saved };
 }
