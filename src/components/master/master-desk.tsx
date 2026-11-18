@@ -799,6 +799,7 @@ function UsersSheet({ showInactive }: { showInactive: boolean }) {
   const epNorm = normalizeEp(ep);
   const epOwner = epNorm ? state.staff.find((x) => x.epNumber === epNorm) : undefined;
   const epOwnerLogin = epOwner ? state.users.find((u) => u.staffId === epOwner.id) : undefined;
+  const epLabourer = epNorm && !epOwner ? state.labourers.find((l) => l.epNumber === epNorm) : undefined;
   // Owner, 2026-11-18: "Create login" from HR → Staff opens this form for that staff record
   const params = useSearchParams();
   const fromStaff = params.get("staff");
@@ -826,6 +827,52 @@ function UsersSheet({ showInactive }: { showInactive: boolean }) {
   return (
     <Panel>
       <div className="mb-4 grid gap-2 rounded-sm border border-[var(--sge-line)] bg-[var(--sge-linen)] p-3 sm:grid-cols-4">
+        {!isLabourerRole ? (
+          // Owner, 2026-11-18: every user has an EP — start from it; the profile is filled from what the app already knows
+          <div className="sm:col-span-4">
+            <Label>EP number (RIL gate pass) — start here</Label>
+            <div className="mt-1 flex flex-wrap items-center gap-3">
+              <Input
+                className="max-w-xs font-mono"
+                value={ep}
+                placeholder="PP5920xxxxxx"
+                onChange={(e) => {
+                  const v = e.target.value.toUpperCase();
+                  setEp(v);
+                  const n = normalizeEp(v);
+                  if (!n) return;
+                  const st = state.staff.find((x) => x.epNumber === n && !linkedStaff.has(x.id));
+                  if (st) {
+                    setLink(st.id);
+                    setName(st.name);
+                    if (st.role !== "labourer") setRole(st.role);
+                    setSiteIds([...new Set([st.siteId, ...(st.siteIds ?? [])])]);
+                    return;
+                  }
+                  const lab = state.labourers.find((l) => l.epNumber === n && l.active) ?? state.labourers.find((l) => l.epNumber === n);
+                  if (lab) {
+                    setLink("new");
+                    setName(lab.name.toLowerCase().replace(/\b[a-z]/g, (c) => c.toUpperCase()));
+                    if (lab.siteId) setSiteIds([lab.siteId]);
+                  }
+                }}
+              />
+              <span className="text-xs text-[var(--sge-ink-2)]">
+                {!ep.trim()
+                  ? "Type the EP: an existing staff profile or the labourer register fills in the name and site."
+                  : !epNorm
+                    ? "EP is PP + 10 digits"
+                    : epOwner && epOwnerLogin
+                      ? `${epOwner.name} already has the login @${epOwnerLogin.username}`
+                      : epOwner
+                        ? `Staff profile found: ${epOwner.name} · ${epOwner.designation ?? epOwner.role} — this login joins it`
+                        : epLabourer
+                          ? `Found in the labourer register: ${epLabourer.name} — a staff profile is made from it (the labour record stays separate)`
+                          : "Not in the app yet — a new staff profile is made with this EP"}
+              </span>
+            </div>
+          </div>
+        ) : null}
         <div>
           <Label>Display name</Label>
           <Input className="mt-1" value={name} onChange={(e) => setName(e.target.value)} placeholder="R. Mehta" />
@@ -910,32 +957,6 @@ function UsersSheet({ showInactive }: { showInactive: boolean }) {
             The login sees this person&apos;s jobs, DPRs and crew.
           </p>
         </div>
-        {!isLabourerRole ? (
-          <div>
-            <Label>EP number</Label>
-            <Input
-              className="mt-1 font-mono"
-              value={ep}
-              placeholder="PP5920xxxxxx (optional)"
-              onChange={(e) => {
-                const v = e.target.value.toUpperCase();
-                setEp(v);
-                // Owner, 2026-11-18: an EP that already has a staff record (no login yet) links to it
-                const n = normalizeEp(v);
-                const match = n ? state.staff.find((x) => x.epNumber === n && !linkedStaff.has(x.id)) : undefined;
-                if (match) {
-                  setLink(match.id);
-                  if (!name.trim()) setName(match.name);
-                }
-              }}
-            />
-            <p className="mt-1 text-[11px] text-[var(--sge-ink-3)]">
-              {epOwner && !epOwnerLogin
-                ? `Links to the existing staff record of ${epOwner.name} — profiles merge, the record takes this seat's role and sites.`
-                : "RIL gate pass — tracks this staff member's attendance."}
-            </p>
-          </div>
-        ) : null}
         {role === "supervisor" && linkValue === "new" ? (
           <div>
             <Label>Supervisor type</Label>
@@ -990,6 +1011,8 @@ function UsersSheet({ showInactive }: { showInactive: boolean }) {
               // Check here too: the store's result isn't known until React applies the update
               const invalid = checkSeat(input, state.users);
               if (invalid) return setMsg({ ok: false, text: invalid });
+              // Owner, 2026-11-18: every user has an EP number
+              if (!isLabourerRole && !ep.trim()) return setMsg({ ok: false, text: "Enter the person's EP number (RIL gate pass)" });
               const epCheck = isLabourerRole ? {} : checkStaffEp(state, ep, newStaff ? undefined : linkValue2);
               if (epCheck.error) {
                 return setMsg({ ok: false, text: epOwnerLogin ? `EP ${epNorm} belongs to ${epOwner!.name}, who already has the login @${epOwnerLogin.username}` : epCheck.error });
