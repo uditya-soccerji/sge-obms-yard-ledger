@@ -1034,8 +1034,11 @@ function UsersSheet({ showInactive }: { showInactive: boolean }) {
                 });
                 if (!staffId) return setMsg({ ok: false, text: "Your role can't create staff records" });
                 input.staffId = staffId;
-              } else if (linkValue2) {
-                // Owner, 2026-11-18: merge — the staff record takes the seat's role and sites (and the EP)
+              }
+              const r = await createUser(input);
+              if (!r.ok) return setMsg({ ok: false, text: r.error ?? "Failed" });
+              if (!newStaff && !isLabourerRole && linkValue2) {
+                // Owner, 2026-11-18: merge (only once the login exists) — the staff record takes the seat's role and sites (and the EP)
                 const cur = state.staff.find((x) => x.id === linkValue2);
                 const meta = ROLES.find((r) => r.id === role);
                 updateStaff(linkValue2, {
@@ -1046,8 +1049,6 @@ function UsersSheet({ showInactive }: { showInactive: boolean }) {
                   ...(cur && cur.role !== role && role !== "supervisor" ? { designation: cur.designation && cur.role === role ? cur.designation : meta?.label ?? role } : {}),
                 });
               }
-              const r = await createUser(input);
-              if (!r.ok) return setMsg({ ok: false, text: r.error ?? "Failed" });
               setMsg({ ok: true, text: `Created @${input.username} · ${siteCodes(state, siteIds)}${input.plantIds.length ? ` · ${input.plantIds.join(", ")}` : ""}${epCheck.ep ? ` · ${epCheck.ep}` : ""}${epCheck.note ? ` (${epCheck.note})` : ""}` });
               setEp("");
               setPlantIds([]);

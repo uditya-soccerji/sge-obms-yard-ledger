@@ -121,6 +121,7 @@ async function callAdminUsers(body: Record<string, unknown>): Promise<FnResult> 
     const res = (error as { context?: Response } | null)?.context;
     if (res) {
       const parsed = (await res.json()) as FnResult;
+      if (res.status === 401) return { ok: false, error: "Your sign-in has ended. Sign out, sign in again, then retry." };
       if (parsed && "ok" in parsed) return parsed;
     }
   } catch {
@@ -299,7 +300,8 @@ export async function remoteStillActive(): Promise<boolean | null> {
 }
 
 export async function remoteLogout() {
-  if (supabase) await supabase.auth.signOut();
+  // Local scope: signing out here must not end the same person's sessions on other devices
+  if (supabase) await supabase.auth.signOut({ scope: "local" });
 }
 
 export async function remoteAudit(entry: {
