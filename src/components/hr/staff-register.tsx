@@ -1,6 +1,7 @@
 "use client";
 
 import { Fragment, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
 import { EmptyState, Panel, SectionHeader, StatusPill } from "@/components/shared/ui-bits";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -35,6 +36,9 @@ export function StaffRegister() {
   const linked = (id: string) => fullState.users.find((u) => u.staffId === id);
   // Owner, 2026-11-18: monthly salary from the staff salary sheet — Owner, SA, HR and Finance only
   const canPay = SALARY_ROLES.includes(state.currentRole as RoleId);
+  // Owner, 2026-11-18: every staff member can have a login — Owner / SA make it from here
+  const router = useRouter();
+  const canLogin = state.currentRole === "owner" || state.currentRole === "super_admin";
   const [salaries, setSalaries] = useState<StaffSalary[]>([]);
   const [openPay, setOpenPay] = useState<string | null>(null);
   useEffect(() => {
@@ -126,7 +130,17 @@ export function StaffRegister() {
                     <td>{siteCode(s.siteId)}</td>
                     {canPay ? <td className="text-right font-mono text-xs">{rateOf(s.id) ? formatINR(Math.round(rateOf(s.id)!)) : "—"}</td> : null}
                     <td className="font-mono text-xs">{s.phone ?? "—"}</td>
-                    <td>{linked(s.id) ? <StatusPill tone="ok">@{linked(s.id)!.username}</StatusPill> : <span className="text-xs text-[var(--sge-ink-3)]">none</span>}</td>
+                    <td>
+                      {linked(s.id) ? (
+                        <StatusPill tone="ok">@{linked(s.id)!.username}</StatusPill>
+                      ) : canLogin && s.active !== false ? (
+                        <button type="button" className="text-xs font-semibold text-[var(--sge-brass-ink)] underline" onClick={() => router.push(`/master-data?sheet=users&staff=${s.id}`)}>
+                          Create login
+                        </button>
+                      ) : (
+                        <span className="text-xs text-[var(--sge-ink-3)]">none</span>
+                      )}
+                    </td>
                     <td className="whitespace-nowrap text-right">
                       {canPay && payOf(s.id).length ? (
                         <Button size="sm" variant="ghost" onClick={() => setOpenPay(openPay === s.id ? null : s.id)}>{openPay === s.id ? "Hide salary" : "Salary"}</Button>

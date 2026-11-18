@@ -781,9 +781,11 @@ function UsersSheet({ showInactive }: { showInactive: boolean }) {
   );
   const linkedStaff = new Set(state.users.map((u) => u.staffId).filter(Boolean));
   const linkedLabourers = new Set(state.users.map((u) => u.labourerId).filter(Boolean));
-  const staffChoices = state.staff.filter(
-    (x) => x.role === role && siteIds.includes(x.siteId) && !linkedStaff.has(x.id)
-  );
+  // Owner, 2026-11-18: every staff member can get a login — any staff record without one on the picked
+  // sites can be linked, whatever role it was given (it takes the seat's role); same role first
+  const staffChoices = state.staff
+    .filter((x) => x.active !== false && (siteIds.includes(x.siteId) || (x.siteIds ?? []).some((id) => siteIds.includes(id)) || x.id === link) && !linkedStaff.has(x.id))
+    .sort((a, b) => Number(b.role === role) - Number(a.role === role) || a.name.localeCompare(b.name));
   const labourerChoices = state.labourers.filter(
     (l) => l.active && siteIds.includes(l.siteId) && !linkedLabourers.has(l.id)
   );
@@ -792,6 +794,25 @@ function UsersSheet({ showInactive }: { showInactive: boolean }) {
   const linkValue = isLabourerRole
     ? labourerChoices.some((l) => l.id === link) ? link : ""
     : link === "new" || staffChoices.some((x) => x.id === link) ? link : "new";
+
+  // Owner, 2026-11-18: who holds the typed EP already
+  const epNorm = normalizeEp(ep);
+  const epOwner = epNorm ? state.staff.find((x) => x.epNumber === epNorm) : undefined;
+  const epOwnerLogin = epOwner ? state.users.find((u) => u.staffId === epOwner.id) : undefined;
+  // Owner, 2026-11-18: "Create login" from HR → Staff opens this form for that staff record
+  const params = useSearchParams();
+  const fromStaff = params.get("staff");
+  useEffect(() => {
+    if (!fromStaff) return;
+    const x = state.staff.find((s) => s.id === fromStaff);
+    if (!x || linkedStaff.has(x.id)) return;
+    setLink(x.id);
+    setName(x.name);
+    if (x.role !== "labourer") setRole(x.role);
+    setSiteIds([...new Set([x.siteId, ...(x.siteIds ?? [])])]);
+    if (x.epNumber) setEp(x.epNumber);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fromStaff]);
 
   // Any role may have several sites (owner, 2026-11-13); the person switches among them in the header
   const pickRole = (r: RoleId) => setRole(r);
@@ -880,7 +901,7 @@ function UsersSheet({ showInactive }: { showInactive: boolean }) {
               <>
                 <option value="new">Create a new staff record for this person</option>
                 {staffChoices.map((x) => (
-                  <option key={x.id} value={x.id}>{x.name} · {x.designation}</option>
+                  <option key={x.id} value={x.id}>{x.name} · {x.designation ?? x.role}{x.epNumber ? ` · ${x.epNumber}` : ""}</option>
                 ))}
               </>
             )}
@@ -892,8 +913,27 @@ function UsersSheet({ showInactive }: { showInactive: boolean }) {
         {!isLabourerRole ? (
           <div>
             <Label>EP number</Label>
-            <Input className="mt-1 font-mono" value={ep} placeholder="PP5920xxxxxx (optional)" onChange={(e) => setEp(e.target.value.toUpperCase())} />
-            <p className="mt-1 text-[11px] text-[var(--sge-ink-3)]">RIL gate pass — tracks this staff member&apos;s attendance.</p>
+            <Input
+              className="mt-1 font-mono"
+              value={ep}
+              placeholder="PP5920xxxxxx (optional)"
+              onChange={(e) => {
+                const v = e.target.value.toUpperCase();
+                setEp(v);
+                // Owner, 2026-11-18: an EP that already has a staff record (no login yet) links to it
+                const n = normalizeEp(v);
+                const match = n ? state.staff.find((x) => x.epNumber === n && !linkedStaff.has(x.id)) : undefined;
+                if (match) {
+                  setLink(match.id);
+                  if (!name.trim()) setName(match.name);
+                }
+              }}
+            />
+            <p className="mt-1 text-[11px] text-[var(--sge-ink-3)]">
+              {epOwner && !epOwnerLogin
+                ? `Links to the existing staff record of ${epOwner.name} — profiles merge, the record takes this seat's role and sites.`
+                : "RIL gate pass — tracks this staff member's attendance."}
+            </p>
           </div>
         ) : null}
         {role === "supervisor" && linkValue === "new" ? (
@@ -930,7 +970,10 @@ function UsersSheet({ showInactive }: { showInactive: boolean }) {
             size="sm"
             disabled={!canEdit}
             onClick={async () => {
-              const newStaff = !isLabourerRole && linkValue === "new";
+              // Owner, 2026-11-18: "new" with an EP that already has a staff record (no login) merges into it
+              const mergeInto = !isLabourerRole && linkValue === "new" && epOwner && !epOwnerLogin ? epOwner.id : null;
+              const linkValue2 = mergeInto ?? linkValue;
+              const newStaff = !isLabourerRole && linkValue2 === "new";
               const input = {
                 username: username.trim().toLowerCase(),
                 password,
@@ -941,14 +984,16 @@ function UsersSheet({ showInactive }: { showInactive: boolean }) {
                 permissionOverrides: [],
                 active: true,
                 // "pending" stands in for the staff record created just below
-                staffId: isLabourerRole ? undefined : newStaff ? "pending" : linkValue,
-                labourerId: isLabourerRole ? linkValue || undefined : undefined,
+                staffId: isLabourerRole ? undefined : newStaff ? "pending" : linkValue2,
+                labourerId: isLabourerRole ? linkValue2 || undefined : undefined,
               };
               // Check here too: the store's result isn't known until React applies the update
               const invalid = checkSeat(input, state.users);
               if (invalid) return setMsg({ ok: false, text: invalid });
-              const epCheck = isLabourerRole ? {} : checkStaffEp(state, ep, newStaff ? undefined : linkValue);
-              if (epCheck.error) return setMsg({ ok: false, text: epCheck.error });
+              const epCheck = isLabourerRole ? {} : checkStaffEp(state, ep, newStaff ? undefined : linkValue2);
+              if (epCheck.error) {
+                return setMsg({ ok: false, text: epOwnerLogin ? `EP ${epNorm} belongs to ${epOwner!.name}, who already has the login @${epOwnerLogin.username}` : epCheck.error });
+              }
               if (newStaff && role === "supervisor" && engagement === "subcontract" && !contractorId) {
                 return setMsg({ ok: false, text: "Pick the sub contractor this person comes from" });
               }
@@ -966,8 +1011,17 @@ function UsersSheet({ showInactive }: { showInactive: boolean }) {
                 });
                 if (!staffId) return setMsg({ ok: false, text: "Your role can't create staff records" });
                 input.staffId = staffId;
-              } else if (epCheck.ep && linkValue) {
-                updateStaff(linkValue, { epNumber: epCheck.ep });
+              } else if (linkValue2) {
+                // Owner, 2026-11-18: merge — the staff record takes the seat's role and sites (and the EP)
+                const cur = state.staff.find((x) => x.id === linkValue2);
+                const meta = ROLES.find((r) => r.id === role);
+                updateStaff(linkValue2, {
+                  ...(epCheck.ep ? { epNumber: epCheck.ep } : {}),
+                  role,
+                  siteId: siteIds.includes(cur?.siteId ?? "") ? cur!.siteId : siteIds[0],
+                  ...(siteIds.length > 1 ? { siteIds } : {}),
+                  ...(cur && cur.role !== role && role !== "supervisor" ? { designation: cur.designation && cur.role === role ? cur.designation : meta?.label ?? role } : {}),
+                });
               }
               const r = await createUser(input);
               if (!r.ok) return setMsg({ ok: false, text: r.error ?? "Failed" });
