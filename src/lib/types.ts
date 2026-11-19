@@ -260,6 +260,33 @@ export interface PlantLocation {
   rp?: string;
 }
 
+/** One bay (between two pillars) or a single pillar on a rack (owner, 2026-11-19: DTA OSBL MIS sheets) */
+export interface PlantBay {
+  /** As written on site, e.g. "Bay 2A-BC to 3A-BC" or "Pillar 75A-BC" */
+  label: string;
+  pillar?: string;
+  /** Per-bay scope from the MIS sheet */
+  m3?: number;
+  paintM2?: number;
+  insM2?: number;
+  priority?: string;
+}
+
+/** A pipe rack (or street run) inside a plant location: Site › Plant › Location › Rack › Bay */
+export interface PlantRack {
+  id: string;
+  siteId: string;
+  /** Matches a name in that site's `plants` */
+  plant: string;
+  /** Area inside the plant, e.g. "OSBL", "952 Area", "Street-3" */
+  location: string;
+  name: string;
+  bays: PlantBay[];
+  active: boolean;
+  /** Where the list came from, e.g. "MIS Aug-27 + P2" */
+  source?: string;
+}
+
 export interface PlantDetail {
   /** Matches a name in `Site.plants` (ignoring case) */
   name: string;
@@ -674,6 +701,10 @@ export interface DprScaffoldWorkLine {
   id: string;
   plant: string;
   location: string;
+  /** Picked from Master Data → Racks & bays (location keeps the full text for print and older DPRs) */
+  rackId?: string;
+  bayFrom?: string;
+  bayTo?: string;
   erectM3: number;
   dismantleM3: number;
   standingM3: number;
@@ -973,6 +1004,8 @@ export interface AppState {
   rateLines: RateLine[];
   /** Labour trade catalogue (trade → optional subcategories). */
   tradeCatalogue: TradeDefinition[];
+  /** Racks and bays per plant location (owner, 2026-11-19) */
+  plantRacks: PlantRack[];
   /** Default daily wages by trade × skill × experience (docs §1). */
   wageBands: WageBand[];
   wageLedger: WageLedgerEntry[];

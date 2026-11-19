@@ -126,6 +126,7 @@ import type {
   UserAccount,
   WageBand,
   WageLedgerEntry,
+  PlantRack,
 } from "./types";
 import { seedWageBands } from "./wages";
 
@@ -305,6 +306,10 @@ interface StoreApi {
   ) => Promise<{ ok: boolean; error?: string }>;
   /** Checked with checkSite (code, uniqueness, name, plants) */
   upsertSite: (site: AppState["sites"][number]) => Promise<{ ok: boolean; error?: string }>;
+  /** Master Data → Racks & bays: add or change a rack (Owner / Super Admin) */
+  upsertPlantRack: (rack: PlantRack) => { ok: boolean; error?: string };
+  /** Adds the racks not here yet (by id), e.g. the MIS list; returns how many were added */
+  importPlantRacks: (racks: PlantRack[]) => { ok: boolean; error?: string; added?: number };
   /** New staff record (to link a login to); returns its id, or "" if not allowed */
   addStaff: (input: Omit<StaffMember, "id">) => string;
   /** HR's staff list (round 2, §27): edit, deactivate / activate */
@@ -356,7 +361,7 @@ const StoreContext = createContext<StoreApi | null>(null);
 const OPS_SHARED = [
   "equipment", "equipmentRequests", "crewRequests", "kitLots", "kitIssues", "equipmentReturns", "storeItems", "storeMoves",
   "wageChangeRequests", "masterChangeRequests", "safetyDays", "safetyObservations", "leaves", "advances", "vendorBills", "wageLedger",
-  "workPlans", "transfers", "compliance", "rateCards", "rateLines", "tradeCatalogue", "wageBands", "financeAlerts", "telegramDrafts", "vendors",
+  "workPlans", "transfers", "compliance", "rateCards", "rateLines", "tradeCatalogue", "plantRacks", "wageBands", "financeAlerts", "telegramDrafts", "vendors",
 ] as const satisfies readonly (keyof AppState)[];
 /** Of those, the ones whose built-in records are demo data (the rest — store items, rate book, trades, wage bands — are real lists) */
 const OPS_SHARED_DEMO = ["equipment", "equipmentRequests", "workPlans", "safetyDays", "compliance", "transfers", "vendors", "wageLedger", "acplPunches", "acplMatches"];
@@ -465,6 +470,8 @@ function migrateState(parsed: Partial<AppState>): AppState {
         ...extras,
       ];
     })(),
+    // Racks & bays (owner, 2026-11-19): the shared database is the truth once signed in
+    plantRacks: parsed.plantRacks?.length ? parsed.plantRacks : seed.plantRacks,
     wageBands: (() => {
       const fromSave = parsed.wageBands ?? [];
       const seeded = seed.wageBands?.length ? seed.wageBands : seedWageBands();
@@ -2777,6 +2784,48 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     return { ok: true };
   }, []);
 
+  const upsertPlantRack = useCallback((input: PlantRack) => {
+    const cur = stateRef.current;
+    if (!can(cur, "master", "update")) return DENIED;
+    const rack: PlantRack = {
+      ...input,
+      name: input.name.trim(),
+      location: input.location.trim() || "OSBL",
+      bays: input.bays.map((b) => ({ ...b, label: b.label.trim() })).filter((b) => b.label),
+    };
+    if (!rack.name) return { ok: false, error: "Give the rack a name" };
+    if (!rack.plant) return { ok: false, error: "Pick the plant" };
+    const twin = cur.plantRacks.find(
+      (r) => r.id !== rack.id && r.siteId === rack.siteId && r.plant === rack.plant && r.location.toLowerCase() === rack.location.toLowerCase() && r.name.toLowerCase() === rack.name.toLowerCase()
+    );
+    if (twin) return { ok: false, error: `${rack.plant} › ${rack.location} already has ${twin.name}` };
+    const labels = rack.bays.map((b) => b.label.toLowerCase());
+    const dup = labels.find((l, i) => labels.indexOf(l) !== i);
+    if (dup) return { ok: false, error: `Bay "${dup}" is listed twice` };
+    setState((s) => {
+      const exists = s.plantRacks.some((r) => r.id === rack.id);
+      const next = { ...s, plantRacks: exists ? s.plantRacks.map((r) => (r.id === rack.id ? rack : r)) : [...s.plantRacks, rack] };
+      return {
+        ...next,
+        auditLog: [makeAudit(next, "master", exists ? "update" : "create", `Rack ${rack.plant} › ${rack.location} › ${rack.name} (${rack.bays.length} bays)${rack.active ? "" : " switched off"}`, rack.plant), ...s.auditLog],
+      };
+    });
+    return { ok: true };
+  }, []);
+
+  const importPlantRacks = useCallback((racks: PlantRack[]) => {
+    const cur = stateRef.current;
+    if (!can(cur, "master", "update")) return DENIED;
+    const have = new Set(cur.plantRacks.map((r) => r.id));
+    const add = racks.filter((r) => !have.has(r.id));
+    if (!add.length) return { ok: true, added: 0 };
+    setState((s) => {
+      const next = { ...s, plantRacks: [...s.plantRacks, ...add.filter((r) => !s.plantRacks.some((x) => x.id === r.id))] };
+      return { ...next, auditLog: [makeAudit(next, "master", "create", `Racks & bays: loaded ${add.length} racks (${add.reduce((a, r) => a + r.bays.length, 0)} bays) from the MIS list`), ...s.auditLog] };
+    });
+    return { ok: true, added: add.length };
+  }, []);
+
   const addStaff = useCallback((input: Omit<StaffMember, "id">) => {
     const cur = stateRef.current;
     // Round 2 (§27): HR keeps staff records too
@@ -3357,6 +3406,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       upsertMaterial,
       setCatalogActive,
       upsertSite,
+      upsertPlantRack,
+      importPlantRacks,
       assignCrew,
       removeFromCrew,
       requestCrew,
@@ -3447,6 +3498,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       upsertMaterial,
       setCatalogActive,
       upsertSite,
+      upsertPlantRack,
+      importPlantRacks,
       assignCrew,
       removeFromCrew,
       requestCrew,

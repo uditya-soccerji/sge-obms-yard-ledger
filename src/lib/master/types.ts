@@ -2,6 +2,7 @@
 
 export type MasterSheetId =
   | "sites"
+  | "racks"
   | "users"
   | "labourers"
   | "contractors"
@@ -64,6 +65,7 @@ export const MASTER_SHEETS: {
   hint: string;
 }[] = [
   { id: "sites", label: "Sites", hint: "Operating sites and plants" },
+  { id: "racks", label: "Racks & bays", hint: "Site › Plant › Location › Rack › Bay or pillar. DPR lines pick the place from here." },
   { id: "users", label: "Users / seats", hint: "Logins, roles, assigned sites" },
   { id: "labourers", label: "Labourers", hint: "Register — contractor required" },
   { id: "contractors", label: "Contractors", hint: "Labour contractor firms" },

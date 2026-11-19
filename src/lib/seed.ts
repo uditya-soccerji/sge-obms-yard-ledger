@@ -8,6 +8,7 @@ import { seedMasterCatalog } from "./master/seed-catalog";
 import { seedOtherSites } from "./seed-sites";
 import { applySiteList } from "./sites";
 import { SEED_RATE_LINES } from "./rate-book-seed";
+import { SEED_PLANT_RACKS } from "./rack-book-seed";
 import type { AppState, AttendanceStatus, DprSafetyBody, TradeDefinition } from "./types";
 import type { DprReport } from "./work/types";
 import { seedWageBands } from "./wages";
@@ -1038,6 +1039,7 @@ export function createSeedState(): AppState {
       superseded: false,
     })),
     tradeCatalogue: SEED_TRADE_CATALOGUE.map((t) => ({ ...t, siteId: null })),
+    plantRacks: SEED_PLANT_RACKS,
     wageBands: seedWageBands(),
     masterCatalog: seedMasterCatalog(),
     wageLedger: [

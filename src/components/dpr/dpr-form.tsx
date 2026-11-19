@@ -41,6 +41,7 @@ import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { ATTENDANCE_OPTIONS } from "@/lib/attendance";
 import { worksAt } from "@/lib/site-scope";
+import { PlacePicker, racksFor, type Place } from "@/components/shared/place-picker";
 
 function uid(prefix: string) {
   return `${prefix}-${Math.random().toString(36).slice(2, 9)}`;
@@ -871,6 +872,7 @@ export function DprForm({
         <ScaffoldWorkEditor
           lines={value.scaffoldWork}
           plants={plants}
+          siteId={value.siteId}
           readOnly={readOnly}
           onChange={(scaffoldWork) => onChange({ ...value, scaffoldWork })}
         />
@@ -1192,6 +1194,7 @@ function DprStartJob({
   const line = lines.find((l) => l.id === lineId);
   const item = line ? work.serviceItems.find((x) => x.code === line.serviceCode) : undefined;
   const [location, setLocation] = useState("");
+  const [place, setPlace] = useState<Place>({ location: "" });
   const [plannedM2, setPlannedM2] = useState("");
   const [plannedEnd, setPlannedEnd] = useState("");
   const [stages, setStages] = useState<Stage[] | null>(null);
@@ -1222,9 +1225,15 @@ function DprStartJob({
             ))}
           </select>
         </div>
-        <div>
-          <Label htmlFor="dpr-job-loc">Location / area</Label>
-          <Input id="dpr-job-loc" className="mt-1" value={location} onChange={(e) => setLocation(e.target.value)} placeholder="e.g. TT4 NORTH SIDE SR NO. 269–276" />
+        <div className={racksFor(state.plantRacks, report.siteId, line?.plant ?? report.plant).length ? "sm:col-span-2" : undefined}>
+          {racksFor(state.plantRacks, report.siteId, line?.plant ?? report.plant).length ? (
+            <PlacePicker idPrefix="dpr-job" siteId={report.siteId} plant={line?.plant ?? report.plant} value={place} onChange={(p) => { setPlace(p); setLocation(p.location); }} />
+          ) : (
+            <>
+              <Label htmlFor="dpr-job-loc">Location / area</Label>
+              <Input id="dpr-job-loc" className="mt-1" value={location} onChange={(e) => setLocation(e.target.value)} placeholder="e.g. TT4 NORTH SIDE SR NO. 269–276" />
+            </>
+          )}
         </div>
         <div>
           <Label htmlFor="dpr-job-m2">Planned m² (final shade)</Label>
@@ -1285,11 +1294,13 @@ function DprStartJob({
 function ScaffoldWorkEditor({
   lines,
   plants,
+  siteId,
   onChange,
   readOnly,
 }: {
   lines: DprScaffoldWorkLine[];
   plants: string[];
+  siteId: string;
   onChange: (lines: DprScaffoldWorkLine[]) => void;
   readOnly?: boolean;
 }) {
@@ -1333,26 +1344,23 @@ function ScaffoldWorkEditor({
                 className="mt-1 h-9 w-full rounded-md border border-[var(--sge-line)] bg-[var(--sge-paper)] px-2 text-sm"
                 disabled={readOnly}
                 value={line.plant}
-                onChange={(e) => onChange(lines.map((l, i) => (i === idx ? { ...l, plant: e.target.value } : l)))}
+                onChange={(e) => onChange(lines.map((l, i) => (i === idx ? { ...l, plant: e.target.value, location: "", rackId: undefined, bayFrom: undefined, bayTo: undefined } : l)))}
               >
                 <option value="">Pick plant…</option>
                 {plants.map((p) => <option key={p} value={p}>{p}</option>)}
               </select>
           </div>
-          <div>
-            <Label>Location</Label>
-            <Input
-              className="mt-1"
-              disabled={readOnly}
-              value={line.location}
-              onChange={(e) => {
-                const next = lines.map((l, i) =>
-                  i === idx ? { ...l, location: e.target.value } : l
-                );
-                onChange(next);
-              }}
-            />
-          </div>
+          <PlacePicker
+            className="sm:col-span-3"
+            idPrefix={`sw-${line.id}`}
+            siteId={siteId}
+            plant={line.plant}
+            readOnly={readOnly}
+            value={line}
+            onChange={(p) =>
+              onChange(lines.map((l, i) => (i === idx ? { ...l, location: p.location, rackId: p.rackId, bayFrom: p.bayFrom, bayTo: p.bayTo } : l)))
+            }
+          />
           {(
             [
               ["erectM3", "Erect m³"],

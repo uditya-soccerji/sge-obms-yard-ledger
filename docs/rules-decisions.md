@@ -500,3 +500,11 @@ Process page: "Store module — process" (Claude doc). Decisions there: reorder 
 - **Salary:** `staff_salary` (migration 014), one row per person per month — basic monthly salary, days paid, OT hours / rate, salary, OT, bonus, room rent, conveyance, statutory bonus, gross, PF, PT, ESIC, advance, other, deductions, net paid, remarks and the 31 day marks (P / A / S / H) with OT per day. Readable and writable only by Owner, Super Admin, HR and Finance. Shown on HR → Staff (Basic / month column and a Salary panel per person).
 - **Not stored:** bank name, account number, IFSC and ESIC / UAN numbers.
 - **Checks on Oct 2026:** totals match the sheet (monthly ₹35,44,100, 2,481 days, gross ₹37,29,546, PF ₹2,16,092, net ₹35,06,197), except the sheet's ESIC total (₹8,742) double-counts the Jetty rows (MTF range runs to row 125) — correct total ₹7,274.
+
+## 44. Racks & bays from the MIS sheets (owner, 2026-11-19)
+
+- A place is marked Site › Plant › Location › Rack › Bay or pillar. Master Data → **Racks & bays** holds the list (Owner / Super Admin edit; shared between devices as `ops.plantRacks`).
+- First list: the DTA OSBL MIS sheets (27 Aug 2026 and P2 Block maintenance). 13 plants, 81 racks, 3,613 bays. The same bay in both files is one row; where the files disagree the newer P2 file wins and the Aug file fills gaps. Per-bay scaffold m³, paint m² and insulation m² come with each bay.
+- CPP and HPIB racks sit under their own sites (owner: yes). Location is the area in the rack name (952 Area, Street-3…) or OSBL. Sulphur New B Rack and Old B Rack are both kept (owner). FCCU is one entry (J-Rack) until a bay list comes. OMSH's typed locations stay as they were.
+- On live the list is loaded once with **Load MIS list** on the Racks & bays sheet (it only adds racks not there yet).
+- DPR: the scaffolding line and New job (painting) pick Location → Rack → Bay, optionally a from–to run of bays, and show the MIS scope for that run. "Not in the list" falls back to typing. The line's location text keeps the full place, so print and older DPRs still read.

@@ -34,6 +34,7 @@ import type { CatalogItem, Contractor, MasterCatalog, MaterialItem } from "@/lib
 import type { ExperienceLevel, Labourer, PlantDetail, RoleId, Site, SkillLevel, UserAccount } from "@/lib/types";
 import { EXPERIENCE_LEVELS, experienceLabel, suggestedWage } from "@/lib/wages";
 import { ExcelTransfer } from "./excel-transfer";
+import { RacksSheet } from "./racks-sheet";
 import { canExcelTransfer } from "@/lib/excel-io";
 import { entrySiteId } from "@/lib/site-scope";
 import { checkSeat, checkSites, MIN_PASSWORD } from "@/lib/users";
@@ -56,6 +57,7 @@ function uid(prefix: string) {
 /** An icon for every Master Data sheet, so each is easy to spot (2026-10-24) */
 const SHEET_ICON: Partial<Record<MasterSheetId, LucideIcon>> = {
   sites: MapPin,
+  racks: Layers,
   users: Users,
   labourers: HardHat,
   contractors: Building2,
@@ -205,9 +207,12 @@ function SheetBody({
   scope: ScopeFilter;
   showInactive: boolean;
 }) {
+  const report = useReport();
   const body =
     sheet === "sites" ? (
       <SitesSheet showInactive={showInactive} />
+    ) : sheet === "racks" ? (
+      <RacksSheet showInactive={showInactive} report={report} />
     ) : sheet === "users" ? (
       <UsersSheet showInactive={showInactive} />
     ) : sheet === "labourers" ? (
