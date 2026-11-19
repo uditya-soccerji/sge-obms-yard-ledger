@@ -115,21 +115,21 @@ export function StaffRegister() {
           <EmptyState title="No staff here" detail="Add staff, or switch site / show inactive." />
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[760px] text-left text-sm">
+            <table className="w-full min-w-[1040px] text-left text-sm [&_td]:px-3 [&_td]:py-2 [&_td]:align-middle [&_td:first-child]:pl-0 [&_td:last-child]:pr-0 [&_th]:whitespace-nowrap [&_th]:px-3 [&_th]:py-2 [&_th]:font-semibold [&_th]:tracking-wider [&_th:first-child]:pl-0 [&_th:last-child]:pr-0">
               <thead className="text-[11px] uppercase text-[var(--sge-ink-3)]">
-                <tr><th className="py-1">Name</th><th>EP</th><th>Role</th><th>Designation</th><th>Site</th>{canPay ? <th className="text-right">Basic / month</th> : null}<th>Mobile</th><th>Login</th><th /></tr>
+                <tr><th>Name</th><th>EP</th><th>Role</th><th>Designation</th><th>Site</th>{canPay ? <th className="text-right">Basic / month</th> : null}<th>Mobile</th><th>Login</th><th /></tr>
               </thead>
               <tbody>
                 {rows.map((s) => (
                   <Fragment key={s.id}>
                   <tr className="border-t border-[var(--sge-line)]">
-                    <td className="py-1.5 font-semibold">{s.name}</td>
-                    <td className="font-mono text-xs">{s.epNumber ?? "—"}</td>
-                    <td>{roleLabel(s.role)}</td>
+                    <td className="font-semibold">{s.name}</td>
+                    <td className="whitespace-nowrap font-mono text-xs">{s.epNumber ?? "—"}</td>
+                    <td className="whitespace-nowrap">{roleLabel(s.role)}</td>
                     <td className="text-[var(--sge-ink-2)]">{s.designation ?? "—"}</td>
-                    <td>{siteCode(s.siteId)}</td>
-                    {canPay ? <td className="text-right font-mono text-xs">{rateOf(s.id) ? formatINR(Math.round(rateOf(s.id)!)) : "—"}</td> : null}
-                    <td className="font-mono text-xs">{s.phone ?? "—"}</td>
+                    <td className="whitespace-nowrap">{siteCode(s.siteId)}</td>
+                    {canPay ? <td className="whitespace-nowrap text-right font-mono text-xs">{rateOf(s.id) ? formatINR(Math.round(rateOf(s.id)!)) : "—"}</td> : null}
+                    <td className="whitespace-nowrap font-mono text-xs">{s.phone ?? "—"}</td>
                     <td>
                       {linked(s.id) ? (
                         <StatusPill tone="ok">@{linked(s.id)!.username}</StatusPill>
