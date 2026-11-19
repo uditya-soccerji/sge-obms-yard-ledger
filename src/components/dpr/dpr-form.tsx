@@ -41,6 +41,7 @@ import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { ATTENDANCE_OPTIONS } from "@/lib/attendance";
 import { worksAt } from "@/lib/site-scope";
+import { workRights } from "@/lib/work/permissions";
 import { PlacePicker, racksFor, type Place } from "@/components/shared/place-picker";
 
 function uid(prefix: string) {
@@ -1207,12 +1208,8 @@ function DprStartJob({
   const twin = where ? samePlant.find((j) => j.location.trim().toLowerCase() === where) : undefined;
   const sup = state.staff.find((x) => x.id === report.submitterId)?.name ?? "this supervisor";
   if (!lines.length) {
-    return (
-      <div className="rounded-md border border-dashed border-[var(--sge-line)] p-3 text-xs text-[var(--sge-ink-2)]">
-        {sup} has no plan line {report.plant ? `on ${report.plant}` : "on this site"} for {month}, so a job can&apos;t start yet. The Admin adds the plan line in Work → Plan vs actual (the SIC approves it).{" "}
-        <button type="button" className="underline" onClick={onCancel}>Close</button>
-      </div>
-    );
+    // Owner, 2026-11-19: plan the job right here (SIC / Owner / SA add the line; the Admin's waits for the SIC)
+    return <PlanJobHere report={report} supervisorName={sup} month={month} onCancel={onCancel} />;
   }
   return (
     <div className="space-y-3 rounded-md border border-[var(--sge-line)] p-3">
@@ -1396,6 +1393,89 @@ function ScaffoldWorkEditor({
         </div>
       ))}
     </Panel>
+  );
+}
+
+/**
+ * No plan line for this supervisor + plant this month: plan it from the DPR (owner, 2026-11-19).
+ * SIC / Owner / Super Admin add the line at once and the job form opens; the Admin's line goes to
+ * the SIC for approval (rules §370); a supervisor is told who plans it.
+ */
+function PlanJobHere({ report, supervisorName, month, onCancel }: { report: DprReport; supervisorName: string; month: string; onCancel: () => void }) {
+  const { work, addPlanLine } = useWork();
+  const { state } = useStore();
+  const can = workRights(state.currentRole).canPlan;
+  const sitePlants = state.sites.find((x) => x.id === report.siteId)?.plants ?? [];
+  const [plant, setPlant] = useState(report.plant);
+  const [code, setCode] = useState(work.serviceItems[0]?.code ?? "");
+  const [m2, setM2] = useState("");
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const waiting = work.planRequests.filter(
+    (r) => r.status === "pending" && r.siteId === report.siteId && r.input.supervisorId === report.submitterId && (!report.plant || r.input.plant === report.plant.trim().toUpperCase())
+  );
+  const head = `${supervisorName} has no plan line ${report.plant ? `on ${report.plant}` : "on this site"} for ${month}.`;
+  if (!can) {
+    return (
+      <div className="rounded-md border border-dashed border-[var(--sge-line)] p-3 text-xs text-[var(--sge-ink-2)]">
+        {head} The Admin, SIC, Owner or Super Admin plans the job (here on the DPR, or in Work → Plan vs actual).
+        {waiting.length ? ` ${waiting.length} plan line${waiting.length > 1 ? "s are" : " is"} waiting for the SIC.` : ""}{" "}
+        <button type="button" className="underline" onClick={onCancel}>Close</button>
+      </div>
+    );
+  }
+  const sel = "mt-1 h-9 w-full rounded-md border border-[var(--sge-line)] bg-[var(--sge-paper)] px-2 text-sm";
+  return (
+    <div className="space-y-3 rounded-md border border-[var(--sge-brass)] bg-[var(--sge-brass-wash)] p-3">
+      <div className="text-xs font-semibold uppercase tracking-wide text-[var(--sge-ink-2)]">Plan a job · {supervisorName} · {month}</div>
+      <p className="text-xs text-[var(--sge-ink-2)]">
+        {head} Plan it here{state.currentRole === "admin" ? "; it goes to the SIC for approval, and the job can start once approved" : " and the job form opens straight after"}.
+      </p>
+      {waiting.length ? <p className="text-xs font-semibold text-[var(--sge-warn)]">Already waiting for the SIC: {waiting.map((r) => r.summary).join("; ")}</p> : null}
+      <div className="grid gap-3 sm:grid-cols-3">
+        <div>
+          <Label htmlFor="plan-here-plant">Plant</Label>
+          <select id="plan-here-plant" className={sel} value={plant} onChange={(e) => setPlant(e.target.value)}>
+            <option value="">Pick plant…</option>
+            {sitePlants.map((p) => <option key={p} value={p}>{p}</option>)}
+          </select>
+        </div>
+        <div>
+          <Label htmlFor="plan-here-item">Service item</Label>
+          <select id="plan-here-item" className={sel} value={code} onChange={(e) => setCode(e.target.value)}>
+            {work.serviceItems.map((x) => <option key={x.code} value={x.code}>{x.mps} · {x.description}</option>)}
+          </select>
+        </div>
+        <div>
+          <Label htmlFor="plan-here-m2">Plan m² this month</Label>
+          <Input id="plan-here-m2" type="number" min={0} className="mt-1" value={m2} onChange={(e) => setM2(e.target.value)} placeholder="e.g. 800" />
+        </div>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          type="button"
+          size="sm"
+          onClick={() => {
+            if (!plant) return setMsg({ ok: false, text: "Pick the plant" });
+            const it = work.serviceItems.find((x) => x.code === code);
+            const r = addPlanLine({
+              siteId: report.siteId,
+              month,
+              plant: plant.trim().toUpperCase(),
+              serviceCode: code,
+              jobType: it?.description.replace(/^APLY\s*/i, "") ?? "",
+              planM2: Number(m2),
+              supervisorId: report.submitterId,
+            });
+            if (!r.ok) return setMsg({ ok: false, text: r.error });
+            setMsg({ ok: true, text: r.requested ? "Sent to the SIC for approval. The job can start once it is approved." : "Plan line added — fill in the job below." });
+          }}
+        >
+          {state.currentRole === "admin" ? "Send plan line for approval" : "Add plan line"}
+        </Button>
+        <Button type="button" size="sm" variant="ghost" onClick={onCancel}>Close</Button>
+        {msg ? <span className={cn("text-xs", msg.ok ? "text-[var(--sge-ok)]" : "text-[var(--sge-crit)]")}>{msg.text}</span> : null}
+      </div>
+    </div>
   );
 }
 
