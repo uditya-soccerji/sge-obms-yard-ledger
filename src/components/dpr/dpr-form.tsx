@@ -585,9 +585,10 @@ export function DprForm({
                             key={o.value}
                             type="button"
                             disabled={readOnly}
-                            aria-pressed={mark?.ppe === o.value}
+                            // Owner, 2026-11-19: PPE is OK unless the supervisor marks otherwise
+                            aria-pressed={(mark?.ppe ?? "ok") === o.value}
                             onClick={() => setPpe(l.id, o.value)}
-                            className={cn("px-2.5 py-1.5 font-semibold", mark?.ppe === o.value ? o.on : "bg-[var(--sge-paper)] text-[var(--sge-ink-2)] hover:bg-[var(--sge-paper-2)]")}
+                            className={cn("px-2.5 py-1.5 font-semibold", (mark?.ppe ?? "ok") === o.value ? o.on : "bg-[var(--sge-paper)] text-[var(--sge-ink-2)] hover:bg-[var(--sge-paper-2)]")}
                           >
                             {o.label}
                           </button>
