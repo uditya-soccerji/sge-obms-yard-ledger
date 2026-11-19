@@ -22,7 +22,7 @@ export function wageBadgeCount(s: WageView): number {
 
 // ---- 2026-10-24: the same flow on Trades / Rate book / Materials / Units ----
 
-type ChangeView = WageView & Pick<AppState, "masterChangeRequests">;
+type ChangeView = WageView & Pick<AppState, "masterChangeRequests"> & Partial<Pick<AppState, "placeRequests">>;
 
 /** Where a plan-line alert takes you: Work → Plan with the requests list open */
 export const PLAN_REQUESTS_TAB = "/work?t=plan&requests=open";
@@ -46,5 +46,11 @@ export function sheetBadgeCount(s: ChangeView, sheet: MasterRequestSheet): numbe
 
 /** The number on the Master Data tab: every sheet's requests, Daily wages included */
 export function changeBadgeCount(s: ChangeView): number {
-  return wageBadgeCount(s) + s.masterChangeRequests.filter((r) => r.status === "pending").length + unseenMasterDecisions(s).length;
+  return wageBadgeCount(s) + s.masterChangeRequests.filter((r) => r.status === "pending").length + unseenMasterDecisions(s).length + placeBadgeCount(s);
+}
+
+/** Places asked for from the DPR, waiting for Owner / Super Admin (Racks & bays, 2026-11-19) */
+export function placeBadgeCount(s: Pick<AppState, "currentRole"> & Partial<Pick<AppState, "placeRequests">>): number {
+  if (s.currentRole !== "owner" && s.currentRole !== "super_admin") return 0;
+  return (s.placeRequests ?? []).filter((r) => r.status === "pending").length;
 }

@@ -473,7 +473,7 @@ export function createSeedState(): AppState {
         enabled: true,
         rpTags: ["RP2"],
         // Same spelling as the Work plan (docs/merge-plan.md "one plant list per site")
-        plants: ["AROMATIC", "CES", "COKER", "CRUDE", "FCCU", "HYDROGEN", "HYDROTREATER", "PP", "PRU", "RTF", "SULPHUR", "UTILITY & ETP"],
+        plants: ["AROMATIC", "CES", "COKER", "CPP", "CRUDE", "FCCU", "HPIB", "HYDROGEN", "HYDROTREATER", "PP", "PRU", "RTF", "SULPHUR", "UTILITY & ETP"],
       },
       {
         id: "site-mtf",
@@ -1040,6 +1040,7 @@ export function createSeedState(): AppState {
     })),
     tradeCatalogue: SEED_TRADE_CATALOGUE.map((t) => ({ ...t, siteId: null })),
     plantRacks: SEED_PLANT_RACKS,
+    placeRequests: [],
     wageBands: seedWageBands(),
     masterCatalog: seedMasterCatalog(),
     wageLedger: [

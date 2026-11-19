@@ -16,10 +16,13 @@ import { cn } from "@/lib/utils";
 const fmt = (n?: number) => (n ? Math.round(n).toLocaleString("en-IN") : "—");
 const sum = (bays: PlantBay[], k: "m3" | "paintM2" | "insM2") => bays.reduce((a, b) => a + (b[k] ?? 0), 0);
 
-type Draft = { id?: string; location: string; name: string; bays: string };
+type Draft = { id?: string; location: string; name: string; bays: string; newLocation?: boolean };
 
 export function RacksSheet({ showInactive, report }: { showInactive: boolean; report: (r: { ok: boolean; error?: string }) => void }) {
-  const { fullState: state, upsertPlantRack, importPlantRacks } = useStore();
+  const { fullState: state, upsertPlantRack, importPlantRacks, upsertSite } = useStore();
+  const [addingPlant, setAddingPlant] = useState<string | null>(null);
+  const [plantName, setPlantName] = useState("");
+  const [plantErr, setPlantErr] = useState<string | null>(null);
   const [loadMsg, setLoadMsg] = useState<string | null>(null);
   const sites = state.sites.filter((s) => s.enabled);
   const plantList = useMemo(
@@ -49,6 +52,11 @@ export function RacksSheet({ showInactive, report }: { showInactive: boolean; re
 
   const save = () => {
     if (!draft || !cur) return;
+    if (draft.newLocation) {
+      const l = draft.location.trim();
+      if (!l) return setErr("Give the new location a name");
+      if (locations.some((x) => x.toLowerCase() === l.toLowerCase())) return setErr(`${cur.plant} already has ${l}; use Add rack`);
+    }
     const before = draft.id ? state.plantRacks.find((r) => r.id === draft.id) : undefined;
     const old = new Map((before?.bays ?? []).map((b) => [b.label.toLowerCase(), b]));
     const bays = draft.bays.split("\n").map((l) => l.trim()).filter(Boolean).map((label) => old.get(label.toLowerCase()) ?? { label });
@@ -65,6 +73,20 @@ export function RacksSheet({ showInactive, report }: { showInactive: boolean; re
     if (!r.ok) return setErr(r.error ?? "Couldn't save");
     setErr(null);
     setDraft(null);
+  };
+
+  const addPlant = async (siteId: string) => {
+    const site = state.sites.find((x) => x.id === siteId);
+    const name = plantName.trim().toUpperCase();
+    if (!site) return;
+    if (!name) return setPlantErr("Give the plant a name");
+    if (site.plants.some((p) => p.toUpperCase() === name)) return setPlantErr(`${site.code} already has ${name}`);
+    const r = await upsertSite({ ...site, plants: [...site.plants, name] });
+    if (!r.ok) return setPlantErr(r.error ?? "Couldn't save");
+    setAddingPlant(null);
+    setPlantName("");
+    setPlantErr(null);
+    setPick(`${siteId}|${name}`);
   };
 
   const have = new Set(state.plantRacks.map((r) => r.id));
@@ -90,6 +112,7 @@ export function RacksSheet({ showInactive, report }: { showInactive: boolean; re
       ) : loadMsg ? (
         <div className="mb-4 rounded-sm border border-[var(--sge-ok)]/30 bg-[var(--sge-ok-wash)] px-3 py-2 text-sm text-[var(--sge-ok)]">{loadMsg}</div>
       ) : null}
+      <PlaceAsks />
       <div className="grid gap-4 md:grid-cols-[220px_minmax(0,1fr)]">
         <nav aria-label="Plants" className="flex flex-col gap-0.5">
           {sites.map((s) => (
@@ -114,6 +137,33 @@ export function RacksSheet({ showInactive, report }: { showInactive: boolean; re
                   </button>
                 );
               })}
+              {addingPlant === s.id ? (
+                <div className="mt-1 space-y-1 px-2">
+                  <Input
+                    id={`new-plant-${s.id}`}
+                    aria-label={`New plant on ${s.code}`}
+                    className="h-8"
+                    autoFocus
+                    value={plantName}
+                    placeholder="Plant name"
+                    onChange={(e) => setPlantName(e.target.value)}
+                    onKeyDown={(e) => { if (e.key === "Enter") void addPlant(s.id); }}
+                  />
+                  <div className="flex gap-1">
+                    <Button size="sm" className="h-7" onClick={() => void addPlant(s.id)}>Add</Button>
+                    <Button size="sm" variant="ghost" className="h-7" onClick={() => { setAddingPlant(null); setPlantErr(null); }}>Cancel</Button>
+                  </div>
+                  {plantErr ? <p className="text-xs text-[var(--sge-crit)]">{plantErr}</p> : null}
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  className="px-2 py-1 text-left text-xs font-semibold text-[var(--sge-brass-ink)] hover:underline"
+                  onClick={() => { setAddingPlant(s.id); setPlantName(""); setPlantErr(null); }}
+                >
+                  + Add plant
+                </button>
+              )}
             </div>
           ))}
         </nav>
@@ -134,18 +184,26 @@ export function RacksSheet({ showInactive, report }: { showInactive: boolean; re
                 <Input id="rack-q" className="mt-1 h-8" placeholder="e.g. G12, 2A-BC, 7001" value={q} onChange={(e) => setQ(e.target.value)} />
               </div>
               {!query && cur ? (
-                <Button size="sm" onClick={() => { setErr(null); setDraft({ location: locations[0] ?? "OSBL", name: "", bays: "" }); }}>
-                  Add rack
-                </Button>
+                <>
+                  <Button size="sm" variant="outline" onClick={() => { setErr(null); setDraft({ location: "", name: "", bays: "", newLocation: true }); }}>
+                    Add location
+                  </Button>
+                  <Button size="sm" onClick={() => { setErr(null); setDraft({ location: locations[0] ?? "OSBL", name: "", bays: "" }); }}>
+                    Add rack
+                  </Button>
+                </>
               ) : null}
             </div>
           </div>
 
           {draft ? (
             <div className="mb-4 grid gap-3 rounded-sm border border-[var(--sge-brass)] bg-[var(--sge-brass-wash)] p-3 sm:grid-cols-2">
+              <div className="text-xs font-semibold uppercase tracking-wide text-[var(--sge-ink-2)] sm:col-span-2">
+                {draft.newLocation ? `New location on ${cur?.plant} · it starts with its first rack` : draft.id ? "Edit rack" : `New rack on ${cur?.plant}`}
+              </div>
               <div>
-                <Label htmlFor="rack-loc">Location</Label>
-                <Input id="rack-loc" className="mt-1" list="rack-locs" value={draft.location} onChange={(e) => setDraft({ ...draft, location: e.target.value })} placeholder="OSBL, 952 Area, Street-3…" />
+                <Label htmlFor="rack-loc">{draft.newLocation ? "New location" : "Location"}</Label>
+                <Input id="rack-loc" className="mt-1" list={draft.newLocation ? undefined : "rack-locs"} value={draft.location} onChange={(e) => setDraft({ ...draft, location: e.target.value })} placeholder="OSBL, 952 Area, Street-3…" />
                 <datalist id="rack-locs">{locations.map((l) => <option key={l} value={l} />)}</datalist>
               </div>
               <div>
@@ -292,5 +350,51 @@ function RackRows({
         </tr>
       ) : null}
     </>
+  );
+}
+
+/** Places supervisors asked for from the DPR (Owner / Super Admin add or say no) */
+function PlaceAsks() {
+  const { fullState: state, decidePlace } = useStore();
+  const [why, setWhy] = useState<Record<string, string>>({});
+  const [err, setErr] = useState<string | null>(null);
+  const owner = state.currentRole === "owner" || state.currentRole === "super_admin";
+  const waiting = state.placeRequests.filter((r) => r.status === "pending");
+  if (!owner || !waiting.length) return null;
+  const site = (id: string) => state.sites.find((x) => x.id === id)?.code ?? id;
+  return (
+    <div className="mb-4 rounded-sm border border-[var(--sge-brass)] p-3">
+      <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-[var(--sge-ink-2)]">
+        Places asked for from DPRs · {waiting.length} waiting
+      </div>
+      <ul className="divide-y divide-[var(--sge-line)]">
+        {waiting.map((r) => {
+          const bays = r.bays ? r.bays.split("\n") : [];
+          return (
+            <li key={r.id} className="flex flex-wrap items-end justify-between gap-3 py-2 text-sm">
+              <div className="min-w-0">
+                <div className="font-semibold">{site(r.siteId)} › {r.plant} › {r.location} › {r.rack}</div>
+                <div className="text-xs text-[var(--sge-ink-3)]">
+                  {bays.length ? `${bays.length} bay${bays.length > 1 ? "s" : ""}: ${bays.slice(0, 4).join(", ")}${bays.length > 4 ? "…" : ""}` : "No bays given"} · asked by {r.requestedByName} · {r.requestedAt.slice(0, 10)}
+                  {r.note ? ` · “${r.note}”` : ""}
+                </div>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Input
+                  aria-label="Reason for not adding"
+                  className="h-8 w-48"
+                  placeholder="Reason, if not adding"
+                  value={why[r.id] ?? ""}
+                  onChange={(e) => setWhy({ ...why, [r.id]: e.target.value })}
+                />
+                <Button size="sm" variant="ghost" onClick={() => { const x = decidePlace(r.id, false, why[r.id]); setErr(x.ok ? null : x.error ?? "Not saved"); }}>Not adding</Button>
+                <Button size="sm" onClick={() => { const x = decidePlace(r.id, true); setErr(x.ok ? null : x.error ?? "Not saved"); }}>Add to list</Button>
+              </div>
+            </li>
+          );
+        })}
+      </ul>
+      {err ? <p className="mt-1 text-xs text-[var(--sge-crit)]">{err}</p> : null}
+    </div>
   );
 }

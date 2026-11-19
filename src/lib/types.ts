@@ -287,6 +287,27 @@ export interface PlantRack {
   source?: string;
 }
 
+/** A supervisor asks for a place that isn't in Racks & bays (owner, 2026-11-19); Owner / SA add it or say no */
+export interface PlaceRequest {
+  id: string;
+  siteId: string;
+  plant: string;
+  location: string;
+  rack: string;
+  /** One bay or pillar per line */
+  bays: string;
+  note?: string;
+  requestedBy: string;
+  requestedByName: string;
+  requestedAt: string;
+  status: "pending" | "added" | "rejected";
+  decidedBy?: string;
+  decidedAt?: string;
+  decidedNote?: string;
+  /** The rack it went into */
+  rackId?: string;
+}
+
 export interface PlantDetail {
   /** Matches a name in `Site.plants` (ignoring case) */
   name: string;
@@ -1006,6 +1027,8 @@ export interface AppState {
   tradeCatalogue: TradeDefinition[];
   /** Racks and bays per plant location (owner, 2026-11-19) */
   plantRacks: PlantRack[];
+  /** Places asked for from the DPR, waiting for Owner / Super Admin */
+  placeRequests: PlaceRequest[];
   /** Default daily wages by trade × skill × experience (docs §1). */
   wageBands: WageBand[];
   wageLedger: WageLedgerEntry[];

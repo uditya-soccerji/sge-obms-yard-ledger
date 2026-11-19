@@ -1,6 +1,6 @@
 "use client";
 
-import { changeBadgeCount, sheetBadgeCount, unseenWageDecisions, WAGE_REQUESTS_TAB, WAGE_UNDO_MS, wageBadgeCount } from "@/lib/wage-requests";
+import { changeBadgeCount, placeBadgeCount, sheetBadgeCount, unseenWageDecisions, WAGE_REQUESTS_TAB, WAGE_UNDO_MS, wageBadgeCount } from "@/lib/wage-requests";
 import { ChangeRequestsPanel } from "./change-requests";
 import { RequestList } from "@/components/shared/request-list";
 import { Building2, BookOpen, CalendarCheck, Check, ClipboardList, Clock, HardHat, Hourglass, IndianRupee, Layers, ListChecks, MapPin, PaintBucket, Power, ReceiptIndianRupee, Ruler, Save, Send, ShieldCheck, Undo2, Users, Wrench, X, type LucideIcon } from "lucide-react";
@@ -79,6 +79,7 @@ const SHEET_ICON: Partial<Record<MasterSheetId, LucideIcon>> = {
 function waitingBySheet(state: Parameters<typeof changeBadgeCount>[0]): Partial<Record<MasterSheetId, number>> {
   return {
     wageBands: wageBadgeCount(state),
+    racks: placeBadgeCount(state),
     trades: sheetBadgeCount(state, "trades"),
     rateBook: sheetBadgeCount(state, "rateBook"),
     materials: sheetBadgeCount(state, "materials"),

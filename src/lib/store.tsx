@@ -127,6 +127,7 @@ import type {
   WageBand,
   WageLedgerEntry,
   PlantRack,
+  PlaceRequest,
 } from "./types";
 import { seedWageBands } from "./wages";
 
@@ -310,6 +311,10 @@ interface StoreApi {
   upsertPlantRack: (rack: PlantRack) => { ok: boolean; error?: string };
   /** Adds the racks not here yet (by id), e.g. the MIS list; returns how many were added */
   importPlantRacks: (racks: PlantRack[]) => { ok: boolean; error?: string; added?: number };
+  /** Supervisor (or anyone writing a DPR) asks for a place not in Racks & bays */
+  requestPlace: (input: Pick<PlaceRequest, "siteId" | "plant" | "location" | "rack" | "bays" | "note">) => { ok: boolean; error?: string };
+  /** Owner / SA: add the asked-for place to Racks & bays, or say no (a reason is needed) */
+  decidePlace: (id: string, add: boolean, note?: string) => { ok: boolean; error?: string };
   /** New staff record (to link a login to); returns its id, or "" if not allowed */
   addStaff: (input: Omit<StaffMember, "id">) => string;
   /** HR's staff list (round 2, §27): edit, deactivate / activate */
@@ -361,7 +366,7 @@ const StoreContext = createContext<StoreApi | null>(null);
 const OPS_SHARED = [
   "equipment", "equipmentRequests", "crewRequests", "kitLots", "kitIssues", "equipmentReturns", "storeItems", "storeMoves",
   "wageChangeRequests", "masterChangeRequests", "safetyDays", "safetyObservations", "leaves", "advances", "vendorBills", "wageLedger",
-  "workPlans", "transfers", "compliance", "rateCards", "rateLines", "tradeCatalogue", "plantRacks", "wageBands", "financeAlerts", "telegramDrafts", "vendors",
+  "workPlans", "transfers", "compliance", "rateCards", "rateLines", "tradeCatalogue", "plantRacks", "placeRequests", "wageBands", "financeAlerts", "telegramDrafts", "vendors",
 ] as const satisfies readonly (keyof AppState)[];
 /** Of those, the ones whose built-in records are demo data (the rest — store items, rate book, trades, wage bands — are real lists) */
 const OPS_SHARED_DEMO = ["equipment", "equipmentRequests", "workPlans", "safetyDays", "compliance", "transfers", "vendors", "wageLedger", "acplPunches", "acplMatches"];
@@ -472,6 +477,7 @@ function migrateState(parsed: Partial<AppState>): AppState {
     })(),
     // Racks & bays (owner, 2026-11-19): the shared database is the truth once signed in
     plantRacks: parsed.plantRacks?.length ? parsed.plantRacks : seed.plantRacks,
+    placeRequests: parsed.placeRequests ?? [],
     wageBands: (() => {
       const fromSave = parsed.wageBands ?? [];
       const seeded = seed.wageBands?.length ? seed.wageBands : seedWageBands();
@@ -2826,6 +2832,69 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     return { ok: true, added: add.length };
   }, []);
 
+  const requestPlace = useCallback((input: Pick<PlaceRequest, "siteId" | "plant" | "location" | "rack" | "bays" | "note">) => {
+    const cur = stateRef.current;
+    if (!cur.currentAccountId) return { ok: false, error: "Not signed in" };
+    const rack = input.rack.trim();
+    const location = input.location.trim() || "OSBL";
+    const bays = input.bays.split("\n").map((b) => b.trim()).filter(Boolean).join("\n");
+    if (!input.plant) return { ok: false, error: "Pick the plant first" };
+    if (!rack) return { ok: false, error: "Give the rack (or area) name" };
+    const same = cur.placeRequests.find(
+      (r) => r.status === "pending" && r.siteId === input.siteId && r.plant === input.plant && r.location.toLowerCase() === location.toLowerCase() && r.rack.toLowerCase() === rack.toLowerCase() && r.bays === bays
+    );
+    if (same) return { ok: false, error: `Already asked by ${same.requestedByName}; waiting for Owner / Super Admin` };
+    const account = cur.users.find((u) => u.id === cur.currentAccountId);
+    const req: PlaceRequest = {
+      id: uid("plq"),
+      siteId: input.siteId,
+      plant: input.plant,
+      location,
+      rack,
+      bays,
+      ...(input.note?.trim() ? { note: input.note.trim() } : {}),
+      requestedBy: cur.currentUserId ?? cur.currentAccountId,
+      requestedByName: account?.name || account?.username || "Supervisor",
+      requestedAt: new Date().toISOString(),
+      status: "pending",
+    };
+    setState((s) => {
+      const next = { ...s, placeRequests: [req, ...s.placeRequests] };
+      return { ...next, auditLog: [makeAudit(next, "master", "request", `Place asked for: ${req.plant} › ${req.location} › ${req.rack}${bays ? ` (${bays.split("\n").length} bays)` : ""}`, req.plant), ...s.auditLog] };
+    });
+    return { ok: true };
+  }, []);
+
+  const decidePlace = useCallback((id: string, add: boolean, note?: string) => {
+    const cur = stateRef.current;
+    if (cur.currentRole !== "owner" && cur.currentRole !== "super_admin") return { ok: false, error: "Only the Owner or Super Admin adds places" };
+    const r = cur.placeRequests.find((x) => x.id === id);
+    if (!r || r.status !== "pending") return { ok: false, error: "This request isn't waiting" };
+    if (!add && !note?.trim()) return { ok: false, error: "Give a reason so the supervisor knows why" };
+    const account = cur.users.find((u) => u.id === cur.currentAccountId);
+    const decided = { decidedBy: account?.name || account?.username || cur.currentRole, decidedAt: new Date().toISOString(), ...(note?.trim() ? { decidedNote: note.trim() } : {}) };
+    if (!add) {
+      setState((s) => ({ ...s, placeRequests: s.placeRequests.map((x) => (x.id === id ? { ...x, ...decided, status: "rejected" as const } : x)), auditLog: [makeAudit(s, "master", "reject", `Place not added: ${r.plant} › ${r.location} › ${r.rack} — ${note}`, r.plant), ...s.auditLog] }));
+      return { ok: true };
+    }
+    const twin = cur.plantRacks.find((x) => x.siteId === r.siteId && x.plant === r.plant && x.location.toLowerCase() === r.location.toLowerCase() && x.name.toLowerCase() === r.rack.toLowerCase());
+    const have = new Set((twin?.bays ?? []).map((b) => b.label.toLowerCase()));
+    const newBays = r.bays.split("\n").map((b) => b.trim()).filter((b) => b && !have.has(b.toLowerCase())).map((label) => ({ label }));
+    const rack: PlantRack = twin
+      ? { ...twin, active: true, bays: [...twin.bays, ...newBays] }
+      : { id: uid("rk"), siteId: r.siteId, plant: r.plant, location: r.location, name: r.rack, bays: newBays, active: true, source: `Asked by ${r.requestedByName}` };
+    setState((s) => {
+      const exists = s.plantRacks.some((x) => x.id === rack.id);
+      const next = {
+        ...s,
+        plantRacks: exists ? s.plantRacks.map((x) => (x.id === rack.id ? rack : x)) : [...s.plantRacks, rack],
+        placeRequests: s.placeRequests.map((x) => (x.id === id ? { ...x, ...decided, status: "added" as const, rackId: rack.id } : x)),
+      };
+      return { ...next, auditLog: [makeAudit(next, "master", exists ? "update" : "create", `Place added (asked by ${r.requestedByName}): ${r.plant} › ${r.location} › ${r.rack}${newBays.length ? ` + ${newBays.length} bays` : ""}`, r.plant), ...s.auditLog] };
+    });
+    return { ok: true };
+  }, []);
+
   const addStaff = useCallback((input: Omit<StaffMember, "id">) => {
     const cur = stateRef.current;
     // Round 2 (§27): HR keeps staff records too
@@ -3408,6 +3477,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       upsertSite,
       upsertPlantRack,
       importPlantRacks,
+      requestPlace,
+      decidePlace,
       assignCrew,
       removeFromCrew,
       requestCrew,
@@ -3500,6 +3571,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       upsertSite,
       upsertPlantRack,
       importPlantRacks,
+      requestPlace,
+      decidePlace,
       assignCrew,
       removeFromCrew,
       requestCrew,

@@ -50,7 +50,7 @@ export function PlacePicker({
   idPrefix: string;
   className?: string;
 }) {
-  const { fullState: state } = useStore();
+  const { fullState: state, requestPlace } = useStore();
   const racks = racksFor(state.plantRacks, siteId, plant);
   const rack = value.rackId ? state.plantRacks.find((r) => r.id === value.rackId) : undefined;
   const locations = [...new Set(racks.map((r) => r.location))];
@@ -58,10 +58,21 @@ export function PlacePicker({
   const [loc, setLoc] = useState(rack?.location ?? locations[0] ?? "");
   const curLoc = rack?.location ?? (locations.includes(loc) ? loc : locations[0] ?? "");
   const typed = !racks.length || typing || (!!value.location && !rack);
+  const [asking, setAsking] = useState(false);
 
   if (typed) {
     return (
       <div className={className}>
+        {asking && plant ? (
+          <AskPlace
+            siteId={siteId}
+            plant={plant}
+            locations={locations}
+            typed={value.location}
+            onSend={requestPlace}
+            onClose={() => setAsking(false)}
+          />
+        ) : null}
         <Label htmlFor={`${idPrefix}-loc`}>Location</Label>
         <Input
           id={`${idPrefix}-loc`}
@@ -80,6 +91,12 @@ export function PlacePicker({
             Pick rack and bay from the list ({racks.length} racks)
           </button>
         ) : null}
+        {plant && !readOnly && !asking ? (
+          <button type="button" className="ml-3 mt-1 text-xs font-semibold text-[var(--sge-brass-ink)] underline" onClick={() => setAsking(true)}>
+            Ask to add this place to the list
+          </button>
+        ) : null}
+        <MyAsks siteId={siteId} plant={plant} />
       </div>
     );
   }
@@ -146,6 +163,88 @@ export function PlacePicker({
           {m3 || m2 ? ` · MIS scope ${[m3 ? `${Math.round(m3).toLocaleString("en-IN")} m³` : "", m2 ? `${Math.round(m2).toLocaleString("en-IN")} m² paint` : ""].filter(Boolean).join(", ")}` : ""}
         </p>
       ) : null}
+    </div>
+  );
+}
+
+/** Places this person asked for on this plant: waiting, or turned down with the reason */
+function MyAsks({ siteId, plant }: { siteId: string; plant: string }) {
+  const { fullState: state } = useStore();
+  const me = state.currentUserId ?? state.currentAccountId;
+  const mine = state.placeRequests
+    .filter((r) => r.requestedBy === me && r.siteId === siteId && r.plant === plant && r.status !== "added")
+    .slice(0, 3);
+  if (!mine.length) return null;
+  return (
+    <ul className="mt-1 space-y-0.5 text-xs text-[var(--sge-ink-3)]">
+      {mine.map((r) => (
+        <li key={r.id}>
+          {r.location} › {r.rack}:{" "}
+          {r.status === "pending" ? "waiting for Owner / Super Admin" : <span className="text-[var(--sge-crit)]">not added — {r.decidedNote}</span>}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function AskPlace({
+  siteId, plant, locations, typed, onSend, onClose,
+}: {
+  siteId: string;
+  plant: string;
+  locations: string[];
+  typed: string;
+  onSend: (input: { siteId: string; plant: string; location: string; rack: string; bays: string; note?: string }) => { ok: boolean; error?: string };
+  onClose: () => void;
+}) {
+  const [location, setLocation] = useState(locations[0] ?? "OSBL");
+  const [rack, setRack] = useState(typed);
+  const [bays, setBays] = useState("");
+  const [note, setNote] = useState("");
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const id = `ask-${plant.replace(/\W+/g, "-")}`;
+  if (msg?.ok) {
+    return (
+      <div className="mb-2 rounded-sm border border-[var(--sge-ok)]/30 bg-[var(--sge-ok-wash)] px-3 py-2 text-xs text-[var(--sge-ok)]">
+        {msg.text}{" "}
+        <button type="button" className="underline" onClick={onClose}>Close</button>
+      </div>
+    );
+  }
+  return (
+    <div className="mb-2 grid gap-2 rounded-sm border border-[var(--sge-brass)] bg-[var(--sge-brass-wash)] p-3 sm:grid-cols-2">
+      <div className="text-xs font-semibold uppercase tracking-wide text-[var(--sge-ink-2)] sm:col-span-2">Ask to add a place on {plant}</div>
+      <div>
+        <Label htmlFor={`${id}-loc`}>Location</Label>
+        <Input id={`${id}-loc`} className="mt-1" list={`${id}-locs`} value={location} onChange={(e) => setLocation(e.target.value)} placeholder="OSBL, 952 Area, Street-3…" />
+        <datalist id={`${id}-locs`}>{locations.map((l) => <option key={l} value={l} />)}</datalist>
+      </div>
+      <div>
+        <Label htmlFor={`${id}-rack`}>Rack or area</Label>
+        <Input id={`${id}-rack`} className="mt-1" value={rack} onChange={(e) => setRack(e.target.value)} placeholder="e.g. G12 Rack" />
+      </div>
+      <div className="sm:col-span-2">
+        <Label htmlFor={`${id}-bays`}>Bays or pillars, one per line (optional)</Label>
+        <textarea id={`${id}-bays`} rows={3} className="mt-1 w-full rounded-md border border-[var(--sge-line)] bg-[var(--sge-paper)] p-2 font-mono text-xs" value={bays} onChange={(e) => setBays(e.target.value)} placeholder={"Bay 40-41\nBay 41-42"} />
+      </div>
+      <div className="sm:col-span-2">
+        <Label htmlFor={`${id}-note`}>Note (optional)</Label>
+        <Input id={`${id}-note`} className="mt-1" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Where it is, permit no., anything that helps" />
+      </div>
+      <div className="flex flex-wrap items-center gap-2 sm:col-span-2">
+        <button
+          type="button"
+          className="h-8 rounded-md bg-[var(--sge-night)] px-3 text-xs font-semibold text-white"
+          onClick={() => {
+            const r = onSend({ siteId, plant, location, rack, bays, note });
+            setMsg(r.ok ? { ok: true, text: "Sent to Owner / Super Admin. Keep the typed place on this DPR; it shows in the list once added." } : { ok: false, text: r.error ?? "Not sent" });
+          }}
+        >
+          Send request
+        </button>
+        <button type="button" className="h-8 px-2 text-xs underline" onClick={onClose}>Cancel</button>
+        {msg && !msg.ok ? <span className="text-xs text-[var(--sge-crit)]">{msg.text}</span> : null}
+      </div>
     </div>
   );
 }
