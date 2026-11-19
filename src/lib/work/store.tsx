@@ -15,6 +15,7 @@ import type { RoleId } from "../types";
 import { reasonText, type WorkEvent } from "./events";
 import { entryArea } from "./logic";
 import { workRights } from "./permissions";
+import { addDays, weekStart } from "../progress";
 import type { DprEntry, DprReport, Expense, Jms, JmsPayment, JmsStatus, JmsSubmission, Job, PlanLine, PlanLineRequest, Stage, WorkState } from "./types";
 import { compareJms, linkCandidates } from "./jms-compare";
 import { inStock, LIFECYCLE, LIFECYCLE_LABEL, paintUsedInMonth, stepVariance } from "./paint-steps";
@@ -196,7 +197,7 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
       const seq = Math.max((s.events[s.events.length - 1]?.seq ?? 0) + 1, Date.now());
       // Pass alerts come from the clock, not from whoever happened to open the app (docs §24)
       // …and so does the wage-request alert after the Undo window, whichever tab is open
-      const system = e.kind === "pass_expiring" || e.kind === "wage_change_requested" || e.kind === "change_requested" || e.kind === "plan_requested";
+      const system = e.kind === "pass_expiring" || e.kind === "wage_change_requested" || e.kind === "change_requested" || e.kind === "plan_requested" || e.kind === "weekly_report";
       const ev: WorkEvent = { ...e, id: `ev-${seq}-${Math.random().toString(36).slice(2, 6)}`, seq, at: new Date().toISOString(), day: today(), actorName: system ? "System" : actor.current.name, actorRole: system ? null : actor.current.role, actorAccountId: system ? undefined : actor.current.accountId || undefined, impersonatedBy: system ? undefined : actor.current.impersonatedBy };
       return { ...s, events: [...s.events, ev] };
     });
@@ -418,6 +419,24 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
     const t = setInterval(tick, 10_000);
     return () => clearInterval(t);
   }, [hydrated, shared.loaded, masterReqs, log]);
+
+  // Owner, 2026-11-19: every Monday the Owner gets last week's progress report (Mon–Sun), once,
+  // from whichever device opens the app first that week
+  useEffect(() => {
+    if (!hydrated || (supabase && !shared.loaded)) return;
+    const thisMon = weekStart(today());
+    const lastMon = addDays(thisMon, -7);
+    if (ref.current.events.some((e) => e.kind === "weekly_report" && e.refId === lastMon)) return;
+    const lastSun = addDays(thisMon, -1);
+    log({
+      kind: "weekly_report",
+      siteId: "",
+      title: `Weekly progress report: ${lastMon} to ${lastSun}`,
+      detail: "All sites · open it to print or save as PDF; Home → Progress has the Excel",
+      tab: `/print/progress?from=${lastMon}&to=${lastSun}`,
+      refId: lastMon,
+    });
+  }, [hydrated, shared.loaded, log]);
 
   const passLabourers = fullState.labourers;
   useEffect(() => {

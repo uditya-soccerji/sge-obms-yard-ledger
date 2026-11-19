@@ -510,3 +510,14 @@ Process page: "Store module — process" (Claude doc). Decisions there: reorder 
 - DPR: the scaffolding line and New job (painting) pick Location → Rack → Bay, optionally a from–to run of bays, and show the MIS scope for that run. "Not in the list" falls back to typing. The line's location text keeps the full place, so print and older DPRs still read.
 - Owner / Super Admin add a plant ("+ Add plant" under a site) or a new location (it starts with its first rack) on the Racks & bays sheet.
 - A supervisor whose place isn't listed types it on the DPR and can "Ask to add this place to the list" (location, rack, bays, note). Owner / Super Admin see the waiting requests at the top of Racks & bays (badge on the tab) and Add to list or say Not adding with a reason; the supervisor sees the reason under the picker.
+
+## 45. Progress dashboard and report on Home (owner, 2026-11-19)
+
+- **Home → Progress** (top of Home): Owner, Super Admin, SIC and Admin see every supervisor; a **supervisor sees only their own work** (owner). Other roles don't get it.
+- **General view** (whole site, or all sites) and **detailed view** (one supervisor, plant or job type; click a breakdown row or pick a filter; "Back to general view").
+- **Periods:** Today · This week (**Monday** start, owner) · **15 days** (pick the From date; To = From + 14, owner) · This month · Dates (any From – To). Each figure shows ▲/▼ against the same length of time before.
+- **Job types:** All work · Painting & blasting · Blasting only · Painting only · Scaffolding · Rope access. A supervisor's type decides theirs. **Rope access is split into blasting and painting** like painting & blasting (owner). Blasting = "Blasting / surface prep" stage; painting = 1st / 2nd coat + final shade.
+- **Figures:** blasting m², coats m², final-shade m² (→ JMS), scaffold erected / dismantled m³, man-days (present / overtime = 1, half = 0.5), paint litres, DPRs on time (one a day Mon–Sat from each supervisor with a crew; late = sent after the day), PPE flagged. Only **submitted** DPRs count.
+- **Plan vs actual** (month of the To date): actual = **JMS m² where the job has a JMS, else DPR final-shade m²** (owner).
+- **Report** for whatever the filters show: **Download Excel** (Summary, By supervisor, By plant, By day / week, Plan vs actual, DPRs) and **Print / PDF** (`/print/progress?...`).
+- **Weekly report to the Owner:** every Monday an alert (Owner and Super Admin only) opens last week's report (Mon–Sun, all sites); posted once, by whichever device opens the app first that week.

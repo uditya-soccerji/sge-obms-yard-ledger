@@ -10,11 +10,26 @@ import SicHomePage from "@/app/(app)/sic/page";
 import StoreHomePage from "@/app/(app)/store/page";
 import SupervisorHomePage from "@/app/(app)/supervisor/page";
 import { EmptyState } from "@/components/shared/ui-bits";
+import { ProgressDashboard } from "@/components/home/progress-dashboard";
 import { useStore } from "@/lib/store";
 
 export default function HomePage() {
   const { state } = useStore();
-  switch (state.currentRole) {
+  // Owner, 2026-11-19: progress dashboard on Home — Owner, SA, SIC and Admin see everyone; a supervisor their own work
+  const progress = ["owner", "super_admin", "sic", "admin"].includes(state.currentRole ?? "") || (state.currentRole === "supervisor" && !!state.currentUserId);
+  const desk = roleHome(state.currentRole);
+  return progress ? (
+    <div className="space-y-6">
+      <ProgressDashboard />
+      {desk}
+    </div>
+  ) : (
+    desk
+  );
+}
+
+function roleHome(role: ReturnType<typeof useStore>["state"]["currentRole"]) {
+  switch (role) {
     case "super_admin":
     case "owner":
       return <OwnerHomePage />;

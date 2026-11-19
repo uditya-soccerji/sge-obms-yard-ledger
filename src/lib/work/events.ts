@@ -83,7 +83,9 @@ export type EventKind =
   | "store_extra_issue"
   // 2026-10-24: Admin's plan line, approved by the SIC / Owner / SA
   | "plan_requested"
-  | "plan_decided";
+  | "plan_decided"
+  // 2026-11-19: last week's progress report, every Monday, for the Owner (and Super Admin)
+  | "weekly_report";
 
 export interface WorkEvent {
   id: string;
@@ -121,7 +123,7 @@ export interface Viewer {
 }
 
 /** Events that need someone to act, or tell the submitter the outcome: instant. */
-export const INSTANT: EventKind[] = ["job_closed", "jms_confirmed", "job_sent_back", "dpr_submitted", "dpr_approved", "dpr_sent_back", "crew_requested", "crew_released", "crew_decided", "pass_expiring", "request_rejected", "request_overridden", "dpr_issue", "job_plan", "job_plan_decided", "jms_admin_pending", "jms_admin_approved", "jms_returned", "observation_raised", "stop_work", "wage_change_requested", "wage_change_decided", "change_requested", "change_decided", "equipment_fault", "ppe_flag", "store_extra_issue", "plan_requested", "plan_decided"];
+export const INSTANT: EventKind[] = ["job_closed", "jms_confirmed", "job_sent_back", "dpr_submitted", "dpr_approved", "dpr_sent_back", "crew_requested", "crew_released", "crew_decided", "pass_expiring", "request_rejected", "request_overridden", "dpr_issue", "job_plan", "job_plan_decided", "jms_admin_pending", "jms_admin_approved", "jms_returned", "observation_raised", "stop_work", "wage_change_requested", "wage_change_decided", "change_requested", "change_decided", "equipment_fault", "ppe_flag", "store_extra_issue", "plan_requested", "plan_decided", "weekly_report"];
 
 export const KIND_LABEL: Record<EventKind, string> = {
   dpr_added: "DPR entry",
@@ -187,6 +189,7 @@ export const KIND_LABEL: Record<EventKind, string> = {
   ppe_flag: "PPE needed",
   plan_requested: "Plan line to approve",
   plan_decided: "Plan line decided",
+  weekly_report: "Weekly progress report",
 };
 
 // Company-wide events (no site, e.g. the monthly pay upload) reach every viewer of the right role
@@ -312,6 +315,7 @@ export function isFor(e: WorkEvent, v: Viewer): boolean {
     case "store_extra_issue":
     case "wage_change_requested":
     case "change_requested":
+    case "weekly_report":
       return false;
     case "wage_change_decided":
     case "change_decided":
