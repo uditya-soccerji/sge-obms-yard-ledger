@@ -108,6 +108,7 @@ export function RacksSheet({ showInactive, report }: { showInactive: boolean; re
           >
             Load MIS list
           </Button>
+          {loadMsg ? <span className="w-full text-xs font-semibold text-[var(--sge-crit)]">{loadMsg}</span> : null}
         </div>
       ) : loadMsg ? (
         <div className="mb-4 rounded-sm border border-[var(--sge-ok)]/30 bg-[var(--sge-ok-wash)] px-3 py-2 text-sm text-[var(--sge-ok)]">{loadMsg}</div>

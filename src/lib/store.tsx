@@ -44,6 +44,39 @@ function isDemoMark(a: AttendanceRecord): boolean {
   }
   return demoMarkKeys.ids.has(a.id) || demoMarkKeys.labourers.has(a.labourerId);
 }
+/**
+ * The browser copy of the ops state (2026-11-19). Browser storage is ~5 MB; a full store must never
+ * crash the app (an unguarded write did, after sign-in and on Load MIS list). Order: as is → drop old
+ * backup copies → a slimmer copy (signed in, the shared database has the rest) → give up quietly.
+ */
+function saveLocal(key: string, value: unknown, slim?: () => unknown): boolean {
+  const put = (v: unknown) => localStorage.setItem(key, JSON.stringify(v));
+  try {
+    put(value);
+    return true;
+  } catch {
+    /* full — make room below */
+  }
+  try {
+    const backups = Object.keys(localStorage).filter((k) => k.startsWith("sge-backup-")).sort();
+    for (const k of backups) localStorage.removeItem(k);
+    put(value);
+    return true;
+  } catch {
+    /* still full */
+  }
+  if (slim) {
+    try {
+      put(slim());
+      return true;
+    } catch {
+      /* still full */
+    }
+  }
+  console.warn(`Browser storage is full: ${key} was not saved in this browser (the shared database is unaffected)`);
+  return false;
+}
+
 function readLocalAttendance(): AttendanceRecord[] {
   try {
     const raw = localStorage.getItem(LOCAL_ATTENDANCE_KEY);
@@ -595,7 +628,12 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       return;
     }
     // Shared attendance (migration 008) lives in the database, not in this copy
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(supabase ? { ...state, attendance: [] } : state));
+    saveLocal(
+      STORAGE_KEY,
+      supabase ? { ...state, attendance: [] } : state,
+      // Signed in, the racks come back from the database at sign-in; the audit trail keeps its newest 300
+      supabase ? () => ({ ...state, attendance: [], plantRacks: [], auditLog: state.auditLog.slice(0, 300) }) : undefined
+    );
     if (supabase && attSynced.current) {
       try {
         localStorage.setItem(UNSENT_ATTENDANCE_KEY, JSON.stringify(attPending()));
