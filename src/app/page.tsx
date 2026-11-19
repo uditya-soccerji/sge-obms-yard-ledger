@@ -9,13 +9,6 @@ import { Label } from "@/components/ui/label";
 import { roleMeta } from "@/lib/roles";
 import { useStore } from "@/lib/store";
 
-const QUICK = [
-  { user: "uditya", pass: "password", label: "Super Admin" },
-  { user: "paint", pass: "paint123", label: "Paint supervisor" },
-  { user: "sic", pass: "sic123", label: "SIC" },
-  { user: "owner", pass: "owner123", label: "Owner" },
-];
-
 const SITES = ["DTA", "MTF", "Marine", "PCG", "Jetty", "Gagva"];
 
 export default function LoginPage() {
@@ -126,7 +119,7 @@ export default function LoginPage() {
               autoComplete="username"
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              placeholder="uditya"
+              placeholder="Your username"
               className="mt-1 rounded-sm bg-[var(--sge-linen)]"
             />
           </div>
@@ -152,34 +145,6 @@ export default function LoginPage() {
             <ArrowRight className="h-3.5 w-3.5" />
           </Button>
         </form>
-
-        <div className="sge-enter sge-enter-delay-2 mx-auto mt-8 w-full max-w-md">
-          <div className="mb-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--sge-ink-3)]">
-            Quick demo seats
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {QUICK.map((q) => (
-              <Button
-                key={q.user}
-                type="button"
-                variant="outline"
-                size="sm"
-                className="rounded-sm"
-                onClick={() => {
-                  setUsername(q.user);
-                  setPassword(q.pass);
-                  enter(q.user, q.pass);
-                }}
-              >
-                {q.label}
-              </Button>
-            ))}
-          </div>
-          <p className="mt-4 text-xs text-[var(--sge-ink-3)]">
-            Full password list in README. Role switcher only shows roles assigned
-            to your account.
-          </p>
-        </div>
       </main>
     </div>
   );
