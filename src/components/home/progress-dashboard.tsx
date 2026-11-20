@@ -460,12 +460,16 @@ export function downloadProgressExcel(a: ReportArgs, work: ReturnType<typeof use
   const reports = work.reports
     .filter((r) => r.date >= f.from && r.date <= f.to && (!f.siteIds.length || f.siteIds.includes(r.siteId)) && (!f.supervisorId || r.submitterId === f.supervisorId) && (!f.plant || r.plant.toUpperCase() === f.plant.toUpperCase()))
     .map((r) => ({ Date: r.date, Site: site(r.siteId), Plant: r.plant, Supervisor: a.supName(r.submitterId), Type: r.submitterType, Status: r.status, "Sent at": r.submittedAt ?? "", "Scaffold lines": (r.scaffoldWork ?? []).map((s) => `${s.location}: +${s.erectM3}/-${s.dismantleM3} m³`).join("; "), Crew: r.labourMarks.filter((m) => m.status !== "absent").length }));
+  // A sheet with nothing in the period keeps its column headings and says so (2026-11-20)
+  const orEmpty = (rows: Record<string, string | number>[], headers: string[], what: string) =>
+    rows.length ? rows : [Object.fromEntries(headers.map((h, i) => [h, i === 0 ? `No ${what} for these filters` : ""]))];
+  const timeHead = spanDays(f.from, f.to) <= 16 ? "Day" : "Week of";
   downloadXlsx(`Progress-${a.siteName.replace(/\W+/g, "")}-${f.from}-to-${f.to}`, [
     { name: "Summary", rows: summary },
-    { name: "By supervisor", rows: bySup },
-    { name: "By plant", rows: byPlant },
-    { name: spanDays(f.from, f.to) <= 16 ? "By day" : "By week", rows: byDay },
-    { name: "Plan vs actual", rows: plan },
-    { name: "DPRs", rows: reports },
+    { name: "By supervisor", rows: orEmpty(bySup, ["Supervisor", "Blasting m²", "Coats m²", "Final m²", "Erected m³", "Dismantled m³", "Man-days", "Paint L", "DPRs sent", "Late", "Not sent"], "submitted DPRs") },
+    { name: "By plant", rows: orEmpty(byPlant, ["Plant", "Blasting m²", "Coats m²", "Final m²", "Erected m³", "Man-days"], "submitted DPRs") },
+    { name: timeHead === "Day" ? "By day" : "By week", rows: orEmpty(byDay, [timeHead, "Blasting m²", "Coats m²", "Final m²", "Erected m³", "Man-days"], "submitted DPRs") },
+    { name: "Plan vs actual", rows: orEmpty(plan, ["Supervisor", "Plan m²", "Actual m²", "Of which JMS m²", "Remaining m²"], "plan lines") },
+    { name: "DPRs", rows: orEmpty(reports, ["Date", "Site", "Plant", "Supervisor", "Type", "Status", "Sent at", "Scaffold lines", "Crew"], "DPRs") },
   ]);
 }
