@@ -84,7 +84,7 @@ function OwnerHomePage() {
       <OwnerDailySummary />
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <KpiTile label="Attendance today" value={`${present}/${totalActive}`} hint="Present + half day" tone="ok" />
+        <KpiTile label="Attendance today" value={`${present}/${totalActive}`} hint="Present" tone="ok" />
         <KpiTile label="Painted today" value={`${paintToday} m²`} hint="From painting DPRs" tone="accent" />
         <KpiTile label="Pending SIC DPRs" value={String(pendingSic)} tone="warn" />
         <KpiTile label="Finance alerts" value={String(financeOpen)} hint={`ACPL flags ${acplFlags}`} tone="crit" />

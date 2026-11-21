@@ -41,7 +41,7 @@ import { structureLabel, type JobStructure } from "@/lib/work/types";
 import type { Stage } from "@/lib/work/types";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
-import { ATTENDANCE_OPTIONS } from "@/lib/attendance";
+import { ATTENDANCE_OPTIONS, normStatus } from "@/lib/attendance";
 import { worksAt } from "@/lib/site-scope";
 import { workRights } from "@/lib/work/permissions";
 import { PlacePicker, racksFor, type Place } from "@/components/shared/place-picker";
@@ -172,7 +172,7 @@ export function DprForm({
                 // Owner, 2026-11-14: no in / out times on labour attendance — a status only
                 inTime: undefined,
                 outTime: undefined,
-                otHours: status === "overtime" ? m.otHours : undefined,
+                otHours: normStatus(status) === "present" ? m.otHours : undefined,
               }
             : m
         )
@@ -555,9 +555,9 @@ export function DprForm({
                             key={st}
                             type="button"
                             disabled={readOnly}
-                            aria-pressed={mark?.status === st}
+                            aria-pressed={!!mark && normStatus(mark.status) === st}
                             onClick={() => setMark(l.id, st)}
-                            className={cn("px-2.5 py-1.5 font-semibold", mark?.status === st ? (st === "present" ? "bg-[var(--sge-ok)] text-white" : "bg-[var(--sge-crit)] text-white") : "bg-[var(--sge-paper)] text-[var(--sge-ink-2)] hover:bg-[var(--sge-paper-2)]")}
+                            className={cn("px-2.5 py-1.5 font-semibold", mark && normStatus(mark.status) === st ? (st === "present" ? "bg-[var(--sge-ok)] text-white" : "bg-[var(--sge-crit)] text-white") : "bg-[var(--sge-paper)] text-[var(--sge-ink-2)] hover:bg-[var(--sge-paper-2)]")}
                           >
                             {st === "present" ? "Present" : "Absent"}
                           </button>
@@ -565,8 +565,8 @@ export function DprForm({
                         <select
                           aria-label={`Other attendance ${l.name}`}
                           disabled={readOnly}
-                          className={cn("border-l border-[var(--sge-line)] px-1.5 text-xs", mark && mark.status !== "present" && mark.status !== "absent" ? "bg-[var(--sge-brass-wash)] font-semibold" : "bg-[var(--sge-paper)]")}
-                          value={mark && mark.status !== "present" && mark.status !== "absent" ? mark.status : ""}
+                          className={cn("border-l border-[var(--sge-line)] px-1.5 text-xs", mark && normStatus(mark.status) !== "present" && mark.status !== "absent" ? "bg-[var(--sge-brass-wash)] font-semibold" : "bg-[var(--sge-paper)]")}
+                          value={mark && normStatus(mark.status) !== "present" && mark.status !== "absent" ? mark.status : ""}
                           onChange={(e) => e.target.value && setMark(l.id, e.target.value as AttendanceStatus)}
                         >
                           <option value="">More…</option>
@@ -575,8 +575,9 @@ export function DprForm({
                           ))}
                         </select>
                       </div>
-                      {mark?.status === "overtime" ? (
-                        // Owner, 2026-11-18: no in / out times, so overtime is entered as hours (paid daily wage ÷ 8 per hour)
+                      {mark && normStatus(mark.status) === "present" ? (
+                        // Owner, 2026-11-18: no in / out times, so overtime is entered as hours (paid daily wage ÷ 8 per hour);
+                        // 2026-11-21: OT is optional hours on a Present mark (no separate Overtime choice)
                         <label className="inline-flex items-center gap-1 text-xs font-semibold text-[var(--sge-ink-2)]">
                           OT
                           <Input
@@ -615,7 +616,7 @@ export function DprForm({
                   <div className="flex flex-wrap items-center gap-2">
                     <Select
                       disabled={readOnly}
-                      value={mark?.status ?? ""}
+                      value={mark ? normStatus(mark.status) : ""}
                       onValueChange={(v) =>
                         setMark(l.id, v as AttendanceStatus)
                       }

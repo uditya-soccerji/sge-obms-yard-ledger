@@ -75,7 +75,8 @@ export function kindOf(staff: StaffMember | undefined, fallback?: DprReport["sub
   return fallback === "scaffolding" ? "scaf" : "pb";
 }
 
-const MAN_DAY: Record<string, number> = { present: 1, overtime: 1, half: 0.5 };
+// Owner, 2026-11-21: no half days — old Half day / Overtime marks count as a full man-day
+const MAN_DAY: Record<string, number> = { present: 1, overtime: 1, half: 1 };
 
 /** Every counted thing in the date range, one row per work line / scaffold line / DPR */
 export function buildFacts(w: WorkData, staff: StaffMember[], from: string, to: string): Fact[] {

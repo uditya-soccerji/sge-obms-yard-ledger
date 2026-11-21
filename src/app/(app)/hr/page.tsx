@@ -25,7 +25,7 @@ import {
 } from "@/components/ui/select";
 import { useStore } from "@/lib/store";
 import { Input } from "@/components/ui/input";
-import { ATTENDANCE_OPTIONS, attendanceLabel, workedCount } from "@/lib/attendance";
+import { ATTENDANCE_OPTIONS, attendanceLabel, normStatus, workedCount } from "@/lib/attendance";
 import { daysAgo } from "@/lib/today";
 import type { AttendanceStatus } from "@/lib/types";
 import { OpsExcelTransferStack } from "@/components/ops/ops-excel-transfer";
@@ -128,7 +128,7 @@ function HrHomePage() {
                     {att ? (
                       <StatusPill
                         tone={
-                          att.status === "present"
+                          normStatus(att.status) === "present"
                             ? "ok"
                             : att.status === "absent"
                               ? "crit"
@@ -143,7 +143,7 @@ function HrHomePage() {
                       <StatusPill>unset</StatusPill>
                     )}
                     <Select
-                      value={att?.status ?? ""}
+                      value={att ? normStatus(att.status) : ""}
                       onValueChange={(v) =>
                         setStatus(l.id, v as AttendanceStatus)
                       }
