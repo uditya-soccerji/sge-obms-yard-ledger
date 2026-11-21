@@ -28,7 +28,7 @@ function ScaffoldPage() {
     <div className="sge-enter space-y-6">
       <SectionHeader
         title="Scaffolding volume"
-        subtitle="Standing scaffold volume L×B×H×E for DPR and hire tracking."
+        subtitle="Scaffold volume L × W × H × E (W = width) for DPR and hire tracking."
         action={<PdfButton href={`/print/calc?type=scaffold&l=${l}&b=${b}&h=${h}&e=${e}`} />}
       />
       <Panel className="max-w-lg space-y-4">
@@ -43,7 +43,7 @@ function ScaffoldPage() {
             />
           </div>
           <div>
-            <Label>B (m)</Label>
+            <Label>W (m)</Label>
             <Input
               type="number"
               className="mt-1"

@@ -56,8 +56,8 @@ function CalcPrint() {
     const l = n(q.get("l")), b = n(q.get("b")), h = n(q.get("h")), e = n(q.get("e"), 1);
     const v = scaffoldVolume(l, b, h, e);
     title = "Scaffolding volume";
-    inputs.push(["L", `${fmt(l)} m`], ["B", `${fmt(b)} m`], ["H", `${fmt(h)} m`], ["E (factor)", fmt(e)]);
-    steps.push({ label: "Standing volume", working: `L × B × H × E = ${fmt(l)} × ${fmt(b)} × ${fmt(h)} × ${fmt(e)}`, result: `${fmt(v)} m³` });
+    inputs.push(["L", `${fmt(l)} m`], ["W (width)", `${fmt(b)} m`], ["H", `${fmt(h)} m`], ["E (factor)", fmt(e)]);
+    steps.push({ label: "Standing volume", working: `L × W × H × E = ${fmt(l)} × ${fmt(b)} × ${fmt(h)} × ${fmt(e)}`, result: `${fmt(v)} m³` });
     results.push(["Standing volume", `${fmt(v)} m³`]);
     notes.push("Negative or blank sizes count as 0. Rounded to 3 decimals.");
   } else if (type === "paint") {

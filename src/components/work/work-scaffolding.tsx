@@ -145,13 +145,13 @@ export function WorkScaffolding() {
                 {supRest.length ? <optgroup label={supFirst.length ? "Also with this sub-con" : "With this sub-con"}>{supRest.map((x) => <option key={x.id} value={x.id}>{x.name}{x.plants?.length ? ` · ${x.plants.join(", ")}` : ""}</option>)}</optgroup> : null}
               </select>
             </div>
-            {/* Owner, 2026-11-21: scope from the Scaffold calc — L × B × H × E per piece, summed */}
+            {/* Owner, 2026-11-21: scope from the Scaffold calc — L × W × H × E per piece, summed (W = width, owner 2026-11-21) */}
             <div className="lg:col-span-2">
-              <span className="block text-sm font-medium">Job scope · Scaffold calc (L × B × H × E)</span>
+              <span className="block text-sm font-medium">Job scope · Scaffold calc (L × W × H × E)</span>
               <div className="mt-1 overflow-x-auto">
                 <table className="w-full min-w-[520px] text-sm [&_td]:px-1.5 [&_td]:py-1 [&_th]:px-1.5 [&_th]:py-1">
                   <thead className="text-left text-[10px] uppercase tracking-wider text-[var(--sge-ink-3)]">
-                    <tr><th>Piece</th><th>L (m)</th><th>B (m)</th><th>H (m)</th><th>E (factor)</th><th className="text-right">m³</th><th>Platform planks</th><th className="text-right">Platform m²</th><th /></tr>
+                    <tr><th>Piece</th><th>L (m)</th><th>W (m)</th><th>H (m)</th><th>E (factor)</th><th className="text-right">m³</th><th>Platform planks</th><th className="text-right">Platform m²</th><th /></tr>
                   </thead>
                   <tbody>
                     {calc.map((row, i) => (
@@ -161,7 +161,7 @@ export function WorkScaffolding() {
                           <td key={k}>
                             <Input
                               id={`sj-calc-${i}-${k}`}
-                              aria-label={`Piece ${i + 1} ${k.toUpperCase()}`}
+                              aria-label={`Piece ${i + 1} ${({ l: "L", b: "W", h: "H", e: "E" } as const)[k]}`}
                               type="number"
                               min={0}
                               step="any"
