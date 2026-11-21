@@ -32,6 +32,18 @@ import { worksAt } from "../site-scope";
 
 type Result = { ok: true; id?: string; requested?: boolean } | { ok: false; error: string };
 
+/** A file prepared from the MS-SGE daily DPR sheets (owner, 2026-11-21) */
+export interface PreparedImport {
+  kind: "sge-prepared-dprs";
+  version: 1;
+  source: string;
+  serviceItems?: WorkState["serviceItems"];
+  planLines?: PlanLine[];
+  jobs?: Job[];
+  reports?: DprReport[];
+  dprs?: DprEntry[];
+}
+
 interface WorkApi {
   work: WorkState;
   hydrated: boolean;
@@ -52,6 +64,8 @@ interface WorkApi {
   decidePlanRequest: (id: string, approve: boolean, note: string) => Result;
   /** The Admin takes a waiting plan line back (Undo) */
   withdrawPlanRequest: (id: string) => Result;
+  /** Owner / SA: add DPRs prepared from the MS-SGE daily sheets (only records not here yet, by id) */
+  importPrepared: (p: PreparedImport) => { ok: true; added: Record<string, number> } | { ok: false; error: string };
   markPlanRequests: (ids: string[], patch: { notified?: boolean; seenByRequester?: boolean }) => void;
   /** SIC approves the supervisor's job plan or sends it back (docs §24) */
   decideJobPlan: (jobId: string, approve: boolean, note: string) => Result;
@@ -566,6 +580,37 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
     log({ kind: "plan_decided", problem: !approve, siteId: r.siteId, subjectStaffId: r.requestedBy, title: `Plan line ${approve ? "approved" : "rejected"}: ${r.summary}`, detail: note.trim() || (approve ? "Added to the plan" : ""), tab: PLAN_REQUESTS_TAB, refId: id });
     return { ok: true, id };
   }, [addPlanLine, log]);
+
+  const importPrepared = useCallback<WorkApi["importPrepared"]>((p) => {
+    if (actor.current.role !== "owner" && actor.current.role !== "super_admin") return { ok: false, error: "Only the Owner or Super Admin can import" };
+    if (p?.kind !== "sge-prepared-dprs" || p.version !== 1) return { ok: false, error: "This isn't a prepared DPR file" };
+    const w = ref.current;
+    const newBy = <T,>(list: T[] | undefined, have: Set<string>, key: (x: T) => string) => (list ?? []).filter((x) => !have.has(key(x)));
+    const items = newBy(p.serviceItems, new Set(w.serviceItems.map((x) => x.code)), (x) => x.code);
+    const lines = newBy(p.planLines, new Set(w.planLines.map((x) => x.id)), (x) => x.id);
+    const jobs = newBy(p.jobs, new Set(w.jobs.map((x) => x.id)), (x) => x.id);
+    const reports = newBy(p.reports, new Set(w.reports.map((x) => x.id)), (x) => x.id);
+    const dprs = newBy(p.dprs, new Set(w.dprs.map((x) => x.id)), (x) => x.id);
+    // Every job needs its plan line and every work line its job and report, here or in this file
+    const lineIds = new Set([...w.planLines, ...lines].map((x) => x.id));
+    const jobIds = new Set([...w.jobs, ...jobs].map((x) => x.id));
+    const reportIds = new Set([...w.reports, ...reports].map((x) => x.id));
+    const badJob = jobs.find((j) => !lineIds.has(j.planLineId));
+    if (badJob) return { ok: false, error: `Job ${badJob.jobNo} has no plan line in the file` };
+    const badEntry = dprs.find((e) => (e.jobId && !jobIds.has(e.jobId)) || (e.reportId && !reportIds.has(e.reportId)));
+    if (badEntry) return { ok: false, error: `Work line ${badEntry.id} points to a job or DPR that isn't there` };
+    setWork((s) => ({
+      ...s,
+      serviceItems: [...s.serviceItems, ...items],
+      planLines: [...s.planLines, ...lines],
+      jobs: [...s.jobs, ...jobs],
+      reports: [...s.reports, ...reports],
+      dprs: [...s.dprs, ...dprs],
+    }));
+    const added = { "service items": items.length, "plan lines": lines.length, jobs: jobs.length, DPRs: reports.length, "work lines": dprs.length };
+    auditOnly("import", "", `Imported ${p.source}: ${Object.entries(added).map(([k, v]) => `${v} ${k}`).join(", ")}`);
+    return { ok: true, added };
+  }, []);
 
   const withdrawPlanRequest = useCallback<WorkApi["withdrawPlanRequest"]>((id) => {
     const r = ref.current.planRequests.find((x) => x.id === id);
@@ -1444,8 +1489,8 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const api = useMemo<WorkApi>(
-    () => ({ work, hydrated, shared, importExcel, editExpense, receivePaint, advancePaintLifecycle, recoMonth, postMonth, setRilRef, uploadSubmission, linkSubmission, unlinkSubmission, addPlanLine, updatePlanLine, removePlanLine, decidePlanRequest, withdrawPlanRequest, markPlanRequests, startJob, decideJobPlan, adminApproveJms, adminReturnJms, addDpr, addPlanEntry, handlePpe, removeEntry, saveReport, submitReport, reviewReport, unlockReport, telegramToReport, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork, notify: log }),
-    [work, hydrated, shared, importExcel, editExpense, receivePaint, advancePaintLifecycle, recoMonth, postMonth, setRilRef, uploadSubmission, linkSubmission, unlinkSubmission, addPlanLine, updatePlanLine, removePlanLine, decidePlanRequest, withdrawPlanRequest, markPlanRequests, startJob, decideJobPlan, adminApproveJms, adminReturnJms, addDpr, addPlanEntry, handlePpe, removeEntry, saveReport, submitReport, reviewReport, unlockReport, telegramToReport, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork, log]
+    () => ({ work, hydrated, shared, importExcel, editExpense, receivePaint, advancePaintLifecycle, recoMonth, postMonth, setRilRef, uploadSubmission, linkSubmission, unlinkSubmission, addPlanLine, updatePlanLine, removePlanLine, decidePlanRequest, withdrawPlanRequest, importPrepared, markPlanRequests, startJob, decideJobPlan, adminApproveJms, adminReturnJms, addDpr, addPlanEntry, handlePpe, removeEntry, saveReport, submitReport, reviewReport, unlockReport, telegramToReport, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork, notify: log }),
+    [work, hydrated, shared, importExcel, editExpense, receivePaint, advancePaintLifecycle, recoMonth, postMonth, setRilRef, uploadSubmission, linkSubmission, unlinkSubmission, addPlanLine, updatePlanLine, removePlanLine, decidePlanRequest, withdrawPlanRequest, importPrepared, markPlanRequests, startJob, decideJobPlan, adminApproveJms, adminReturnJms, addDpr, addPlanEntry, handlePpe, removeEntry, saveReport, submitReport, reviewReport, unlockReport, telegramToReport, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork, log]
   );
   return <WorkContext.Provider value={api}>{children}</WorkContext.Provider>;
 }

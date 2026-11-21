@@ -133,6 +133,7 @@ function DprPrint() {
                 <th className={th}>Erect m³</th>
                 <th className={th}>Dismantle m³</th>
                 <th className={th}>Standing m³</th>
+                <th className={th}>Permit · scope / done · details</th>
               </tr>
             </thead>
             <tbody>
@@ -143,6 +144,7 @@ function DprPrint() {
                   <td className={`${td} text-right`}>{l.erectM3}</td>
                   <td className={`${td} text-right`}>{l.dismantleM3}</td>
                   <td className={`${td} text-right`}>{l.standingM3}</td>
+                  <td className={td}>{[l.permitNo, l.scopeM3 != null ? `${l.doneM3 ?? 0} / ${l.scopeM3} m³` : "", l.note].filter(Boolean).join(" · ")}</td>
                 </tr>
               ))}
             </tbody>

@@ -726,6 +726,13 @@ export interface DprScaffoldWorkLine {
   rackId?: string;
   bayFrom?: string;
   bayTo?: string;
+  /** From the MS-SGE daily sheet (owner, 2026-11-21): permit, job scope, done so far, times */
+  permitNo?: string;
+  scopeM3?: number;
+  doneM3?: number;
+  reportingTime?: string;
+  permitOpen?: string;
+  permitClose?: string;
   erectM3: number;
   dismantleM3: number;
   standingM3: number;

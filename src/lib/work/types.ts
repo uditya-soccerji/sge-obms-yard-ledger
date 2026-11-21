@@ -185,6 +185,12 @@ export interface DprReport {
   sicReviewedAt?: string;
   createdAt: string;
   updatedAt: string;
+  /** Brought in from the MS-SGE daily DPR sheet (owner, 2026-11-21) */
+  imported?: { source: string; at: string };
+  /** Crew headcount from the sheet when it doesn't name people (e.g. "Scaffolders" 12) */
+  headcount?: { label: string; count: number }[];
+  /** Other supervisors on the same plant DPR (the sheet has one block per plant) */
+  alsoSupervisorIds?: string[];
 }
 
 export interface DprEntry {

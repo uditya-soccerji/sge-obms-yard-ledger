@@ -306,6 +306,17 @@ export function DprForm({
             </div>
           </div>
         </div>
+        {value.imported || value.headcount?.length || value.alsoSupervisorIds?.length ? (
+          <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-sm bg-[var(--sge-paper-2)] px-3 py-2 text-xs text-[var(--sge-ink-2)]">
+            {value.imported ? <StatusPill tone="accent">Imported · {value.imported.source}</StatusPill> : null}
+            {value.alsoSupervisorIds?.length ? (
+              <span>Also on this plant: {value.alsoSupervisorIds.map((id) => state.staff.find((x) => x.id === id)?.name ?? id).join(", ")}</span>
+            ) : null}
+            {value.headcount?.length ? (
+              <span>Crew (sheet): {value.headcount.filter((h) => h.count).map((h) => `${h.count} ${h.label.toLowerCase()}`).join(" · ")}</span>
+            ) : null}
+          </div>
+        ) : null}
         <div className="mt-3">
           <Label>Note</Label>
           <Textarea
@@ -1383,6 +1394,40 @@ function ScaffoldWorkEditor({
               />
             </div>
           ))}
+          {/* Owner, 2026-11-21: what the daily sheet records per scaffold job */}
+          <div>
+            <Label htmlFor={`sw-${line.id}-permit`}>Permit no.</Label>
+            <Input id={`sw-${line.id}-permit`} className="mt-1" disabled={readOnly} value={line.permitNo ?? ""} onChange={(e) => onChange(lines.map((l, i) => (i === idx ? { ...l, permitNo: e.target.value } : l)))} />
+          </div>
+          {(
+            [
+              ["scopeM3", "Job scope m³"],
+              ["doneM3", "Done so far m³"],
+            ] as const
+          ).map(([key, label]) => (
+            <div key={key}>
+              <Label htmlFor={`sw-${line.id}-${key}`}>{label}</Label>
+              <Input id={`sw-${line.id}-${key}`} type="number" min={0} className="mt-1" disabled={readOnly} value={line[key] ?? ""} onChange={(e) => onChange(lines.map((l, i) => (i === idx ? { ...l, [key]: e.target.value === "" ? undefined : Number(e.target.value) } : l)))} />
+            </div>
+          ))}
+          <div className="sm:col-span-2 grid grid-cols-3 gap-2">
+            {(
+              [
+                ["reportingTime", "Reporting"],
+                ["permitOpen", "Permit open"],
+                ["permitClose", "Permit close"],
+              ] as const
+            ).map(([key, label]) => (
+              <div key={key}>
+                <Label htmlFor={`sw-${line.id}-${key}`}>{label}</Label>
+                <Input id={`sw-${line.id}-${key}`} type="time" className="mt-1" disabled={readOnly} value={line[key] ?? ""} onChange={(e) => onChange(lines.map((l, i) => (i === idx ? { ...l, [key]: e.target.value } : l)))} />
+              </div>
+            ))}
+          </div>
+          <div className="sm:col-span-2">
+            <Label htmlFor={`sw-${line.id}-note`}>Work details</Label>
+            <Input id={`sw-${line.id}-note`} className="mt-1" disabled={readOnly} value={line.note ?? ""} placeholder="e.g. 100 M³ = S/F erection job" onChange={(e) => onChange(lines.map((l, i) => (i === idx ? { ...l, note: e.target.value } : l)))} />
+          </div>
           {!readOnly && lines.length > 1 ? (
             <div className="flex items-end">
               <Button type="button" size="sm" variant="ghost" onClick={() => onChange(lines.filter((_, i) => i !== idx))}>

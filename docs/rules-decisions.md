@@ -521,3 +521,12 @@ Process page: "Store module — process" (Claude doc). Decisions there: reorder 
 - **Plan vs actual** (month of the To date): actual = **JMS m² where the job has a JMS, else DPR final-shade m²** (owner).
 - **Report** for whatever the filters show: **Download Excel** (Summary, By supervisor, By plant, By day / week, Plan vs actual, DPRs) and **Print / PDF** (`/print/progress?...`).
 - **Weekly report to the Owner:** every Monday an alert (Owner and Super Admin only) opens last week's report (Mon–Sun, all sites); posted once, by whichever device opens the app first that week.
+
+## 46. October 2026 DPRs from the MS-SGE daily sheets (owner, 2026-11-21)
+
+- The four tabs (Scaffolding DPR, Painting DPR, Standing scaffolding, Manpower summary) are rows per plant. They become DPRs through the owner's plant lists: **scaffolding** one supervisor per plant (Utility Old B rack → Manoj Kumar, the rest of Utility → Ajay; Coker A rack 509–521 → Bharat, other Coker areas → Sagar; PP → Pappu); **painting** one DPR per plant a day under the first-named supervisor, the others named on it ("Also on this plant"); **rope access** by location (power recovery unit → FCCU, CT-6 → Utility, HT 362 → Hydrotreater, JDY-PP1 → PP, 312 → Crude · Manu Gohil).
+- Scaffold lines now keep **permit no., job scope m³, done so far m³, reporting / permit open / close times and the work details** (they are in the sheet). DPRs keep the sheet's **crew headcount** when people aren't named; the dashboard counts it as man-days. Imported DPRs say **"Imported · MS-SGE daily DPR sheet"** and go in as submitted (not SIC-approved).
+- Painting: each location + MPS is a job on the plant's October plan line (scope from the sheet); each day's m² goes in at the stage in the details (blasting / buffing / cleaning = prep; 1st coat / primer; 2nd coat; 3rd / final / top coat = final; "painting job" with no coat = 1st coat; housekeeping-only lines go in the DPR note). "Erection/removal" with one figure counts as erection. Standing scaffolding is a standing-m³ line on that plant's scaffolding DPR.
+- MPS 2, 10, 12, 25 and "MPS not stated" are service items with the rate pending.
+- People without an EP yet (Raju, Manoj Kumar, Sujeet Mahato, the 9 rope access) are added by name; EPs come later. Ganesh = Ganesh Chandra Lakari (SIC) for FCCU painting; Chitta Sardar = Chitta Mahato; Suvodip Dawn = the sub-con Suvodeep (also CPP painting).
+- **DPR desk → Import prepared DPRs** (Owner / SA) takes the prepared file, shows what's new and adds only records not already there.

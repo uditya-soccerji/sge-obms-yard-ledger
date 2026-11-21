@@ -110,7 +110,9 @@ export function buildFacts(w: WorkData, staff: StaffMember[], from: string, to: 
     for (const s of r.scaffoldWork ?? []) {
       out.push({ ...blank, date: r.date, siteId: r.siteId, plant: P(s.plant || r.plant), supervisorId: r.submitterId, kind: "scaf", erect: s.erectM3 || 0, dism: s.dismantleM3 || 0 });
     }
-    const mandays = r.labourMarks.reduce((n, m) => n + (MAN_DAY[m.status] ?? 0), 0);
+    // Imported sheets give a headcount instead of named crew (owner, 2026-11-21)
+    const marked = r.labourMarks.reduce((n, m) => n + (MAN_DAY[m.status] ?? 0), 0);
+    const mandays = r.labourMarks.length ? marked : (r.headcount ?? []).reduce((n, h) => n + (h.count || 0), 0);
     const ppe = r.labourMarks.filter((m) => m.ppe === "damaged" || m.ppe === "due" || m.ppe === "urgent").length;
     if (mandays || ppe) out.push({ ...blank, date: r.date, siteId: r.siteId, plant: P(r.plant), supervisorId: r.submitterId, kind, mandays, ppe });
   }

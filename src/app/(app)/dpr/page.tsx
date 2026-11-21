@@ -31,6 +31,7 @@ import type { DprSubmitterType } from "@/lib/types";
 import { useWork } from "@/lib/work/store";
 import { entriesOf, isLate, reportArea } from "@/lib/work/reports";
 import { WorkExcelTransferStack } from "@/components/work/work-excel-transfer";
+import { ImportPrepared } from "@/components/dpr/import-prepared";
 
 const STATUS_TONE: Record<
   ReportStatus,
@@ -134,6 +135,7 @@ function DprDeskPage() {
       />
 
       <WorkExcelTransferStack kinds={["dprReports", "dprEntries"]} />
+      <ImportPrepared />
 
       <div className="grid gap-3 sm:grid-cols-3">
         <KpiTile label="Visible DPRs" value={String(visible.length)} />
