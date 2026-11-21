@@ -608,7 +608,8 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
     if (!input.contractorId) return { ok: false, error: "Pick the sub-contractor" };
     if (!input.location.trim()) return { ok: false, error: "Pick the area and bays" };
     if (!sup || sup.contractorId !== input.contractorId || sup.subconOwner) return { ok: false, error: "Pick a supervisor tagged with this sub-con" };
-    if (!(input.scopeM3 > 0)) return { ok: false, error: "Give the job's scope in m³" };
+    if (!(input.scopeM3 > 0)) return { ok: false, error: "Work out the job scope in the Scaffold calc (L × B × H × E)" };
+    if (!input.purpose.trim()) return { ok: false, error: "Pick at least one kind of work it's for" };
     if (!input.targetDate) return { ok: false, error: "Give the target date" };
     if (input.platformPlanks != null && !(Number.isInteger(input.platformPlanks) && input.platformPlanks >= 0)) return { ok: false, error: "Platform: give the number of planks / plates" };
     const month = currentMonthOf(w, input.siteId);

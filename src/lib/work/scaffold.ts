@@ -13,7 +13,8 @@ export const SCAFFOLD_TYPES: { id: ScaffoldType; label: string }[] = [
 export const PLANK_M2 = 0.6;
 export const platformM2 = (planks?: number) => Math.round((planks ?? 0) * PLANK_M2 * 100) / 100;
 
-export const SCAFFOLD_PURPOSES = ["Blasting & painting", "Insulation", "CUI inspection", "Maintenance / mechanical", "Other"];
+/** Which work a scaffold serves; several may apply, Blasting & painting first (owner, 2026-11-21) */
+export const SCAFFOLD_PURPOSES = ["Blasting & painting", "Insulation", "CUI inspection", "Maintenance / mechanical", "Welding / fabrication", "Inspection / NDT"];
 
 export type ScaffoldStatus = "pending" | "rejected" | "erection" | "standing" | "removal" | "closed";
 export const STATUS_LABEL: Record<ScaffoldStatus, string> = {
@@ -30,16 +31,19 @@ export function scaffoldProgress(job: ScaffoldJob, reports: DprReport[]) {
   let erected = 0;
   let removed = 0;
   let last = "";
+  // Owner, 2026-11-21: the permit comes from the DPR, not the job form
+  const permits: string[] = [];
   for (const r of reports) {
     if (r.status !== "submitted" && r.status !== "sic_approved") continue;
     for (const l of r.scaffoldWork ?? []) {
       if (l.scaffoldJobId !== job.id) continue;
       erected += l.erectM3 || 0;
       removed += l.dismantleM3 || 0;
+      if (l.permitNo && !permits.includes(l.permitNo)) permits.push(l.permitNo);
       if (r.date > last) last = r.date;
     }
   }
-  return { erected, removed, last };
+  return { erected, removed, last, permits };
 }
 
 export function scaffoldStatus(job: ScaffoldJob, p: { erected: number; removed: number }): ScaffoldStatus {
