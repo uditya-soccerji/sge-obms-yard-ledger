@@ -10,7 +10,9 @@ export type RoleId =
   | "supervisor"
   | "store"
   | "safety"
-  | "labourer";
+  | "labourer"
+  /** A sub-contractor (owner, 2026-11-21): sees only his own supervisors, crew and DPRs; view only */
+  | "subcontractor";
 
 export type ModuleId =
   | "owner"
@@ -65,6 +67,8 @@ export interface UserAccount {
   plantIds: string[];
   staffId?: string;
   labourerId?: string;
+  /** Sub-contractor login (owner, 2026-11-21): the sub-con firm in Master Data → Contractors */
+  contractorId?: string;
   permissionOverrides: PermissionOverride[];
   active: boolean;
 }
@@ -306,6 +310,21 @@ export interface PlaceRequest {
   decidedNote?: string;
   /** The rack it went into */
   rackId?: string;
+}
+
+/** A sub-contractor's request for a change (owner, 2026-11-21): his login is view only */
+export interface SubconRequest {
+  id: string;
+  contractorId: string;
+  siteId: string;
+  text: string;
+  requestedBy: string;
+  requestedByName: string;
+  requestedAt: string;
+  status: "pending" | "done" | "declined";
+  decidedBy?: string;
+  decidedAt?: string;
+  decidedNote?: string;
 }
 
 export interface PlantDetail {
@@ -1036,6 +1055,8 @@ export interface AppState {
   plantRacks: PlantRack[];
   /** Places asked for from the DPR, waiting for Owner / Super Admin */
   placeRequests: PlaceRequest[];
+  /** Change requests from sub-contractor logins, for Owner / Super Admin */
+  subconRequests: SubconRequest[];
   /** Default daily wages by trade × skill × experience (docs §1). */
   wageBands: WageBand[];
   wageLedger: WageLedgerEntry[];

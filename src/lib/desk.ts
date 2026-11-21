@@ -157,6 +157,7 @@ const ROLE_PILLS: Record<RoleId, OpsPill[]> = {
     { id: "requests", label: "Requests", module: "requests" },
   ],
   labourer: [],
+  subcontractor: [],
 };
 
 /** Owner and Super Admin see every sheet; Admin keeps trades and the rate book (M3, rules §2). */

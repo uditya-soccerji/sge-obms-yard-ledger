@@ -796,6 +796,8 @@ function UsersSheet({ showInactive }: { showInactive: boolean }) {
     (l) => l.active && siteIds.includes(l.siteId) && !linkedLabourers.has(l.id)
   );
   const isLabourerRole = role === "labourer";
+  // Owner, 2026-11-21: a sub-contractor login points at the sub-con firm, not a person in the registers
+  const isSubconRole = role === "subcontractor";
   // Keep the pick valid as role / sites change
   const linkValue = isLabourerRole
     ? labourerChoices.some((l) => l.id === link) ? link : ""
@@ -833,7 +835,7 @@ function UsersSheet({ showInactive }: { showInactive: boolean }) {
   return (
     <Panel>
       <div className="mb-4 grid gap-2 rounded-sm border border-[var(--sge-line)] bg-[var(--sge-linen)] p-3 sm:grid-cols-4">
-        {!isLabourerRole ? (
+        {!isLabourerRole && !isSubconRole ? (
           // Owner, 2026-11-18: every user has an EP — start from it; the profile is filled from what the app already knows
           <div className="sm:col-span-4">
             <Label>EP number (RIL gate pass) — start here</Label>
@@ -936,7 +938,24 @@ function UsersSheet({ showInactive }: { showInactive: boolean }) {
             Tick the plants this person works at; leave &quot;All plants&quot; for every plant on that site.
           </p>
         </div>
-        <div className="sm:col-span-2">
+        {isSubconRole ? (
+          <div className="sm:col-span-2">
+            <Label htmlFor="seat-subcon">Sub-contractor firm</Label>
+            <select
+              id="seat-subcon"
+              className="mt-1 h-9 w-full rounded-sm border border-[var(--sge-line)] bg-[var(--sge-paper)] px-2 text-sm"
+              value={contractorId}
+              onChange={(e) => setContractorId(e.target.value)}
+            >
+              <option value="">Pick the sub-con…</option>
+              {subContractors.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            <p className="mt-1 text-[11px] text-[var(--sge-ink-3)]">
+              View only. Sees the supervisors tagged with this sub-con, their crew, attendance and DPRs on the sites ticked above.
+            </p>
+          </div>
+        ) : null}
+        <div className={cn("sm:col-span-2", isSubconRole && "hidden")}>
           <Label>{isLabourerRole ? "Labourer" : "Staff record"}</Label>
           <select
             className="mt-1 h-9 w-full rounded-sm border border-[var(--sge-line)] bg-[var(--sge-paper)] px-2 text-sm"
@@ -997,6 +1016,30 @@ function UsersSheet({ showInactive }: { showInactive: boolean }) {
             size="sm"
             disabled={!canEdit}
             onClick={async () => {
+              if (isSubconRole) {
+                if (!contractorId) return setMsg({ ok: false, text: "Pick the sub-contractor firm" });
+                const sub = {
+                  username: username.trim().toLowerCase(),
+                  password,
+                  name: name.trim(),
+                  roles: [role],
+                  siteIds,
+                  plantIds: [],
+                  permissionOverrides: [],
+                  active: true,
+                  contractorId,
+                };
+                const bad = checkSeat(sub, state.users);
+                if (bad) return setMsg({ ok: false, text: bad });
+                const made = await createUser(sub);
+                if (!made.ok) return setMsg({ ok: false, text: made.error ?? "Failed" });
+                setMsg({ ok: true, text: `Created @${sub.username} · sub-con view only · ${siteCodes(state, siteIds)}` });
+                setUsername("");
+                setName("");
+                setPassword("");
+                setContractorId("");
+                return;
+              }
               // Owner, 2026-11-18: "new" with an EP that already has a staff record (no login) merges into it
               const mergeInto = !isLabourerRole && linkValue === "new" && epOwner && !epOwnerLogin ? epOwner.id : null;
               const linkValue2 = mergeInto ?? linkValue;

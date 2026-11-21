@@ -18,7 +18,7 @@ function DprPrint() {
   const { work, hydrated } = useWork();
   const r = work.reports.find((x) => x.id === id);
   const role = state.currentRole;
-  const mayRead = !!r && (r.submitterId === state.currentUserId || ["sic", "admin", "owner", "super_admin", "hr"].includes(role ?? ""));
+  const mayRead = !!r && (r.submitterId === state.currentUserId || ["sic", "admin", "owner", "super_admin", "hr", "subcontractor"].includes(role ?? ""));
 
   if (!hydrated) return <p className="p-8 text-sm">Loading…</p>;
   if (!currentAccount) return <p className="p-8 text-sm">Sign in first, then open the PDF again from the DPR.</p>;

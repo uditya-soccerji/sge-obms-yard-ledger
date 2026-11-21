@@ -52,6 +52,8 @@ export interface Filters {
   plant: string;
   supervisorId: string;
   type: TypeFilter;
+  /** Only these supervisors (a sub-contractor login: his own people) */
+  supervisorIds?: string[];
 }
 
 export interface WorkData {
@@ -123,6 +125,7 @@ export function matches(f: Fact, x: Filters): boolean {
   if (x.siteIds.length && !x.siteIds.includes(f.siteId)) return false;
   if (x.plant && f.plant !== P(x.plant)) return false;
   if (x.supervisorId && f.supervisorId !== x.supervisorId) return false;
+  if (x.supervisorIds && !x.supervisorIds.includes(f.supervisorId)) return false;
   if (x.type === "all") return true;
   if (x.type === "blast" || x.type === "paint") return f.kind !== "scaf";
   return f.kind === x.type;
@@ -258,9 +261,14 @@ export interface PlanRow {
   fromJms: number;
 }
 
-export function planVsActual(w: WorkData, month: string, x: Pick<Filters, "siteIds" | "plant" | "supervisorId">): PlanRow[] {
+export function planVsActual(w: WorkData, month: string, x: Pick<Filters, "siteIds" | "plant" | "supervisorId" | "supervisorIds">): PlanRow[] {
   const lines = w.planLines.filter(
-    (l) => l.month === month && (!x.siteIds.length || x.siteIds.includes(l.siteId)) && (!x.plant || P(l.plant) === P(x.plant)) && (!x.supervisorId || l.supervisorId === x.supervisorId)
+    (l) =>
+      l.month === month &&
+      (!x.siteIds.length || x.siteIds.includes(l.siteId)) &&
+      (!x.plant || P(l.plant) === P(x.plant)) &&
+      (!x.supervisorId || l.supervisorId === x.supervisorId) &&
+      (!x.supervisorIds || x.supervisorIds.includes(l.supervisorId))
   );
   const entries = effectiveEntries(w.dprs).filter((e) => e.stage === "final");
   const bySup = new Map<string, PlanRow>();

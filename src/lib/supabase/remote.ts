@@ -16,6 +16,7 @@ interface ProfileRow {
   plant_ids: string[];
   staff_id: string | null;
   labourer_id: string | null;
+  contractor_id?: string | null;
   permission_overrides: PermissionOverride[];
   active: boolean;
 }
@@ -45,6 +46,7 @@ function toAccount(p: ProfileRow): UserAccount {
     plantIds: p.plant_ids,
     staffId: p.staff_id ?? undefined,
     labourerId: p.labourer_id ?? undefined,
+    contractorId: p.contractor_id ?? undefined,
     permissionOverrides: p.permission_overrides ?? [],
     active: p.active,
   };
@@ -143,6 +145,7 @@ export async function remoteCreateUser(
     plant_ids: input.plantIds,
     staff_id: input.staffId ?? null,
     labourer_id: input.labourerId ?? null,
+    contractor_id: input.contractorId ?? null,
     permission_overrides: input.permissionOverrides,
   });
   if (!r.ok || !r.profile) return { ok: false, error: r.ok ? "Create failed" : r.error };
@@ -157,6 +160,7 @@ export async function remoteUpdateUser(id: string, patch: Partial<UserAccount>) 
   if (patch.plantIds !== undefined) map.plant_ids = patch.plantIds;
   if (patch.staffId !== undefined) map.staff_id = patch.staffId ?? null;
   if (patch.labourerId !== undefined) map.labourer_id = patch.labourerId ?? null;
+  if (patch.contractorId !== undefined) map.contractor_id = patch.contractorId ?? null;
   if (patch.permissionOverrides !== undefined)
     map.permission_overrides = patch.permissionOverrides;
   if (patch.active !== undefined) map.active = patch.active;

@@ -5,12 +5,14 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 const ROLES = [
   "super_admin", "owner", "sic", "hr", "admin",
   "finance", "supervisor", "store", "safety", "labourer",
+  // Owner, 2026-11-21: view-only sub-contractor login, linked to its sub-con (contractor_id)
+  "subcontractor",
 ];
 // Same rule as src/lib/users.ts USERNAME_RE (docs/rules-decisions.md §2) — keep the two in step
 const USERNAME_RE = /^[a-z0-9.]{3,20}$/;
 const PATCHABLE = [
   "name", "roles", "site_ids", "plant_ids", "staff_id",
-  "labourer_id", "permission_overrides", "active",
+  "labourer_id", "contractor_id", "permission_overrides", "active",
 ];
 
 const cors = {
@@ -103,6 +105,7 @@ Deno.serve(async (req) => {
       plant_ids: body.plant_ids ?? [],
       staff_id: body.staff_id ?? null,
       labourer_id: body.labourer_id ?? null,
+      contractor_id: body.contractor_id ?? null,
       permission_overrides: body.permission_overrides ?? [],
       active: true,
     };

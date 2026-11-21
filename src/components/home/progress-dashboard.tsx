@@ -57,7 +57,10 @@ export function ProgressDashboard() {
     if (period === "fortnight") return [from15, addDays(from15, 14)];
     return custom[0] <= custom[1] ? custom : [custom[1], custom[0]];
   }, [period, day, from15, custom]);
-  const filters: Filters = { from, to, siteIds, plant, supervisorId: own || sup, type };
+  // Sub-contractor login: only his own supervisors (owner, 2026-11-21)
+  const subconOf = role === "subcontractor" ? fullState.users.find((u) => u.id === state.currentAccountId)?.contractorId ?? "-" : null;
+  const subconIds = subconOf ? fullState.staff.filter((x) => x.contractorId === subconOf).map((x) => x.id) : undefined;
+  const filters: Filters = { from, to, siteIds, plant, supervisorId: own || sup, type, ...(subconIds ? { supervisorIds: subconIds } : {}) };
   const [pFrom, pTo] = previousRange(from, to);
 
   const facts = useMemo(() => buildFacts(work, fullState.staff, pFrom, to), [work, fullState.staff, pFrom, to]);
@@ -78,7 +81,7 @@ export function ProgressDashboard() {
     ? fullState.sites.find((x) => x.id === siteIds[0])?.plants ?? []
     : [...new Set(fullState.sites.filter((x) => x.enabled).flatMap((x) => x.plants))].sort();
   const supervisors = fullState.staff.filter(
-    (x) => x.role === "supervisor" && x.active !== false && x.supervisorType !== "safety" && (!siteIds.length || worksAt(x, siteIds[0]))
+    (x) => x.role === "supervisor" && x.active !== false && x.supervisorType !== "safety" && (!siteIds.length || worksAt(x, siteIds[0])) && (!subconIds || subconIds.includes(x.id))
   );
   // DPRs expected from supervisors with a crew, of the job type picked
   const typeOk = (id: string) => {

@@ -530,3 +530,12 @@ Process page: "Store module — process" (Claude doc). Decisions there: reorder 
 - MPS 2, 10, 12, 25 and "MPS not stated" are service items with the rate pending.
 - People without an EP yet (Raju, Manoj Kumar, Sujeet Mahato, the 9 rope access) are added by name; EPs come later. Ganesh = Ganesh Chandra Lakari (SIC) for FCCU painting; Chitta Sardar = Chitta Mahato; Suvodip Dawn = the sub-con Suvodeep (also CPP painting).
 - **DPR desk → Import prepared DPRs** (Owner / SA) takes the prepared file, shows what's new and adds only records not already there.
+
+## 47. Sub-contractor login (owner, 2026-11-21)
+
+- New role **Sub-contractor (view only)**. The login is linked to a sub-con firm (Master Data → Contractors), not to a staff record or EP. Made in Users / seats: role Sub-contractor → pick the firm and the sites.
+- He sees **only his own people**: supervisors whose staff record is tagged with his sub-con, their crew (labourers of his sub-con), attendance, DPRs (submitted / approved; not drafts), jobs and plan lines, on his sites. His Home: his supervisors (crew, DPRs this week), their DPRs (View opens the printed DPR) and the progress dashboard limited to them. Nothing else (no Work, Operations, Master Data, rates, wages or other sub-cons).
+- **View only.** He can't add or change data. **Request a change** on his Home sends a request to Owner / Super Admin; they see "Requests from sub-contractors" on their Home and **Mark done** or **Decline** (with a reason). He sees the answer under his requests.
+- Enforced in the database (migration 015): his reads are limited to his sub-con's records, and his only writes are his own requests and his read marks.
+- Mintu (sub-con "Mintu Gupta") gets such a login. The existing "minut" login stays Krishna Mohan Kumar Das's supervisor login (EP PP5915640912, under Mintu); it is deactivated.
+- The 386 imported October DPRs were marked SIC approved (owner): past records, not for review.

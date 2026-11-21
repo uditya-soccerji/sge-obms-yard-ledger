@@ -21,7 +21,7 @@ function ProgressPrint() {
   if (!hydrated) return <p className="p-8 text-sm">Loading…</p>;
   if (!currentAccount) return <p className="p-8 text-sm">Sign in first, then open the report again from Home.</p>;
   const boss = ["owner", "super_admin", "sic", "admin"].includes(role ?? "");
-  if (!boss && role !== "supervisor") return <p className="p-8 text-sm">Your role doesn&apos;t have the progress report.</p>;
+  if (!boss && role !== "supervisor" && role !== "subcontractor") return <p className="p-8 text-sm">Your role doesn&apos;t have the progress report.</p>;
 
   const day = today();
   const f: Filters = {

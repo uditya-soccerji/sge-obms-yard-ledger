@@ -161,6 +161,7 @@ import type {
   WageLedgerEntry,
   PlantRack,
   PlaceRequest,
+  SubconRequest,
 } from "./types";
 import { seedWageBands } from "./wages";
 
@@ -348,6 +349,10 @@ interface StoreApi {
   requestPlace: (input: Pick<PlaceRequest, "siteId" | "plant" | "location" | "rack" | "bays" | "note">) => { ok: boolean; error?: string };
   /** Owner / SA: add the asked-for place to Racks & bays, or say no (a reason is needed) */
   decidePlace: (id: string, add: boolean, note?: string) => { ok: boolean; error?: string };
+  /** Sub-contractor login: ask Owner / Super Admin for a change (his login can't make it) */
+  requestSubconChange: (text: string) => { ok: boolean; error?: string };
+  /** Owner / SA: mark a sub-con request done, or decline it with a reason */
+  decideSubconRequest: (id: string, done: boolean, note?: string) => { ok: boolean; error?: string };
   /** New staff record (to link a login to); returns its id, or "" if not allowed */
   addStaff: (input: Omit<StaffMember, "id">) => string;
   /** HR's staff list (round 2, §27): edit, deactivate / activate */
@@ -399,7 +404,7 @@ const StoreContext = createContext<StoreApi | null>(null);
 const OPS_SHARED = [
   "equipment", "equipmentRequests", "crewRequests", "kitLots", "kitIssues", "equipmentReturns", "storeItems", "storeMoves",
   "wageChangeRequests", "masterChangeRequests", "safetyDays", "safetyObservations", "leaves", "advances", "vendorBills", "wageLedger",
-  "workPlans", "transfers", "compliance", "rateCards", "rateLines", "tradeCatalogue", "plantRacks", "placeRequests", "wageBands", "financeAlerts", "telegramDrafts", "vendors",
+  "workPlans", "transfers", "compliance", "rateCards", "rateLines", "tradeCatalogue", "plantRacks", "placeRequests", "subconRequests", "wageBands", "financeAlerts", "telegramDrafts", "vendors",
 ] as const satisfies readonly (keyof AppState)[];
 /** Of those, the ones whose built-in records are demo data (the rest — store items, rate book, trades, wage bands — are real lists) */
 const OPS_SHARED_DEMO = ["equipment", "equipmentRequests", "workPlans", "safetyDays", "compliance", "transfers", "vendors", "wageLedger", "acplPunches", "acplMatches"];
@@ -511,6 +516,7 @@ function migrateState(parsed: Partial<AppState>): AppState {
     // Racks & bays (owner, 2026-11-19): the shared database is the truth once signed in
     plantRacks: parsed.plantRacks?.length ? parsed.plantRacks : seed.plantRacks,
     placeRequests: parsed.placeRequests ?? [],
+    subconRequests: parsed.subconRequests ?? [],
     wageBands: (() => {
       const fromSave = parsed.wageBands ?? [];
       const seeded = seed.wageBands?.length ? seed.wageBands : seedWageBands();
@@ -2933,6 +2939,45 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     return { ok: true };
   }, []);
 
+  const requestSubconChange = useCallback((text: string) => {
+    const cur = stateRef.current;
+    const account = cur.users.find((u) => u.id === cur.currentAccountId);
+    if (cur.currentRole !== "subcontractor" || !account?.contractorId) return { ok: false, error: "Only a sub-contractor login asks here" };
+    const t = text.trim();
+    if (t.length < 5) return { ok: false, error: "Write what needs changing" };
+    const req: SubconRequest = {
+      id: uid("scr"),
+      contractorId: account.contractorId,
+      siteId: cur.currentSiteId,
+      text: t.slice(0, 1000),
+      requestedBy: account.id,
+      requestedByName: account.name || account.username,
+      requestedAt: new Date().toISOString(),
+      status: "pending",
+    };
+    setState((s) => ({ ...s, subconRequests: [req, ...s.subconRequests] }));
+    return { ok: true };
+  }, []);
+
+  const decideSubconRequest = useCallback((id: string, done: boolean, note?: string) => {
+    const cur = stateRef.current;
+    if (cur.currentRole !== "owner" && cur.currentRole !== "super_admin") return { ok: false, error: "Only the Owner or Super Admin decides these" };
+    const r = cur.subconRequests.find((x) => x.id === id);
+    if (!r || r.status !== "pending") return { ok: false, error: "This request isn't waiting" };
+    if (!done && !note?.trim()) return { ok: false, error: "Give a reason so the sub-con knows why" };
+    const account = cur.users.find((u) => u.id === cur.currentAccountId);
+    setState((s) => {
+      const next = {
+        ...s,
+        subconRequests: s.subconRequests.map((x) =>
+          x.id === id ? { ...x, status: done ? ("done" as const) : ("declined" as const), decidedBy: account?.name || account?.username || cur.currentRole || "", decidedAt: new Date().toISOString(), ...(note?.trim() ? { decidedNote: note.trim() } : {}) } : x
+        ),
+      };
+      return { ...next, auditLog: [makeAudit(next, "master", done ? "update" : "reject", `Sub-con request from ${r.requestedByName} ${done ? "done" : "declined"}: ${r.text.slice(0, 80)}`), ...s.auditLog] };
+    });
+    return { ok: true };
+  }, []);
+
   const addStaff = useCallback((input: Omit<StaffMember, "id">) => {
     const cur = stateRef.current;
     // Round 2 (§27): HR keeps staff records too
@@ -3517,6 +3562,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       importPlantRacks,
       requestPlace,
       decidePlace,
+      requestSubconChange,
+      decideSubconRequest,
       assignCrew,
       removeFromCrew,
       requestCrew,
@@ -3611,6 +3658,8 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       importPlantRacks,
       requestPlace,
       decidePlace,
+      requestSubconChange,
+      decideSubconRequest,
       assignCrew,
       removeFromCrew,
       requestCrew,

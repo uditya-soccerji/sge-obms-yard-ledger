@@ -144,6 +144,11 @@ const ROLE_MATRIX: Record<RoleId, Partial<Record<ModuleId, PermissionAction[]>>>
   labourer: {
     labourer: ["view"],
   },
+  // Owner, 2026-11-21: like the SIC but view only, and only his own supervisors' work
+  subcontractor: {
+    dpr: ["view"],
+    crew: ["view"],
+  },
 };
 
 export function roleHas(role: RoleId, module: ModuleId, action: PermissionAction): boolean {

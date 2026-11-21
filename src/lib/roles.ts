@@ -91,6 +91,14 @@ export const ROLES: RoleMeta[] = [
     home: "/home",
     accent: "bg-[var(--sge-ok)]",
   },
+  {
+    id: "subcontractor",
+    label: "Sub-contractor (view only)",
+    short: "Sub-con",
+    blurb: "His own supervisors, crew, attendance and DPRs on his sites. View only; changes go to Owner / Super Admin as a request.",
+    home: "/home",
+    accent: "bg-[var(--sge-steel)]",
+  },
 ];
 
 export function roleMeta(id: RoleId) {

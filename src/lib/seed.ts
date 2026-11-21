@@ -1041,6 +1041,7 @@ export function createSeedState(): AppState {
     tradeCatalogue: SEED_TRADE_CATALOGUE.map((t) => ({ ...t, siteId: null })),
     plantRacks: SEED_PLANT_RACKS,
     placeRequests: [],
+    subconRequests: [],
     wageBands: seedWageBands(),
     masterCatalog: seedMasterCatalog(),
     wageLedger: [
