@@ -21,7 +21,6 @@ export const attendanceLabel = (s: AttendanceStatus) => ATTENDANCE_OPTIONS.find(
 /** Shift (docs §4): 08:00–18:00. */
 export const SHIFT_START = "08:00";
 export const SHIFT_END = "18:00";
-const SHIFT_MINUTES = 8 * 60;
 
 export type DayMark = {
   status: AttendanceStatus;
@@ -57,20 +56,12 @@ export function otHours(inTime?: string, outTime?: string): number {
 }
 
 /**
- * Share of a normal day that is payable (docs §4, §17). Hours inside the
- * shift ÷ 8 when both times are set (capped at 1). Half day with no times is
- * 0.5; present / overtime with no times is 1. Absent / leave / weekly off is 0.
+ * Share of a normal day that is payable, from the attendance status only (owner, 2026-11-21).
  */
 export function payableFraction(mark: DayMark): number {
+  // Owner, 2026-11-21: the status decides the day — present / overtime a full day, half day 0.5,
+  // absent / leave / off nothing. In / out times are kept as recorded and only give the OT hours.
   if (UNPAID.includes(mark.status)) return 0;
-  const a = minutesOf(mark.inTime);
-  const b = minutesOf(mark.outTime);
-  if (a != null && b != null && b > a) {
-    const start = Math.max(a, minutesOf(SHIFT_START)!);
-    const end = Math.min(b, minutesOf(SHIFT_END)!);
-    if (end <= start) return 0;
-    return Math.min(1, (end - start) / SHIFT_MINUTES);
-  }
   if (mark.status === "half") return 0.5;
   return 1;
 }
