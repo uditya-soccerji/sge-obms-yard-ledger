@@ -410,8 +410,21 @@ export interface ScaffoldJob {
   createdAt: string;
 }
 
+/** A sub-con's scaffolding material, in m³ (owner, 2026-11-21): issued to him or returned */
+export interface ScaffoldMaterialEntry {
+  id: string;
+  contractorId: string;
+  date: string;
+  kind: "issued" | "returned";
+  m3: number;
+  note?: string;
+  by: string;
+  at: string;
+}
+
 export interface WorkState {
   serviceItems: ServiceItem[];
+  scaffoldMaterial?: ScaffoldMaterialEntry[];
   scaffoldJobs?: ScaffoldJob[];
   scaffoldPlanLines?: ScaffoldPlanLine[];
   workOrders: WorkOrder[];

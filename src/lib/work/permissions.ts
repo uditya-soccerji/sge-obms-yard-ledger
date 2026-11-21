@@ -22,6 +22,7 @@ export type WorkRights = ReturnType<typeof workRights>;
 
 /** Work tabs a role sees. The Store Keeper only works the paint stock. */
 export function workTabsFor(role: RoleId | null | undefined): string[] | "all" {
-  if (role === "store") return ["paint"];
+  // Owner, 2026-11-21: the store also records sub-cons' scaffolding material (Work → Scaffolding)
+  if (role === "store") return ["paint", "scaffold"];
   return "all";
 }

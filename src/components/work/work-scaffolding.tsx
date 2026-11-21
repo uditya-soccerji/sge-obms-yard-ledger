@@ -5,7 +5,7 @@
  * scaffolding plan line in the background. The jobs list follows each job from the DPRs:
  * Erection → Standing → Removal → Closed.
  */
-import { useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { EmptyState, KpiTile, Panel, StatusPill } from "@/components/shared/ui-bits";
 import { PlacePicker, type Place } from "@/components/shared/place-picker";
 import { Button } from "@/components/ui/button";
@@ -15,7 +15,7 @@ import { ALL_SITES, entrySiteId, worksAt } from "@/lib/site-scope";
 import { scaffoldVolume } from "@/lib/paint-calc";
 import { useStore } from "@/lib/store";
 import { today } from "@/lib/today";
-import { PLANK_M2, platformM2, typeLabel, SCAFFOLD_PURPOSES, SCAFFOLD_TYPES, STATUS_LABEL, scaffoldProgress, scaffoldStatus, type ScaffoldStatus } from "@/lib/work/scaffold";
+import { PLANK_M2, platformM2, subconMaterial, typeLabel, SCAFFOLD_PURPOSES, SCAFFOLD_TYPES, STATUS_LABEL, scaffoldProgress, scaffoldStatus, type ScaffoldStatus } from "@/lib/work/scaffold";
 import { useWork } from "@/lib/work/store";
 import type { ScaffoldType } from "@/lib/work/types";
 import { cn } from "@/lib/utils";
@@ -27,7 +27,7 @@ const TONE: Record<ScaffoldStatus, "default" | "ok" | "warn" | "crit" | "accent"
 
 export function WorkScaffolding() {
   const { state, fullState } = useStore();
-  const { work, startScaffoldJob, decideScaffoldJob, closeScaffoldJob } = useWork();
+  const { work, startScaffoldJob, decideScaffoldJob, closeScaffoldJob, addScaffoldMaterial, removeScaffoldMaterial } = useWork();
   const role = state.currentRole;
   const canStart = role === "sic" || role === "owner" || role === "super_admin" || role === "admin";
   const canDecide = role === "sic" || role === "owner" || role === "super_admin";
@@ -235,6 +235,16 @@ export function WorkScaffolding() {
               <p className="mt-1 text-xs text-[var(--sge-ink-3)]">The permit number goes on the DPR line when the work is reported.</p>
             </div>
           </div>
+          {con && scopeM3 ? (() => {
+            const m = subconMaterial(con, work.scaffoldMaterial ?? [], work.scaffoldJobs ?? [], work.reports);
+            return m.issued === 0 ? (
+              <p className="mt-2 text-xs text-[var(--sge-warn)]">No scaffolding material is recorded for {firm(con)} yet (see Sub-con material below).</p>
+            ) : scopeM3 > m.free ? (
+              <p className="mt-2 text-xs font-semibold text-[var(--sge-warn)]">{firm(con)} has {fmt(m.free)} m³ of material free; this job needs {fmt3(scopeM3)} m³. You can still start it.</p>
+            ) : (
+              <p className="mt-2 text-xs text-[var(--sge-ink-3)]">{firm(con)} has {fmt(m.free)} m³ of material free.</p>
+            );
+          })() : null}
           <div className="mt-3 flex flex-wrap items-center gap-3">
             <Button
               onClick={() => {
@@ -318,8 +328,8 @@ export function WorkScaffolding() {
                     <td className="text-right tabular-nums">{fmt(p.removed)}</td>
                     <td><StatusPill tone={TONE[status]}>{STATUS_LABEL[status]}</StatusPill>{j.approvalNote ? <div className="text-xs text-[var(--sge-ink-3)]">{j.approvalNote}</div> : null}</td>
                     <td className="whitespace-nowrap text-right">
-                      {canStart && (status === "standing" || status === "removal" || status === "erection") ? <Button size="sm" variant="ghost" onClick={() => closeScaffoldJob(j.id, true)}>Close</Button> : null}
-                      {canStart && status === "closed" ? <Button size="sm" variant="ghost" onClick={() => closeScaffoldJob(j.id, false)}>Reopen</Button> : null}
+                      {canStart && (status === "standing" || status === "removal" || status === "erection") ? <Button size="sm" variant="ghost" onClick={() => closeScaffoldJob(j.id, true)}>Mark removal complete</Button> : null}
+                      {canStart && j.closedAt ? <Button size="sm" variant="ghost" onClick={() => closeScaffoldJob(j.id, false)}>Reopen</Button> : null}
                     </td>
                   </tr>
                 ))}
@@ -328,6 +338,127 @@ export function WorkScaffolding() {
           </div>
         )}
       </Panel>
+
+      <MaterialPanel
+        canAdd={canStart || role === "store"}
+        canRemove={role === "owner" || role === "super_admin"}
+        contractors={fullState.masterCatalog.contractors.filter((c) => c.active && fullState.staff.some((x) => x.contractorId === c.id && x.supervisorType === "scaffolding"))}
+        entries={work.scaffoldMaterial ?? []}
+        stat={(id) => subconMaterial(id, work.scaffoldMaterial ?? [], work.scaffoldJobs ?? [], work.reports)}
+        onAdd={addScaffoldMaterial}
+        onRemove={removeScaffoldMaterial}
+      />
     </div>
+  );
+}
+
+/** Owner, 2026-11-21: each sub-con's scaffolding material, in m³ — issued, returned, in use on jobs, free */
+function MaterialPanel({
+  canAdd, canRemove, contractors, entries, stat, onAdd, onRemove,
+}: {
+  canAdd: boolean;
+  canRemove: boolean;
+  contractors: { id: string; name: string }[];
+  entries: import("@/lib/work/types").ScaffoldMaterialEntry[];
+  stat: (id: string) => ReturnType<typeof subconMaterial>;
+  onAdd: ReturnType<typeof useWork>["addScaffoldMaterial"];
+  onRemove: ReturnType<typeof useWork>["removeScaffoldMaterial"];
+}) {
+  const [con, setCon] = useState("");
+  const [kind, setKind] = useState<"issued" | "returned">("issued");
+  const [qty, setQty] = useState("");
+  const [date, setDate] = useState(today());
+  const [note, setNote] = useState("");
+  const [open, setOpen] = useState<string | null>(null);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  return (
+    <Panel>
+      <h3 className="mb-1 font-heading text-sm font-bold">Sub-con scaffolding material</h3>
+      <p className="mb-3 text-xs text-[var(--sge-ink-3)]">What each sub-con holds, in m³. In use = standing on his jobs now (erected − removed, from DPRs). Free = held − in use.</p>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[720px] text-sm [&_td]:px-3 [&_td]:py-2 [&_th]:whitespace-nowrap [&_th]:px-3 [&_th]:py-2">
+          <thead className="text-left text-[10px] uppercase tracking-wider text-[var(--sge-ink-3)]">
+            <tr><th>Sub-con</th><th className="text-right">Issued</th><th className="text-right">Returned</th><th className="text-right">Held</th><th className="text-right">In use on jobs</th><th className="text-right">Free</th><th /></tr>
+          </thead>
+          <tbody>
+            {contractors.map((c) => {
+              const m = stat(c.id);
+              const list = entries.filter((e) => e.contractorId === c.id).sort((a, b) => b.date.localeCompare(a.date));
+              return (
+                <React.Fragment key={c.id}>
+                  <tr className="border-t border-[var(--sge-line)]">
+                    <td className="font-semibold">{c.name}</td>
+                    <td className="text-right tabular-nums">{fmt(m.issued)}</td>
+                    <td className="text-right tabular-nums">{fmt(m.returned)}</td>
+                    <td className="text-right tabular-nums">{fmt(m.held)}</td>
+                    <td className="text-right tabular-nums">{fmt(m.inUse)}</td>
+                    <td className={cn("text-right font-semibold tabular-nums", m.free < 0 && "text-[var(--sge-crit)]")}>{fmt(m.free)} m³</td>
+                    <td className="text-right">{list.length ? <button type="button" className="text-xs underline" onClick={() => setOpen(open === c.id ? null : c.id)}>{open === c.id ? "Hide" : `${list.length} entries`}</button> : null}</td>
+                  </tr>
+                  {open === c.id ? (
+                    <tr><td colSpan={7} className="bg-[var(--sge-paper-2)]">
+                      <ul className="space-y-1 text-xs">
+                        {list.map((e) => (
+                          <li key={e.id} className="flex flex-wrap items-center gap-2">
+                            <span className="font-mono">{e.date}</span>
+                            <StatusPill tone={e.kind === "issued" ? "ok" : "warn"}>{e.kind === "issued" ? "Issued" : "Returned"}</StatusPill>
+                            <span className="tabular-nums">{fmt(e.m3)} m³</span>
+                            {e.note ? <span className="text-[var(--sge-ink-3)]">{e.note}</span> : null}
+                            <span className="text-[var(--sge-ink-3)]">· {e.by}</span>
+                            {canRemove ? <button type="button" className="ml-auto underline" onClick={() => onRemove(e.id)}>Remove</button> : null}
+                          </li>
+                        ))}
+                      </ul>
+                    </td></tr>
+                  ) : null}
+                </React.Fragment>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+      {canAdd ? (
+        <div className="mt-3 flex flex-wrap items-end gap-2 border-t border-[var(--sge-line)] pt-3">
+          <div>
+            <Label htmlFor="smat-con">Sub-con</Label>
+            <select id="smat-con" className={sel} value={con} onChange={(e) => setCon(e.target.value)}>
+              <option value="">Pick…</option>
+              {contractors.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <Label htmlFor="smat-kind">Entry</Label>
+            <select id="smat-kind" className={sel} value={kind} onChange={(e) => setKind(e.target.value as "issued" | "returned")}>
+              <option value="issued">Issued to him</option>
+              <option value="returned">Returned by him</option>
+            </select>
+          </div>
+          <div className="w-32">
+            <Label htmlFor="smat-qty">m³</Label>
+            <Input id="smat-qty" type="number" min={0} className="mt-1" value={qty} onChange={(e) => setQty(e.target.value)} placeholder="e.g. 100000" />
+          </div>
+          <div>
+            <Label htmlFor="smat-date">Date</Label>
+            <Input id="smat-date" type="date" className="mt-1" value={date} onChange={(e) => setDate(e.target.value)} />
+          </div>
+          <div className="min-w-[180px] flex-1">
+            <Label htmlFor="smat-note">Note</Label>
+            <Input id="smat-note" className="mt-1" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Challan / opening stock / transfer…" />
+          </div>
+          <Button
+            onClick={() => {
+              const r = onAdd({ contractorId: con, kind, m3: Number(qty), date, note });
+              if (!r.ok) return setMsg({ ok: false, text: r.error });
+              setMsg({ ok: true, text: "Saved" });
+              setQty("");
+              setNote("");
+            }}
+          >
+            Save entry
+          </Button>
+          {msg ? <span className={cn("text-xs", msg.ok ? "text-[var(--sge-ok)]" : "text-[var(--sge-crit)]")}>{msg.text}</span> : null}
+        </div>
+      ) : null}
+    </Panel>
   );
 }

@@ -3,7 +3,7 @@
  * job (scaffoldJobId). Status follows the work: Erection until the scope is up, Standing until
  * removal starts, Removal until it's closed by hand.
  */
-import type { DprReport, ScaffoldJob, ScaffoldPlanLine, ScaffoldType } from "./types";
+import type { DprReport, ScaffoldJob, ScaffoldMaterialEntry, ScaffoldPlanLine, ScaffoldType } from "./types";
 
 // Owner, 2026-11-21: "Standing" is called "Tower" (the saved value stays "standing")
 export const SCAFFOLD_TYPES: { id: ScaffoldType; label: string }[] = [
@@ -19,13 +19,14 @@ export const platformM2 = (planks?: number) => Math.round((planks ?? 0) * PLANK_
 export const SCAFFOLD_PURPOSES = ["Blasting & painting", "Insulation", "CUI inspection", "Maintenance / mechanical", "Welding / fabrication", "Inspection / NDT"];
 
 export type ScaffoldStatus = "pending" | "rejected" | "erection" | "standing" | "removal" | "closed";
+// Owner, 2026-11-21: the four stages a supervisor sees on the DPR
 export const STATUS_LABEL: Record<ScaffoldStatus, string> = {
   pending: "Waiting for SIC",
   rejected: "Rejected",
-  erection: "Erection",
-  standing: "Standing",
-  removal: "Removal",
-  closed: "Closed",
+  erection: "Erection in progress",
+  standing: "Standing (erection complete)",
+  removal: "Removal in progress",
+  closed: "Removal complete",
 };
 
 /** Erected and removed m³ on this job, and the days with work, from submitted / approved DPRs */
@@ -52,6 +53,8 @@ export function scaffoldStatus(job: ScaffoldJob, p: { erected: number; removed: 
   if (job.approval === "pending") return "pending";
   if (job.approval === "rejected") return "rejected";
   if (job.closedAt) return "closed";
+  // Everything that went up has come down
+  if (p.removed > 0 && p.removed >= Math.max(p.erected, job.scopeM3)) return "closed";
   if (p.removed > 0) return "removal";
   if (p.erected >= job.scopeM3) return "standing";
   return "erection";
@@ -67,4 +70,22 @@ export function nextScaffoldJobNo(jobs: ScaffoldJob[], siteCode: string): string
 /** The month's line for this plant · type · supervisor (one line each, like painting) */
 export function findScaffoldLine(lines: ScaffoldPlanLine[], k: Pick<ScaffoldPlanLine, "month" | "siteId" | "plant" | "type" | "supervisorId">) {
   return lines.find((l) => l.month === k.month && l.siteId === k.siteId && l.plant === k.plant && l.type === k.type && l.supervisorId === k.supervisorId);
+}
+
+/**
+ * A sub-con's scaffolding material (owner, 2026-11-21): issued − returned is what he holds;
+ * "in use" is what stands on his jobs now (erected − removed, from DPRs); the rest is free.
+ */
+export function subconMaterial(contractorId: string, entries: ScaffoldMaterialEntry[], jobs: ScaffoldJob[], reports: DprReport[]) {
+  const mine = entries.filter((e) => e.contractorId === contractorId);
+  const issued = mine.filter((e) => e.kind === "issued").reduce((n, e) => n + e.m3, 0);
+  const returned = mine.filter((e) => e.kind === "returned").reduce((n, e) => n + e.m3, 0);
+  const inUse = jobs
+    .filter((j) => j.contractorId === contractorId && j.approval === "approved")
+    .reduce((n, j) => {
+      const p = scaffoldProgress(j, reports);
+      return n + Math.max(0, p.erected - p.removed);
+    }, 0);
+  const held = issued - returned;
+  return { issued, returned, held, inUse, free: held - inUse };
 }

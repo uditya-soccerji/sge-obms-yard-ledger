@@ -43,7 +43,7 @@ import { ATTENDANCE_OPTIONS } from "@/lib/attendance";
 import { worksAt } from "@/lib/site-scope";
 import { workRights } from "@/lib/work/permissions";
 import { PlacePicker, racksFor, type Place } from "@/components/shared/place-picker";
-import { typeLabel } from "@/lib/work/scaffold";
+import { scaffoldProgress, scaffoldStatus, STATUS_LABEL, typeLabel } from "@/lib/work/scaffold";
 
 function uid(prefix: string) {
   return `${prefix}-${Math.random().toString(36).slice(2, 9)}`;
@@ -1319,7 +1319,13 @@ function ScaffoldWorkEditor({
 }) {
   // Owner, 2026-11-21: the supervisor's open scaffolding jobs; a line's m³ count against the job picked
   const { work } = useWork();
-  const openJobs = (work.scaffoldJobs ?? []).filter((x) => x.siteId === siteId && x.supervisorId === submitterId && x.approval === "approved" && !x.closedAt);
+  const jobState = (id: string) => {
+    const j = (work.scaffoldJobs ?? []).find((x) => x.id === id);
+    if (!j) return null;
+    const p = scaffoldProgress(j, work.reports);
+    return { j, p, status: scaffoldStatus(j, p) };
+  };
+  const openJobs = (work.scaffoldJobs ?? []).filter((x) => x.siteId === siteId && x.supervisorId === submitterId && x.approval === "approved" && jobState(x.id)?.status !== "closed");
   return (
     <Panel>
       <div className="mb-3 flex items-center justify-between">
@@ -1382,8 +1388,18 @@ function ScaffoldWorkEditor({
                 }}
               >
                 <option value="">No job (one-off work)</option>
-                {openJobs.map((x) => <option key={x.id} value={x.id}>{x.jobNo} · {x.plant} · {x.location} · {typeLabel(x.type)} · {x.scopeM3} m³</option>)}
+                {openJobs.map((x) => <option key={x.id} value={x.id}>{x.jobNo} · {x.plant} · {x.location} · {typeLabel(x.type)} · {x.scopeM3} m³ · {STATUS_LABEL[jobState(x.id)!.status]}</option>)}
               </select>
+              {/* Owner, 2026-11-21: the job's stage, from the DPRs so far */}
+              {line.scaffoldJobId && jobState(line.scaffoldJobId) ? (() => {
+                const st = jobState(line.scaffoldJobId!)!;
+                return (
+                  <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-[var(--sge-ink-2)]">
+                    <StatusPill tone={st.status === "erection" ? "accent" : st.status === "standing" ? "ok" : st.status === "removal" ? "warn" : "default"}>{STATUS_LABEL[st.status]}</StatusPill>
+                    <span>Erected {st.p.erected.toLocaleString("en-IN")} / {st.j.scopeM3.toLocaleString("en-IN")} m³ · removed {st.p.removed.toLocaleString("en-IN")} m³ (submitted DPRs)</span>
+                  </div>
+                );
+              })() : null}
             </div>
           ) : null}
           <PlacePicker

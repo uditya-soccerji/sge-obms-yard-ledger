@@ -13,6 +13,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useStore } from "@/lib/store";
 import { useWork } from "@/lib/work/store";
 import { daysAgo } from "@/lib/today";
+import { subconMaterial } from "@/lib/work/scaffold";
 
 const TYPE: Record<string, string> = { painting_blasting: "Painting & blasting", scaffolding: "Scaffolding", rope_access: "Rope access", safety: "Safety" };
 const STATUS: Record<string, string> = { draft: "Draft", submitted: "Submitted", sic_approved: "SIC approved", sic_rejected: "Sent back" };
@@ -47,6 +48,24 @@ export function SubconHome() {
         title={firm}
         subtitle={`Sub-contractor · view only · ${sites.map(site).join(", ") || "no site"}. To change anything, send a request to the Owner / Super Admin below.`}
       />
+
+      {(() => {
+        // Owner, 2026-11-21: his scaffolding material — held, standing on his jobs, free
+        const m = subconMaterial(contractorId, work.scaffoldMaterial ?? [], work.scaffoldJobs ?? [], work.reports);
+        return m.issued ? (
+          <Panel>
+            <h3 className="mb-2 font-heading text-sm font-bold uppercase tracking-wide">Scaffolding material</h3>
+            <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+              {[["Issued", m.issued], ["Returned", m.returned], ["In use on jobs", m.inUse], ["Free", m.free]].map(([l, v]) => (
+                <div key={String(l)} className="rounded-sm bg-[var(--sge-paper-2)] px-3 py-2">
+                  <div className="text-[10px] uppercase tracking-wider text-[var(--sge-ink-3)]">{l}</div>
+                  <div className="font-heading text-xl font-semibold tabular-nums">{Number(v).toLocaleString("en-IN")} m³</div>
+                </div>
+              ))}
+            </div>
+          </Panel>
+        ) : null;
+      })()}
 
       <Panel>
         <h3 className="mb-2 font-heading text-sm font-bold uppercase tracking-wide">My supervisors · {mine.length}</h3>

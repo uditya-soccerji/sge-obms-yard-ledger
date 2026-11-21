@@ -16,7 +16,7 @@ import { reasonText, type WorkEvent } from "./events";
 import { entryArea } from "./logic";
 import { workRights } from "./permissions";
 import { addDays, weekStart } from "../progress";
-import type { DprEntry, DprReport, Expense, Jms, JmsPayment, JmsStatus, JmsSubmission, Job, PlanLine, PlanLineRequest, ScaffoldJob, ScaffoldPlanLine, Stage, WorkState } from "./types";
+import type { DprEntry, DprReport, Expense, Jms, JmsPayment, JmsStatus, JmsSubmission, Job, PlanLine, PlanLineRequest, ScaffoldJob, ScaffoldMaterialEntry, ScaffoldPlanLine, Stage, WorkState } from "./types";
 import { findScaffoldLine, nextScaffoldJobNo, platformM2, typeLabel } from "./scaffold";
 import { compareJms, linkCandidates } from "./jms-compare";
 import { inStock, LIFECYCLE, LIFECYCLE_LABEL, paintUsedInMonth, stepVariance } from "./paint-steps";
@@ -71,6 +71,10 @@ interface WorkApi {
   decideScaffoldJob: (id: string, approve: boolean, note?: string) => Result;
   /** Close a scaffolding job (fully removed), or open it again */
   closeScaffoldJob: (id: string, closed: boolean) => Result;
+  /** A sub-con's scaffolding material issued or returned, in m³ (Owner / SA / SIC / Admin / Store) */
+  addScaffoldMaterial: (e: Omit<ScaffoldMaterialEntry, "id" | "by" | "at">) => Result;
+  /** Remove a wrong entry (Owner / SA) */
+  removeScaffoldMaterial: (id: string) => Result;
   /** Owner / SA: add DPRs prepared from the MS-SGE daily sheets (only records not here yet, by id) */
   importPrepared: (p: PreparedImport) => { ok: true; added: Record<string, number> } | { ok: false; error: string };
   markPlanRequests: (ids: string[], patch: { notified?: boolean; seenByRequester?: boolean }) => void;
@@ -153,7 +157,7 @@ function uid(prefix: string) {
 export const READ_WINDOW_MS = 10 * 60 * 1000;
 
 /** Work collections kept in the shared database (owner, 2026-11-18) */
-const WORK_SHARED = ["serviceItems", "scaffoldJobs", "scaffoldPlanLines", "workOrders", "planLines", "jobs", "reports", "dprs", "jms", "submissions", "paint", "paintSteps", "planRequests", "expenses", "events"] as const;
+const WORK_SHARED = ["serviceItems", "scaffoldMaterial", "scaffoldJobs", "scaffoldPlanLines", "workOrders", "planLines", "jobs", "reports", "dprs", "jms", "submissions", "paint", "paintSteps", "planRequests", "expenses", "events"] as const;
 
 const NOT_ALLOWED: Result = { ok: false, error: "Your role can't do this" };
 
@@ -249,7 +253,7 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
       const raw = localStorage.getItem(WORK_STORAGE_KEY);
       if (raw) {
         const saved = JSON.parse(raw) as WorkState;
-        setWork(renameWorkPlants({ ...saved, reports: saved.reports ?? [], submissions: saved.submissions ?? [], paintSteps: saved.paintSteps ?? [], planRequests: saved.planRequests ?? [], scaffoldJobs: saved.scaffoldJobs ?? [], scaffoldPlanLines: saved.scaffoldPlanLines ?? [] }));
+        setWork(renameWorkPlants({ ...saved, reports: saved.reports ?? [], submissions: saved.submissions ?? [], paintSteps: saved.paintSteps ?? [], planRequests: saved.planRequests ?? [], scaffoldMaterial: saved.scaffoldMaterial ?? [], scaffoldJobs: saved.scaffoldJobs ?? [], scaffoldPlanLines: saved.scaffoldPlanLines ?? [] }));
       }
     } catch {
       /* keep seed */
@@ -265,7 +269,7 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
       try {
         const saved = JSON.parse(e.newValue) as WorkState;
         fromOtherTab.current = true;
-        setWork(renameWorkPlants({ ...saved, reports: saved.reports ?? [], submissions: saved.submissions ?? [], paintSteps: saved.paintSteps ?? [], planRequests: saved.planRequests ?? [], scaffoldJobs: saved.scaffoldJobs ?? [], scaffoldPlanLines: saved.scaffoldPlanLines ?? [] }));
+        setWork(renameWorkPlants({ ...saved, reports: saved.reports ?? [], submissions: saved.submissions ?? [], paintSteps: saved.paintSteps ?? [], planRequests: saved.planRequests ?? [], scaffoldMaterial: saved.scaffoldMaterial ?? [], scaffoldJobs: saved.scaffoldJobs ?? [], scaffoldPlanLines: saved.scaffoldPlanLines ?? [] }));
       } catch {
         /* unreadable copy — keep ours */
       }
@@ -665,6 +669,27 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
     if (!job) return { ok: false, error: "Job not found" };
     setWork((s) => ({ ...s, scaffoldJobs: (s.scaffoldJobs ?? []).map((j) => (j.id === id ? { ...j, closedAt: closed ? new Date().toISOString() : undefined } : j)) }));
     auditOnly(closed ? "scaffold_job_closed" : "scaffold_job_reopened", job.siteId, job.jobNo);
+    return { ok: true };
+  }, []);
+
+  const addScaffoldMaterial = useCallback<WorkApi["addScaffoldMaterial"]>((e) => {
+    const role = actor.current.role;
+    if (!["owner", "super_admin", "sic", "admin", "store"].includes(role ?? "")) return NOT_ALLOWED;
+    if (!e.contractorId) return { ok: false, error: "Pick the sub-con" };
+    if (!(e.m3 > 0)) return { ok: false, error: "Give the quantity in m³" };
+    if (!e.date) return { ok: false, error: "Give the date" };
+    const entry: ScaffoldMaterialEntry = { ...e, note: e.note?.trim() || undefined, id: uid("smat"), by: actor.current.name, at: new Date().toISOString() };
+    setWork((s) => ({ ...s, scaffoldMaterial: [...(s.scaffoldMaterial ?? []), entry] }));
+    auditOnly("scaffold_material", "", `${e.kind === "issued" ? "Issued to" : "Returned by"} ${e.contractorId}: ${e.m3} m³ on ${e.date}${entry.note ? ` — ${entry.note}` : ""}`);
+    return { ok: true, id: entry.id };
+  }, []);
+
+  const removeScaffoldMaterial = useCallback<WorkApi["removeScaffoldMaterial"]>((id) => {
+    if (actor.current.role !== "owner" && actor.current.role !== "super_admin") return NOT_ALLOWED;
+    const e = (ref.current.scaffoldMaterial ?? []).find((x) => x.id === id);
+    if (!e) return { ok: false, error: "Entry not found" };
+    setWork((s) => ({ ...s, scaffoldMaterial: (s.scaffoldMaterial ?? []).filter((x) => x.id !== id) }));
+    auditOnly("scaffold_material_removed", "", `Removed: ${e.kind} ${e.m3} m³ · ${e.contractorId} · ${e.date}`);
     return { ok: true };
   }, []);
 
@@ -1576,8 +1601,8 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const api = useMemo<WorkApi>(
-    () => ({ work, hydrated, shared, importExcel, editExpense, receivePaint, advancePaintLifecycle, recoMonth, postMonth, setRilRef, uploadSubmission, linkSubmission, unlinkSubmission, addPlanLine, updatePlanLine, removePlanLine, decidePlanRequest, withdrawPlanRequest, importPrepared, startScaffoldJob, decideScaffoldJob, closeScaffoldJob, markPlanRequests, startJob, decideJobPlan, adminApproveJms, adminReturnJms, addDpr, addPlanEntry, handlePpe, removeEntry, saveReport, submitReport, reviewReport, unlockReport, telegramToReport, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork, notify: log }),
-    [work, hydrated, shared, importExcel, editExpense, receivePaint, advancePaintLifecycle, recoMonth, postMonth, setRilRef, uploadSubmission, linkSubmission, unlinkSubmission, addPlanLine, updatePlanLine, removePlanLine, decidePlanRequest, withdrawPlanRequest, importPrepared, startScaffoldJob, decideScaffoldJob, closeScaffoldJob, markPlanRequests, startJob, decideJobPlan, adminApproveJms, adminReturnJms, addDpr, addPlanEntry, handlePpe, removeEntry, saveReport, submitReport, reviewReport, unlockReport, telegramToReport, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork, log]
+    () => ({ work, hydrated, shared, importExcel, editExpense, receivePaint, advancePaintLifecycle, recoMonth, postMonth, setRilRef, uploadSubmission, linkSubmission, unlinkSubmission, addPlanLine, updatePlanLine, removePlanLine, decidePlanRequest, withdrawPlanRequest, importPrepared, startScaffoldJob, decideScaffoldJob, closeScaffoldJob, addScaffoldMaterial, removeScaffoldMaterial, markPlanRequests, startJob, decideJobPlan, adminApproveJms, adminReturnJms, addDpr, addPlanEntry, handlePpe, removeEntry, saveReport, submitReport, reviewReport, unlockReport, telegramToReport, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork, notify: log }),
+    [work, hydrated, shared, importExcel, editExpense, receivePaint, advancePaintLifecycle, recoMonth, postMonth, setRilRef, uploadSubmission, linkSubmission, unlinkSubmission, addPlanLine, updatePlanLine, removePlanLine, decidePlanRequest, withdrawPlanRequest, importPrepared, startScaffoldJob, decideScaffoldJob, closeScaffoldJob, addScaffoldMaterial, removeScaffoldMaterial, markPlanRequests, startJob, decideJobPlan, adminApproveJms, adminReturnJms, addDpr, addPlanEntry, handlePpe, removeEntry, saveReport, submitReport, reviewReport, unlockReport, telegramToReport, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork, log]
   );
   return <WorkContext.Provider value={api}>{children}</WorkContext.Provider>;
 }
