@@ -373,6 +373,8 @@ export interface ScaffoldPlanLine {
   supervisorId: string;
   contractorId: string;
   planM3: number;
+  /** Platform added on top, m² (owner, 2026-11-21) */
+  platformM2?: number;
 }
 export interface ScaffoldJob {
   id: string;
@@ -388,6 +390,8 @@ export interface ScaffoldJob {
   bayFrom?: string;
   bayTo?: string;
   scopeM3: number;
+  /** Additional platform: planks / plates of 2 m × 0.3 m (owner, 2026-11-21) */
+  platformPlanks?: number;
   purpose: string;
   permitNo?: string;
   startDate: string;

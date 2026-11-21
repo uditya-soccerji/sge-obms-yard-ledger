@@ -17,7 +17,7 @@ import { entryArea } from "./logic";
 import { workRights } from "./permissions";
 import { addDays, weekStart } from "../progress";
 import type { DprEntry, DprReport, Expense, Jms, JmsPayment, JmsStatus, JmsSubmission, Job, PlanLine, PlanLineRequest, ScaffoldJob, ScaffoldPlanLine, Stage, WorkState } from "./types";
-import { findScaffoldLine, nextScaffoldJobNo } from "./scaffold";
+import { findScaffoldLine, nextScaffoldJobNo, platformM2 } from "./scaffold";
 import { compareJms, linkCandidates } from "./jms-compare";
 import { inStock, LIFECYCLE, LIFECYCLE_LABEL, paintUsedInMonth, stepVariance } from "./paint-steps";
 import type { PaintBatch, PaintStep } from "./types";
@@ -592,8 +592,9 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
   const addToScaffoldLine = (s: WorkState, job: ScaffoldJob, month: string): { s: WorkState; lineId: string } => {
     const lines = s.scaffoldPlanLines ?? [];
     const have = findScaffoldLine(lines, { month, siteId: job.siteId, plant: job.plant, type: job.type, supervisorId: job.supervisorId });
-    if (have) return { s: { ...s, scaffoldPlanLines: lines.map((l) => (l.id === have.id ? { ...l, planM3: l.planM3 + job.scopeM3 } : l)) }, lineId: have.id };
-    const line: ScaffoldPlanLine = { id: uid("spl"), month, siteId: job.siteId, plant: job.plant, type: job.type, supervisorId: job.supervisorId, contractorId: job.contractorId, planM3: job.scopeM3 };
+    const plat = platformM2(job.platformPlanks);
+    if (have) return { s: { ...s, scaffoldPlanLines: lines.map((l) => (l.id === have.id ? { ...l, planM3: l.planM3 + job.scopeM3, ...(plat ? { platformM2: (l.platformM2 ?? 0) + plat } : {}) } : l)) }, lineId: have.id };
+    const line: ScaffoldPlanLine = { id: uid("spl"), month, siteId: job.siteId, plant: job.plant, type: job.type, supervisorId: job.supervisorId, contractorId: job.contractorId, planM3: job.scopeM3, ...(plat ? { platformM2: plat } : {}) };
     return { s: { ...s, scaffoldPlanLines: [...lines, line] }, lineId: line.id };
   };
 
@@ -609,6 +610,7 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
     if (!sup || sup.contractorId !== input.contractorId || sup.subconOwner) return { ok: false, error: "Pick a supervisor tagged with this sub-con" };
     if (!(input.scopeM3 > 0)) return { ok: false, error: "Give the job's scope in m³" };
     if (!input.targetDate) return { ok: false, error: "Give the target date" };
+    if (input.platformPlanks != null && !(Number.isInteger(input.platformPlanks) && input.platformPlanks >= 0)) return { ok: false, error: "Platform: give the number of planks / plates" };
     const month = currentMonthOf(w, input.siteId);
     if (isMonthClosed(w, input.siteId, month)) return { ok: false, error: "That month is closed" };
     const siteCode = sitesRef.current.find((x) => x.id === input.siteId)?.code ?? input.siteId.replace("site-", "").toUpperCase();
@@ -631,7 +633,7 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
       }
       return next;
     });
-    auditOnly(job.approval === "pending" ? "scaffold_job_requested" : "scaffold_job_started", job.siteId, `${job.jobNo} · ${job.plant} · ${job.location} · ${job.type} · ${job.scopeM3} m³ · ${sup.name}`);
+    auditOnly(job.approval === "pending" ? "scaffold_job_requested" : "scaffold_job_started", job.siteId, `${job.jobNo} · ${job.plant} · ${job.location} · ${job.type} · ${job.scopeM3} m³${job.platformPlanks ? ` + ${job.platformPlanks} planks (${platformM2(job.platformPlanks)} m² platform)` : ""} · ${sup.name}`);
     return { ok: true, id: job.id, requested: job.approval === "pending" };
   }, []);
 

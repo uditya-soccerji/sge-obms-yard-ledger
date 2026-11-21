@@ -14,7 +14,7 @@ import { Label } from "@/components/ui/label";
 import { ALL_SITES, entrySiteId, worksAt } from "@/lib/site-scope";
 import { useStore } from "@/lib/store";
 import { today } from "@/lib/today";
-import { SCAFFOLD_PURPOSES, SCAFFOLD_TYPES, STATUS_LABEL, scaffoldProgress, scaffoldStatus, type ScaffoldStatus } from "@/lib/work/scaffold";
+import { PLANK_M2, platformM2, SCAFFOLD_PURPOSES, SCAFFOLD_TYPES, STATUS_LABEL, scaffoldProgress, scaffoldStatus, type ScaffoldStatus } from "@/lib/work/scaffold";
 import { useWork } from "@/lib/work/store";
 import type { ScaffoldType } from "@/lib/work/types";
 import { cn } from "@/lib/utils";
@@ -42,6 +42,7 @@ export function WorkScaffolding() {
   const [target, setTarget] = useState("");
   const [purpose, setPurpose] = useState(SCAFFOLD_PURPOSES[0]);
   const [permit, setPermit] = useState("");
+  const [planks, setPlanks] = useState("");
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [why, setWhy] = useState<Record<string, string>>({});
 
@@ -83,12 +84,14 @@ export function WorkScaffolding() {
   const name = (id: string) => fullState.staff.find((x) => x.id === id)?.name ?? id;
   const firm = (id: string) => fullState.masterCatalog.contractors.find((c) => c.id === id)?.name ?? id;
 
-  const reset = () => { setPlace({ location: "" }); setM3(""); setM3Typed(false); setPermit(""); };
+  const reset = () => { setPlace({ location: "" }); setM3(""); setM3Typed(false); setPermit(""); setPlanks(""); };
+  const plat = platformM2(Number(planks) || 0);
+  const linePlatform = lines.reduce((n, l) => n + (l.platformM2 ?? 0), 0);
 
   return (
     <div className="space-y-4">
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <KpiTile label={`Plan · ${month}`} value={`${fmt(planM3)} m³`} hint={`${lines.length} scaffolding plan lines`} />
+        <KpiTile label={`Plan · ${month}`} value={`${fmt(planM3)} m³`} hint={`${lines.length} scaffolding plan lines${linePlatform ? ` · + ${linePlatform.toLocaleString("en-IN")} m² platform` : ""}`} />
         <KpiTile label="Erected (DPRs)" value={`${fmt(erected)} m³`} hint={planM3 ? `${Math.round((erected / planM3) * 100)}% of plan` : undefined} tone="ok" />
         <KpiTile label="Removed (DPRs)" value={`${fmt(removed)} m³`} />
         <KpiTile label="Jobs open" value={String(rows.filter((r) => ["erection", "standing", "removal"].includes(r.status)).length)} hint={waiting.length ? `${waiting.length} waiting for the SIC` : undefined} tone={waiting.length ? "warn" : "default"} />
@@ -144,6 +147,20 @@ export function WorkScaffolding() {
               <Input id="sj-m3" type="number" min={0} className="mt-1" value={scope} onChange={(e) => { setM3(e.target.value); setM3Typed(true); }} placeholder="e.g. 300" />
               {bayScope ? <p className="mt-1 text-xs text-[var(--sge-ink-3)]">MIS scope for these bays: {fmt(bayScope)} m³</p> : null}
             </div>
+            {/* Owner, 2026-11-21: platform on top of the m³ scope — planks / plates of 2 m × 0.3 m */}
+            <div>
+              <Label htmlFor="sj-planks">Platform (additional) · planks / plates</Label>
+              <Input id="sj-planks" type="number" min={0} step={1} className="mt-1" value={planks} onChange={(e) => setPlanks(e.target.value.replace(/[^\d]/g, ""))} placeholder="e.g. 30" />
+              <p className="mt-1 text-xs text-[var(--sge-ink-3)]">
+                1 plank / plate = 2 m × 0.3 m = {PLANK_M2} m²{plat ? ` · ${planks} × ${PLANK_M2} = ${plat.toLocaleString("en-IN")} m² platform` : ""}
+              </p>
+            </div>
+            <div className="flex items-end">
+              <div className="w-full rounded-sm bg-[var(--sge-paper-2)] px-3 py-2 text-sm">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--sge-ink-3)]">Overall scope</span>
+                <div className="font-semibold tabular-nums">{Number(scope) ? `${fmt(Number(scope))} m³` : "— m³"}{plat ? ` + ${plat.toLocaleString("en-IN")} m² platform` : ""}</div>
+              </div>
+            </div>
             <div>
               <Label htmlFor="sj-target">Target date</Label>
               <Input id="sj-target" type="date" className="mt-1" value={target} onChange={(e) => setTarget(e.target.value)} />
@@ -173,6 +190,7 @@ export function WorkScaffolding() {
                   ...(place.bayFrom ? { bayFrom: place.bayFrom } : {}),
                   ...(place.bayTo ? { bayTo: place.bayTo } : {}),
                   scopeM3: Number(scope),
+                  ...(Number(planks) > 0 ? { platformPlanks: Number(planks) } : {}),
                   purpose,
                   ...(permit.trim() ? { permitNo: permit.trim() } : {}),
                   targetDate: target,
@@ -228,7 +246,7 @@ export function WorkScaffolding() {
                     <td className="max-w-[260px]">{j.location}<div className="text-xs text-[var(--sge-ink-3)]">{j.purpose}{j.permitNo ? ` · permit ${j.permitNo}` : ""} · target {j.targetDate}</div></td>
                     <td className="capitalize">{j.type}</td>
                     <td>{name(j.supervisorId)}<div className="text-xs text-[var(--sge-ink-3)]">{firm(j.contractorId)}</div></td>
-                    <td className="whitespace-nowrap text-right tabular-nums">{fmt(j.scopeM3)} m³</td>
+                    <td className="whitespace-nowrap text-right tabular-nums">{fmt(j.scopeM3)} m³{j.platformPlanks ? <div className="text-xs text-[var(--sge-ink-3)]">+ {platformM2(j.platformPlanks).toLocaleString("en-IN")} m² platform ({j.platformPlanks} planks)</div> : null}</td>
                     <td className="text-right tabular-nums">{fmt(p.erected)}</td>
                     <td className="text-right tabular-nums">{fmt(p.removed)}</td>
                     <td><StatusPill tone={TONE[status]}>{STATUS_LABEL[status]}</StatusPill>{j.approvalNote ? <div className="text-xs text-[var(--sge-ink-3)]">{j.approvalNote}</div> : null}</td>

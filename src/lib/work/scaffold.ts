@@ -9,6 +9,10 @@ export const SCAFFOLD_TYPES: { id: ScaffoldType; label: string }[] = [
   { id: "standing", label: "Standing" },
   { id: "hanging", label: "Hanging" },
 ];
+/** One plank / plate is 2 m × 0.3 m (owner, 2026-11-21) */
+export const PLANK_M2 = 0.6;
+export const platformM2 = (planks?: number) => Math.round((planks ?? 0) * PLANK_M2 * 100) / 100;
+
 export const SCAFFOLD_PURPOSES = ["Blasting & painting", "Insulation", "CUI inspection", "Maintenance / mechanical", "Other"];
 
 export type ScaffoldStatus = "pending" | "rejected" | "erection" | "standing" | "removal" | "closed";
