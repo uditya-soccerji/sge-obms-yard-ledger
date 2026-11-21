@@ -357,8 +357,55 @@ export interface PaintStep {
   rilLitres?: number;
 }
 
+/**
+ * Scaffolding (owner, 2026-11-21): a job is one scaffold at one place, Erection → Standing →
+ * Removal → Closed. Starting it makes or adds to the month's scaffolding plan line (m³), in the
+ * background. SIC / Owner / SA start them at once; the Admin's waits for the SIC.
+ */
+export type ScaffoldType = "standing" | "hanging";
+export interface ScaffoldPlanLine {
+  id: string;
+  /** YYYY-MM */
+  month: string;
+  siteId: string;
+  plant: string;
+  type: ScaffoldType;
+  supervisorId: string;
+  contractorId: string;
+  planM3: number;
+}
+export interface ScaffoldJob {
+  id: string;
+  jobNo: string;
+  siteId: string;
+  plant: string;
+  contractorId: string;
+  supervisorId: string;
+  type: ScaffoldType;
+  /** Location · rack · bays, as text (print, search) */
+  location: string;
+  rackId?: string;
+  bayFrom?: string;
+  bayTo?: string;
+  scopeM3: number;
+  purpose: string;
+  permitNo?: string;
+  startDate: string;
+  targetDate: string;
+  planLineId?: string;
+  /** The Admin's job waits for the SIC; rejected ones never count */
+  approval: "approved" | "pending" | "rejected";
+  approvalNote?: string;
+  /** Set by hand when the scaffold is fully removed (or written off) */
+  closedAt?: string;
+  createdBy: string;
+  createdAt: string;
+}
+
 export interface WorkState {
   serviceItems: ServiceItem[];
+  scaffoldJobs?: ScaffoldJob[];
+  scaffoldPlanLines?: ScaffoldPlanLine[];
   workOrders: WorkOrder[];
   planLines: PlanLine[];
   jobs: Job[];

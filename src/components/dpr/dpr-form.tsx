@@ -886,6 +886,7 @@ export function DprForm({
           lines={value.scaffoldWork}
           plants={plants}
           siteId={value.siteId}
+          submitterId={value.submitterId}
           readOnly={readOnly}
           onChange={(scaffoldWork) => onChange({ ...value, scaffoldWork })}
         />
@@ -1304,15 +1305,20 @@ function ScaffoldWorkEditor({
   lines,
   plants,
   siteId,
+  submitterId,
   onChange,
   readOnly,
 }: {
   lines: DprScaffoldWorkLine[];
   plants: string[];
   siteId: string;
+  submitterId: string;
   onChange: (lines: DprScaffoldWorkLine[]) => void;
   readOnly?: boolean;
 }) {
+  // Owner, 2026-11-21: the supervisor's open scaffolding jobs; a line's m³ count against the job picked
+  const { work } = useWork();
+  const openJobs = (work.scaffoldJobs ?? []).filter((x) => x.siteId === siteId && x.supervisorId === submitterId && x.approval === "approved" && !x.closedAt);
   return (
     <Panel>
       <div className="mb-3 flex items-center justify-between">
@@ -1359,6 +1365,26 @@ function ScaffoldWorkEditor({
                 {plants.map((p) => <option key={p} value={p}>{p}</option>)}
               </select>
           </div>
+          {openJobs.length ? (
+            <div className="sm:col-span-4">
+              <Label htmlFor={`sw-${line.id}-job`}>Scaffolding job</Label>
+              <select
+                id={`sw-${line.id}-job`}
+                className="mt-1 h-9 w-full rounded-md border border-[var(--sge-line)] bg-[var(--sge-paper)] px-2 text-sm"
+                disabled={readOnly}
+                value={line.scaffoldJobId ?? ""}
+                onChange={(e) => {
+                  const job = openJobs.find((x) => x.id === e.target.value);
+                  onChange(lines.map((l, i) => (i !== idx ? l : job
+                    ? { ...l, scaffoldJobId: job.id, plant: job.plant, location: job.location, rackId: job.rackId, bayFrom: job.bayFrom, bayTo: job.bayTo, scopeM3: job.scopeM3, ...(job.permitNo ? { permitNo: job.permitNo } : {}) }
+                    : { ...l, scaffoldJobId: undefined })));
+                }}
+              >
+                <option value="">No job (one-off work)</option>
+                {openJobs.map((x) => <option key={x.id} value={x.id}>{x.jobNo} · {x.plant} · {x.location} · {x.type} · {x.scopeM3} m³</option>)}
+              </select>
+            </div>
+          ) : null}
           <PlacePicker
             className="sm:col-span-3"
             idPrefix={`sw-${line.id}`}

@@ -11,6 +11,7 @@ import { WorkJobs } from "@/components/work/work-jobs";
 import { WorkPaint } from "@/components/work/work-paint";
 import { WorkPayments } from "@/components/work/work-payments";
 import { WorkPlan } from "@/components/work/work-plan";
+import { WorkScaffolding } from "@/components/work/work-scaffolding";
 import { WorkPnl } from "@/components/work/work-pnl";
 import { canAccessWork } from "@/lib/desk";
 import { workTabsFor } from "@/lib/work/permissions";
@@ -23,6 +24,7 @@ import { cn } from "@/lib/utils";
 const TABS = [
   { id: "plan", label: "Plan vs actual", money: false, boss: false },
   { id: "jobs", label: "Jobs & DPR", money: false, boss: false },
+  { id: "scaffold", label: "Scaffolding", money: false, boss: false },
   { id: "jms", label: "JMS", money: false, boss: false },
   { id: "payments", label: "Payments", money: true, boss: false },
   { id: "pnl", label: "P&L", money: true, boss: false },
@@ -84,6 +86,7 @@ function WorkInner() {
       </div>
       {tab === "plan" ? <WorkPlan /> : null}
       {tab === "jobs" ? <WorkJobs /> : null}
+      {tab === "scaffold" ? <WorkScaffolding /> : null}
       {tab === "jms" ? <WorkJms /> : null}
       {tab === "payments" ? <WorkPayments /> : null}
       {tab === "pnl" ? <WorkPnl /> : null}

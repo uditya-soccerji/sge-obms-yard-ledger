@@ -539,3 +539,11 @@ Process page: "Store module — process" (Claude doc). Decisions there: reorder 
 - Enforced in the database (migration 015): his reads are limited to his sub-con's records, and his only writes are his own requests and his read marks.
 - Mintu (sub-con "Mintu Gupta") gets such a login. The existing "minut" login stays Krishna Mohan Kumar Das's supervisor login (EP PP5915640912, under Mintu); it is deactivated.
 - The 386 imported October DPRs were marked SIC approved (owner): past records, not for review.
+
+## 48. Scaffolding jobs (owner, 2026-11-21)
+
+- **Work → Scaffolding → Start a scaffolding job:** 1 Plant · 2 Sub-contractor · 3 Area · rack (Racks & bays) · 4 Bay / pillar from–to · 5 Type (**Standing or Hanging** only, owner) · 6 Supervisor (only those tagged with that sub-con; owners of sub-cons left out) · **Job scope m³ (required, owner)**, filled from the MIS scope of the bays when the sheet has it · target date · for which work · permit (optional).
+- Starting a job makes, or adds its m³ to, the month's **scaffolding plan line** (plant · type · supervisor), in m³, apart from painting's m². **SIC, Owner, SA, Admin** start jobs (owner); the Admin's waits for the SIC (Approve / Reject with a reason) before it counts. Supervisors don't start jobs; they **pick the job on their DPR's scaffold line**, which fills plant, place, scope and permit.
+- **One job, full lifecycle** (owner): Erection (until erected ≥ scope) → Standing → Removal (once removal starts) → Closed (by hand; can be reopened). Erected / removed m³ come from submitted DPR lines on the job.
+- Staff have **plants** (several, can change; HR → Staff) so the sub-con and supervisor lists show the plant's people first, and a **sub-con owner** flag that keeps them off supervisor lists (Suvodeep Dan, Sunil Sinha, Shivnath Shah = sub-con Shivnath Sah).
+- Rates for scaffolding (erection / removal / standing) come later from the work order (owner); jobs carry no rate yet. Sudheer, Kuldip Prajapati and Manish Kumar Singh have no sub-con yet, so they don't appear until tagged.

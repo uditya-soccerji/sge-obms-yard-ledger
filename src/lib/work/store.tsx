@@ -16,7 +16,8 @@ import { reasonText, type WorkEvent } from "./events";
 import { entryArea } from "./logic";
 import { workRights } from "./permissions";
 import { addDays, weekStart } from "../progress";
-import type { DprEntry, DprReport, Expense, Jms, JmsPayment, JmsStatus, JmsSubmission, Job, PlanLine, PlanLineRequest, Stage, WorkState } from "./types";
+import type { DprEntry, DprReport, Expense, Jms, JmsPayment, JmsStatus, JmsSubmission, Job, PlanLine, PlanLineRequest, ScaffoldJob, ScaffoldPlanLine, Stage, WorkState } from "./types";
+import { findScaffoldLine, nextScaffoldJobNo } from "./scaffold";
 import { compareJms, linkCandidates } from "./jms-compare";
 import { inStock, LIFECYCLE, LIFECYCLE_LABEL, paintUsedInMonth, stepVariance } from "./paint-steps";
 import type { PaintBatch, PaintStep } from "./types";
@@ -64,6 +65,12 @@ interface WorkApi {
   decidePlanRequest: (id: string, approve: boolean, note: string) => Result;
   /** The Admin takes a waiting plan line back (Undo) */
   withdrawPlanRequest: (id: string) => Result;
+  /** Scaffolding (owner, 2026-11-21): start a job; makes or adds to the month's plan line */
+  startScaffoldJob: (input: Omit<ScaffoldJob, "id" | "jobNo" | "approval" | "createdBy" | "createdAt" | "startDate" | "planLineId" | "closedAt" | "approvalNote">) => Result;
+  /** SIC / Owner / SA: approve or reject an Admin's scaffolding job (a reason to reject) */
+  decideScaffoldJob: (id: string, approve: boolean, note?: string) => Result;
+  /** Close a scaffolding job (fully removed), or open it again */
+  closeScaffoldJob: (id: string, closed: boolean) => Result;
   /** Owner / SA: add DPRs prepared from the MS-SGE daily sheets (only records not here yet, by id) */
   importPrepared: (p: PreparedImport) => { ok: true; added: Record<string, number> } | { ok: false; error: string };
   markPlanRequests: (ids: string[], patch: { notified?: boolean; seenByRequester?: boolean }) => void;
@@ -146,7 +153,7 @@ function uid(prefix: string) {
 export const READ_WINDOW_MS = 10 * 60 * 1000;
 
 /** Work collections kept in the shared database (owner, 2026-11-18) */
-const WORK_SHARED = ["serviceItems", "workOrders", "planLines", "jobs", "reports", "dprs", "jms", "submissions", "paint", "paintSteps", "planRequests", "expenses", "events"] as const;
+const WORK_SHARED = ["serviceItems", "scaffoldJobs", "scaffoldPlanLines", "workOrders", "planLines", "jobs", "reports", "dprs", "jms", "submissions", "paint", "paintSteps", "planRequests", "expenses", "events"] as const;
 
 const NOT_ALLOWED: Result = { ok: false, error: "Your role can't do this" };
 
@@ -242,7 +249,7 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
       const raw = localStorage.getItem(WORK_STORAGE_KEY);
       if (raw) {
         const saved = JSON.parse(raw) as WorkState;
-        setWork(renameWorkPlants({ ...saved, reports: saved.reports ?? [], submissions: saved.submissions ?? [], paintSteps: saved.paintSteps ?? [], planRequests: saved.planRequests ?? [] }));
+        setWork(renameWorkPlants({ ...saved, reports: saved.reports ?? [], submissions: saved.submissions ?? [], paintSteps: saved.paintSteps ?? [], planRequests: saved.planRequests ?? [], scaffoldJobs: saved.scaffoldJobs ?? [], scaffoldPlanLines: saved.scaffoldPlanLines ?? [] }));
       }
     } catch {
       /* keep seed */
@@ -258,7 +265,7 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
       try {
         const saved = JSON.parse(e.newValue) as WorkState;
         fromOtherTab.current = true;
-        setWork(renameWorkPlants({ ...saved, reports: saved.reports ?? [], submissions: saved.submissions ?? [], paintSteps: saved.paintSteps ?? [], planRequests: saved.planRequests ?? [] }));
+        setWork(renameWorkPlants({ ...saved, reports: saved.reports ?? [], submissions: saved.submissions ?? [], paintSteps: saved.paintSteps ?? [], planRequests: saved.planRequests ?? [], scaffoldJobs: saved.scaffoldJobs ?? [], scaffoldPlanLines: saved.scaffoldPlanLines ?? [] }));
       } catch {
         /* unreadable copy — keep ours */
       }
@@ -580,6 +587,83 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
     log({ kind: "plan_decided", problem: !approve, siteId: r.siteId, subjectStaffId: r.requestedBy, title: `Plan line ${approve ? "approved" : "rejected"}: ${r.summary}`, detail: note.trim() || (approve ? "Added to the plan" : ""), tab: PLAN_REQUESTS_TAB, refId: id });
     return { ok: true, id };
   }, [addPlanLine, log]);
+
+  /** Add an approved job's scope to its month line (or make the line) */
+  const addToScaffoldLine = (s: WorkState, job: ScaffoldJob, month: string): { s: WorkState; lineId: string } => {
+    const lines = s.scaffoldPlanLines ?? [];
+    const have = findScaffoldLine(lines, { month, siteId: job.siteId, plant: job.plant, type: job.type, supervisorId: job.supervisorId });
+    if (have) return { s: { ...s, scaffoldPlanLines: lines.map((l) => (l.id === have.id ? { ...l, planM3: l.planM3 + job.scopeM3 } : l)) }, lineId: have.id };
+    const line: ScaffoldPlanLine = { id: uid("spl"), month, siteId: job.siteId, plant: job.plant, type: job.type, supervisorId: job.supervisorId, contractorId: job.contractorId, planM3: job.scopeM3 };
+    return { s: { ...s, scaffoldPlanLines: [...lines, line] }, lineId: line.id };
+  };
+
+  const startScaffoldJob = useCallback<WorkApi["startScaffoldJob"]>((input) => {
+    const role = actor.current.role;
+    // Owner, 2026-11-21: SIC, Owner, SA and Admin start scaffolding jobs (supervisors pick them in the DPR)
+    if (role !== "sic" && role !== "owner" && role !== "super_admin" && role !== "admin") return NOT_ALLOWED;
+    const w = ref.current;
+    const sup = staffRef.current.find((x) => x.id === input.supervisorId);
+    if (!input.plant) return { ok: false, error: "Pick the plant" };
+    if (!input.contractorId) return { ok: false, error: "Pick the sub-contractor" };
+    if (!input.location.trim()) return { ok: false, error: "Pick the area and bays" };
+    if (!sup || sup.contractorId !== input.contractorId || sup.subconOwner) return { ok: false, error: "Pick a supervisor tagged with this sub-con" };
+    if (!(input.scopeM3 > 0)) return { ok: false, error: "Give the job's scope in m³" };
+    if (!input.targetDate) return { ok: false, error: "Give the target date" };
+    const month = currentMonthOf(w, input.siteId);
+    if (isMonthClosed(w, input.siteId, month)) return { ok: false, error: "That month is closed" };
+    const siteCode = sitesRef.current.find((x) => x.id === input.siteId)?.code ?? input.siteId.replace("site-", "").toUpperCase();
+    const at = new Date().toISOString();
+    const job: ScaffoldJob = {
+      ...input,
+      location: input.location.trim(),
+      id: uid("sj"),
+      jobNo: nextScaffoldJobNo(w.scaffoldJobs ?? [], siteCode),
+      startDate: today(),
+      approval: role === "admin" ? "pending" : "approved",
+      createdBy: actor.current.name,
+      createdAt: at,
+    };
+    setWork((s) => {
+      let next: WorkState = { ...s, scaffoldJobs: [...(s.scaffoldJobs ?? []), job] };
+      if (job.approval === "approved") {
+        const r = addToScaffoldLine(next, job, month);
+        next = { ...r.s, scaffoldJobs: (r.s.scaffoldJobs ?? []).map((j) => (j.id === job.id ? { ...j, planLineId: r.lineId } : j)) };
+      }
+      return next;
+    });
+    auditOnly(job.approval === "pending" ? "scaffold_job_requested" : "scaffold_job_started", job.siteId, `${job.jobNo} · ${job.plant} · ${job.location} · ${job.type} · ${job.scopeM3} m³ · ${sup.name}`);
+    return { ok: true, id: job.id, requested: job.approval === "pending" };
+  }, []);
+
+  const decideScaffoldJob = useCallback<WorkApi["decideScaffoldJob"]>((id, approve, note) => {
+    if (!rights().canConfirm) return NOT_ALLOWED;
+    const w = ref.current;
+    const job = (w.scaffoldJobs ?? []).find((j) => j.id === id);
+    if (!job || job.approval !== "pending") return { ok: false, error: "This job isn't waiting" };
+    if (!approve && !note?.trim()) return { ok: false, error: "Give a reason so the Admin knows why" };
+    const month = currentMonthOf(w, job.siteId);
+    setWork((s) => {
+      const decided = (s.scaffoldJobs ?? []).map((j) => (j.id === id ? { ...j, approval: approve ? ("approved" as const) : ("rejected" as const), ...(note?.trim() ? { approvalNote: note.trim() } : {}) } : j));
+      let next: WorkState = { ...s, scaffoldJobs: decided };
+      if (approve) {
+        const r = addToScaffoldLine(next, { ...job, approval: "approved" }, month);
+        next = { ...r.s, scaffoldJobs: (r.s.scaffoldJobs ?? []).map((j) => (j.id === id ? { ...j, planLineId: r.lineId } : j)) };
+      }
+      return next;
+    });
+    auditOnly(approve ? "scaffold_job_approved" : "scaffold_job_rejected", job.siteId, `${job.jobNo}${note?.trim() ? ` — ${note.trim()}` : ""}`);
+    return { ok: true };
+  }, []);
+
+  const closeScaffoldJob = useCallback<WorkApi["closeScaffoldJob"]>((id, closed) => {
+    const role = actor.current.role;
+    if (role !== "sic" && role !== "owner" && role !== "super_admin" && role !== "admin") return NOT_ALLOWED;
+    const job = (ref.current.scaffoldJobs ?? []).find((j) => j.id === id);
+    if (!job) return { ok: false, error: "Job not found" };
+    setWork((s) => ({ ...s, scaffoldJobs: (s.scaffoldJobs ?? []).map((j) => (j.id === id ? { ...j, closedAt: closed ? new Date().toISOString() : undefined } : j)) }));
+    auditOnly(closed ? "scaffold_job_closed" : "scaffold_job_reopened", job.siteId, job.jobNo);
+    return { ok: true };
+  }, []);
 
   const importPrepared = useCallback<WorkApi["importPrepared"]>((p) => {
     if (actor.current.role !== "owner" && actor.current.role !== "super_admin") return { ok: false, error: "Only the Owner or Super Admin can import" };
@@ -1489,8 +1573,8 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const api = useMemo<WorkApi>(
-    () => ({ work, hydrated, shared, importExcel, editExpense, receivePaint, advancePaintLifecycle, recoMonth, postMonth, setRilRef, uploadSubmission, linkSubmission, unlinkSubmission, addPlanLine, updatePlanLine, removePlanLine, decidePlanRequest, withdrawPlanRequest, importPrepared, markPlanRequests, startJob, decideJobPlan, adminApproveJms, adminReturnJms, addDpr, addPlanEntry, handlePpe, removeEntry, saveReport, submitReport, reviewReport, unlockReport, telegramToReport, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork, notify: log }),
-    [work, hydrated, shared, importExcel, editExpense, receivePaint, advancePaintLifecycle, recoMonth, postMonth, setRilRef, uploadSubmission, linkSubmission, unlinkSubmission, addPlanLine, updatePlanLine, removePlanLine, decidePlanRequest, withdrawPlanRequest, importPrepared, markPlanRequests, startJob, decideJobPlan, adminApproveJms, adminReturnJms, addDpr, addPlanEntry, handlePpe, removeEntry, saveReport, submitReport, reviewReport, unlockReport, telegramToReport, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork, log]
+    () => ({ work, hydrated, shared, importExcel, editExpense, receivePaint, advancePaintLifecycle, recoMonth, postMonth, setRilRef, uploadSubmission, linkSubmission, unlinkSubmission, addPlanLine, updatePlanLine, removePlanLine, decidePlanRequest, withdrawPlanRequest, importPrepared, startScaffoldJob, decideScaffoldJob, closeScaffoldJob, markPlanRequests, startJob, decideJobPlan, adminApproveJms, adminReturnJms, addDpr, addPlanEntry, handlePpe, removeEntry, saveReport, submitReport, reviewReport, unlockReport, telegramToReport, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork, notify: log }),
+    [work, hydrated, shared, importExcel, editExpense, receivePaint, advancePaintLifecycle, recoMonth, postMonth, setRilRef, uploadSubmission, linkSubmission, unlinkSubmission, addPlanLine, updatePlanLine, removePlanLine, decidePlanRequest, withdrawPlanRequest, importPrepared, startScaffoldJob, decideScaffoldJob, closeScaffoldJob, markPlanRequests, startJob, decideJobPlan, adminApproveJms, adminReturnJms, addDpr, addPlanEntry, handlePpe, removeEntry, saveReport, submitReport, reviewReport, unlockReport, telegramToReport, requestClose, confirmJms, rejectClose, setJmsStatus, closeMonth, issuePaint, recordPayment, addExpense, removeExpense, loadScenario, loadDemo, markSeen, resetWork, log]
   );
   return <WorkContext.Provider value={api}>{children}</WorkContext.Provider>;
 }

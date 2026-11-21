@@ -379,6 +379,10 @@ export interface StaffMember {
   joinedOn?: string;
   /** false = left / deactivated; unset = active */
   active?: boolean;
+  /** The plants this person usually works on (owner, 2026-11-21: fixed, but can change and can be several) */
+  plants?: string[];
+  /** Owner of a sub-con firm, not a supervisor: kept off supervisor pick lists (owner, 2026-11-21) */
+  subconOwner?: boolean;
 }
 
 export interface Labourer {
@@ -743,6 +747,8 @@ export interface DprScaffoldWorkLine {
   location: string;
   /** Picked from Master Data → Racks & bays (location keeps the full text for print and older DPRs) */
   rackId?: string;
+  /** The scaffolding job this line's m³ counts against (owner, 2026-11-21) */
+  scaffoldJobId?: string;
   bayFrom?: string;
   bayTo?: string;
   /** From the MS-SGE daily sheet (owner, 2026-11-21): permit, job scope, done so far, times */

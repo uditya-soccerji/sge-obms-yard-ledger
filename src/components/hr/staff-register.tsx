@@ -107,6 +107,30 @@ export function StaffRegister() {
             <label className="text-xs">Employee code<Input className="mt-1" value={form.employeeCode ?? ""} onChange={(e) => setForm({ ...form, employeeCode: e.target.value })} /></label>
             <label className="text-xs">Mobile<Input className="mt-1" inputMode="numeric" value={form.phone ?? ""} onChange={(e) => setForm({ ...form, phone: e.target.value.replace(/\D/g, "").slice(0, 10) })} /></label>
             <label className="text-xs">Joined on<Input className="mt-1" type="date" value={form.joinedOn ?? ""} onChange={(e) => setForm({ ...form, joinedOn: e.target.value })} /></label>
+            {/* Owner, 2026-11-21: usual plants — several allowed, change any time */}
+            <div className="text-xs sm:col-span-full">
+              Plants
+              <div className="mt-1 flex flex-wrap gap-1.5" role="group" aria-label="Plants">
+                {[...new Set([form.siteId, ...(form.siteIds ?? [])])].flatMap((sid) => fullState.sites.find((x) => x.id === sid)?.plants ?? []).filter((p, i, a) => a.indexOf(p) === i).map((p) => {
+                  const on = (form.plants ?? []).includes(p);
+                  return (
+                    <button
+                      key={p}
+                      type="button"
+                      aria-pressed={on}
+                      onClick={() => setForm({ ...form, plants: on ? (form.plants ?? []).filter((x) => x !== p) : [...(form.plants ?? []), p] })}
+                      className={cn("rounded-full border px-2.5 py-1 font-semibold", on ? "border-[var(--sge-brass)] bg-[var(--sge-brass-wash)] text-[var(--sge-brass-ink)]" : "border-[var(--sge-line)] bg-[var(--sge-paper)] text-[var(--sge-ink-2)]")}
+                    >
+                      {p}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+            <label className="flex items-center gap-2 text-xs sm:col-span-full">
+              <input type="checkbox" checked={!!form.subconOwner} onChange={(e) => setForm({ ...form, subconOwner: e.target.checked || undefined })} />
+              Owner of a sub-con firm (not shown in supervisor pick lists)
+            </label>
             <div className="flex items-end"><Button onClick={save}>{form.id ? "Save changes" : "Add"}</Button></div>
           </div>
         ) : null}

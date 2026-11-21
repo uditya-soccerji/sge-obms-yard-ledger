@@ -21,6 +21,9 @@ interface StaffRow {
   active: boolean;
   /** Migration 010 */
   ep_number?: string | null;
+  /** Migration 016 */
+  plants?: string[];
+  subcon_owner?: boolean;
 }
 
 /** Roles the database lets add / edit staff (mirrors the RLS in migration 009) */
@@ -44,6 +47,8 @@ function fromRow(r: StaffRow): StaffMember {
     epNumber: u(r.ep_number),
     joinedOn: u(r.joined_on),
     active: r.active,
+    plants: r.plants?.length ? r.plants : undefined,
+    subconOwner: r.subcon_owner || undefined,
   };
 }
 
@@ -63,6 +68,8 @@ function toRow(s: StaffMember): StaffRow {
     ep_number: s.epNumber || null,
     joined_on: s.joinedOn || null,
     active: s.active !== false,
+    plants: s.plants ?? [],
+    subcon_owner: !!s.subconOwner,
   };
 }
 

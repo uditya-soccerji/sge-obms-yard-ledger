@@ -1,0 +1,248 @@
+"use client";
+/**
+ * Work → Scaffolding (owner, 2026-11-21): start a scaffolding job — plant, sub-con, area · bays,
+ * type, supervisor (tagged with that sub-con), scope m³ — which makes or adds to the month's
+ * scaffolding plan line in the background. The jobs list follows each job from the DPRs:
+ * Erection → Standing → Removal → Closed.
+ */
+import { useMemo, useState } from "react";
+import { EmptyState, KpiTile, Panel, StatusPill } from "@/components/shared/ui-bits";
+import { PlacePicker, type Place } from "@/components/shared/place-picker";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { ALL_SITES, entrySiteId, worksAt } from "@/lib/site-scope";
+import { useStore } from "@/lib/store";
+import { today } from "@/lib/today";
+import { SCAFFOLD_PURPOSES, SCAFFOLD_TYPES, STATUS_LABEL, scaffoldProgress, scaffoldStatus, type ScaffoldStatus } from "@/lib/work/scaffold";
+import { useWork } from "@/lib/work/store";
+import type { ScaffoldType } from "@/lib/work/types";
+import { cn } from "@/lib/utils";
+
+const sel = "mt-1 h-9 w-full rounded-md border border-[var(--sge-line)] bg-[var(--sge-paper)] px-2 text-sm";
+const fmt = (n: number) => Math.round(n).toLocaleString("en-IN");
+const TONE: Record<ScaffoldStatus, "default" | "ok" | "warn" | "crit" | "accent"> = { pending: "warn", rejected: "crit", erection: "accent", standing: "ok", removal: "warn", closed: "default" };
+
+export function WorkScaffolding() {
+  const { state, fullState } = useStore();
+  const { work, startScaffoldJob, decideScaffoldJob, closeScaffoldJob } = useWork();
+  const role = state.currentRole;
+  const canStart = role === "sic" || role === "owner" || role === "super_admin" || role === "admin";
+  const canDecide = role === "sic" || role === "owner" || role === "super_admin";
+  const siteId = state.currentSiteId === ALL_SITES ? entrySiteId(state) : state.currentSiteId;
+  const site = fullState.sites.find((x) => x.id === siteId);
+
+  const [plant, setPlant] = useState("");
+  const [con, setCon] = useState("");
+  const [place, setPlace] = useState<Place>({ location: "" });
+  const [type, setType] = useState<ScaffoldType>("standing");
+  const [sup, setSup] = useState("");
+  const [m3, setM3] = useState("");
+  const [m3Typed, setM3Typed] = useState(false);
+  const [target, setTarget] = useState("");
+  const [purpose, setPurpose] = useState(SCAFFOLD_PURPOSES[0]);
+  const [permit, setPermit] = useState("");
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [why, setWhy] = useState<Record<string, string>>({});
+
+  // Scaffolding supervisors on this site, tagged with a sub-con; owners of sub-cons left out (owner, 2026-11-21)
+  const scafSups = fullState.staff.filter((x) => x.role === "supervisor" && x.active !== false && x.supervisorType === "scaffolding" && !x.subconOwner && worksAt(x, siteId));
+  const contractors = fullState.masterCatalog.contractors.filter((c) => c.active && scafSups.some((x) => x.contractorId === c.id));
+  const onPlant = (c: string) => scafSups.some((x) => x.contractorId === c && (x.plants ?? []).includes(plant));
+  const conFirst = contractors.filter((c) => onPlant(c.id));
+  const conRest = contractors.filter((c) => !onPlant(c.id));
+  const supList = scafSups.filter((x) => x.contractorId === con);
+  const supFirst = supList.filter((x) => (x.plants ?? []).includes(plant));
+  const supRest = supList.filter((x) => !(x.plants ?? []).includes(plant));
+  const untagged = fullState.staff.filter((x) => x.role === "supervisor" && x.active !== false && x.supervisorType === "scaffolding" && !x.subconOwner && !x.contractorId && worksAt(x, siteId));
+
+  // Scope from the MIS bays picked
+  const rack = place.rackId ? fullState.plantRacks.find((r) => r.id === place.rackId) : undefined;
+  const bayScope = useMemo(() => {
+    if (!rack || !place.bayFrom) return 0;
+    const a = rack.bays.findIndex((b) => b.label === place.bayFrom);
+    const b = place.bayTo ? rack.bays.findIndex((x) => x.label === place.bayTo) : a;
+    return rack.bays.slice(Math.min(a, b), Math.max(a, b) + 1).reduce((n, x) => n + (x.m3 ?? 0), 0);
+  }, [rack, place.bayFrom, place.bayTo]);
+  const scope = m3Typed ? m3 : bayScope ? String(Math.round(bayScope)) : m3;
+
+  const jobs = (work.scaffoldJobs ?? []).filter((j) => state.currentSiteId === ALL_SITES || j.siteId === state.currentSiteId);
+  const rows = jobs
+    .map((j) => {
+      const p = scaffoldProgress(j, work.reports);
+      return { j, p, status: scaffoldStatus(j, p) };
+    })
+    .sort((a, b) => b.j.createdAt.localeCompare(a.j.createdAt));
+  const waiting = rows.filter((r) => r.status === "pending");
+  const month = today().slice(0, 7);
+  const lines = (work.scaffoldPlanLines ?? []).filter((l) => l.month === month && (state.currentSiteId === ALL_SITES || l.siteId === state.currentSiteId));
+  const planM3 = lines.reduce((n, l) => n + l.planM3, 0);
+  const live = rows.filter((r) => r.j.approval === "approved");
+  const erected = live.reduce((n, r) => n + r.p.erected, 0);
+  const removed = live.reduce((n, r) => n + r.p.removed, 0);
+  const name = (id: string) => fullState.staff.find((x) => x.id === id)?.name ?? id;
+  const firm = (id: string) => fullState.masterCatalog.contractors.find((c) => c.id === id)?.name ?? id;
+
+  const reset = () => { setPlace({ location: "" }); setM3(""); setM3Typed(false); setPermit(""); };
+
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <KpiTile label={`Plan · ${month}`} value={`${fmt(planM3)} m³`} hint={`${lines.length} scaffolding plan lines`} />
+        <KpiTile label="Erected (DPRs)" value={`${fmt(erected)} m³`} hint={planM3 ? `${Math.round((erected / planM3) * 100)}% of plan` : undefined} tone="ok" />
+        <KpiTile label="Removed (DPRs)" value={`${fmt(removed)} m³`} />
+        <KpiTile label="Jobs open" value={String(rows.filter((r) => ["erection", "standing", "removal"].includes(r.status)).length)} hint={waiting.length ? `${waiting.length} waiting for the SIC` : undefined} tone={waiting.length ? "warn" : "default"} />
+      </div>
+
+      {canStart ? (
+        <Panel>
+          <h3 className="mb-3 font-heading text-sm font-bold">Start a scaffolding job · {site?.code ?? siteId}</h3>
+          <div className="grid gap-3 lg:grid-cols-2">
+            <div>
+              <Label htmlFor="sj-plant">1 · Plant</Label>
+              <select id="sj-plant" className={sel} value={plant} onChange={(e) => { setPlant(e.target.value); setPlace({ location: "" }); setSup(""); setMsg(null); }}>
+                <option value="">Pick a plant…</option>
+                {(site?.plants ?? []).map((p) => <option key={p} value={p}>{p}</option>)}
+              </select>
+            </div>
+            <div>
+              <Label htmlFor="sj-con">2 · Sub-contractor</Label>
+              <select id="sj-con" className={sel} value={con} onChange={(e) => { setCon(e.target.value); setSup(""); }}>
+                <option value="">Pick the sub-con…</option>
+                {conFirst.length ? <optgroup label={`Work on ${plant}`}>{conFirst.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</optgroup> : null}
+                {conRest.length ? <optgroup label={conFirst.length ? "Other sub-cons" : "Sub-cons"}>{conRest.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</optgroup> : null}
+              </select>
+            </div>
+            <PlacePicker
+              className="lg:col-span-2"
+              idPrefix="sj"
+              siteId={siteId}
+              plant={plant}
+              value={place}
+              onChange={(p) => { setPlace(p); setM3Typed(false); }}
+            />
+            <div>
+              <span className="mb-1 block text-xs font-medium">5 · Type of scaffolding</span>
+              <div className="flex gap-2" role="group" aria-label="Type of scaffolding">
+                {SCAFFOLD_TYPES.map((t) => (
+                  <button key={t.id} type="button" aria-pressed={type === t.id} onClick={() => setType(t.id)} className={cn("rounded-full border px-3 py-1.5 text-xs font-semibold", type === t.id ? "border-[var(--sge-brass)] bg-[var(--sge-brass-wash)] text-[var(--sge-brass-ink)]" : "border-[var(--sge-line)] bg-[var(--sge-paper)] text-[var(--sge-ink-2)]")}>
+                    {t.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div>
+              <Label htmlFor="sj-sup">6 · Supervisor (tagged with this sub-con)</Label>
+              <select id="sj-sup" className={sel} value={sup} disabled={!con} onChange={(e) => setSup(e.target.value)}>
+                <option value="">{con ? "Pick supervisor…" : "Pick the sub-con first"}</option>
+                {supFirst.length ? <optgroup label={`On ${plant}`}>{supFirst.map((x) => <option key={x.id} value={x.id}>{x.name}</option>)}</optgroup> : null}
+                {supRest.length ? <optgroup label={supFirst.length ? "Also with this sub-con" : "With this sub-con"}>{supRest.map((x) => <option key={x.id} value={x.id}>{x.name}{x.plants?.length ? ` · ${x.plants.join(", ")}` : ""}</option>)}</optgroup> : null}
+              </select>
+            </div>
+            <div>
+              <Label htmlFor="sj-m3">Job scope m³</Label>
+              <Input id="sj-m3" type="number" min={0} className="mt-1" value={scope} onChange={(e) => { setM3(e.target.value); setM3Typed(true); }} placeholder="e.g. 300" />
+              {bayScope ? <p className="mt-1 text-xs text-[var(--sge-ink-3)]">MIS scope for these bays: {fmt(bayScope)} m³</p> : null}
+            </div>
+            <div>
+              <Label htmlFor="sj-target">Target date</Label>
+              <Input id="sj-target" type="date" className="mt-1" value={target} onChange={(e) => setTarget(e.target.value)} />
+            </div>
+            <div>
+              <Label htmlFor="sj-purpose">For which work</Label>
+              <select id="sj-purpose" className={sel} value={purpose} onChange={(e) => setPurpose(e.target.value)}>
+                {SCAFFOLD_PURPOSES.map((p) => <option key={p}>{p}</option>)}
+              </select>
+            </div>
+            <div>
+              <Label htmlFor="sj-permit">Permit no. (optional)</Label>
+              <Input id="sj-permit" className="mt-1" inputMode="numeric" value={permit} onChange={(e) => setPermit(e.target.value)} />
+            </div>
+          </div>
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <Button
+              onClick={() => {
+                const r = startScaffoldJob({
+                  siteId,
+                  plant,
+                  contractorId: con,
+                  supervisorId: sup,
+                  type,
+                  location: place.location,
+                  ...(place.rackId ? { rackId: place.rackId } : {}),
+                  ...(place.bayFrom ? { bayFrom: place.bayFrom } : {}),
+                  ...(place.bayTo ? { bayTo: place.bayTo } : {}),
+                  scopeM3: Number(scope),
+                  purpose,
+                  ...(permit.trim() ? { permitNo: permit.trim() } : {}),
+                  targetDate: target,
+                });
+                if (!r.ok) return setMsg({ ok: false, text: r.error });
+                setMsg({ ok: true, text: r.requested ? "Job saved and sent to the SIC; it joins the plan once approved." : "Job started; the plan line is updated." });
+                reset();
+              }}
+            >
+              Start job
+            </Button>
+            {msg ? <span className={cn("text-sm", msg.ok ? "text-[var(--sge-ok)]" : "text-[var(--sge-crit)]")}>{msg.text}</span> : null}
+          </div>
+          {untagged.length ? (
+            <p className="mt-2 text-xs text-[var(--sge-warn)]">Not shown (no sub-con in HR → Staff): {untagged.map((x) => x.name).join(", ")}.</p>
+          ) : null}
+        </Panel>
+      ) : null}
+
+      {canDecide && waiting.length ? (
+        <Panel>
+          <h3 className="mb-2 font-heading text-sm font-bold">Waiting for the SIC · {waiting.length}</h3>
+          <ul className="divide-y divide-[var(--sge-line)]">
+            {waiting.map(({ j }) => (
+              <li key={j.id} className="flex flex-wrap items-end justify-between gap-2 py-2 text-sm">
+                <span className="min-w-0"><b>{j.jobNo}</b> · {j.plant} · {j.location} · {j.type} · {fmt(j.scopeM3)} m³ · {name(j.supervisorId)} ({firm(j.contractorId)}) <span className="text-xs text-[var(--sge-ink-3)]">by {j.createdBy}</span></span>
+                <span className="flex flex-wrap items-center gap-2">
+                  <input aria-label="Reason, if rejecting" className="h-8 w-44 rounded-md border border-[var(--sge-line)] bg-[var(--sge-paper)] px-2 text-xs" placeholder="Reason, if rejecting" value={why[j.id] ?? ""} onChange={(e) => setWhy({ ...why, [j.id]: e.target.value })} />
+                  <Button size="sm" variant="ghost" onClick={() => { const r = decideScaffoldJob(j.id, false, why[j.id]); if (!r.ok) setMsg({ ok: false, text: r.error }); }}>Reject</Button>
+                  <Button size="sm" onClick={() => { const r = decideScaffoldJob(j.id, true); if (!r.ok) setMsg({ ok: false, text: r.error }); }}>Approve</Button>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </Panel>
+      ) : null}
+
+      <Panel>
+        <h3 className="mb-2 font-heading text-sm font-bold">Scaffolding jobs</h3>
+        {rows.length === 0 ? (
+          <EmptyState title="No scaffolding jobs yet" detail="Start one above. Supervisors pick the job on their DPR's scaffold line, and the m³ count against it." />
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[960px] text-sm [&_td]:px-3 [&_td]:py-2 [&_th]:whitespace-nowrap [&_th]:px-3 [&_th]:py-2">
+              <thead className="text-left text-[10px] uppercase tracking-wider text-[var(--sge-ink-3)]">
+                <tr><th>Job</th><th>Plant</th><th>Where</th><th>Type</th><th>Supervisor · sub-con</th><th className="text-right">Scope</th><th className="text-right">Erected</th><th className="text-right">Removed</th><th>Status</th><th /></tr>
+              </thead>
+              <tbody>
+                {rows.map(({ j, p, status }) => (
+                  <tr key={j.id} className="border-t border-[var(--sge-line)] align-top">
+                    <td className="whitespace-nowrap font-mono text-xs">{j.jobNo}</td>
+                    <td>{j.plant}</td>
+                    <td className="max-w-[260px]">{j.location}<div className="text-xs text-[var(--sge-ink-3)]">{j.purpose}{j.permitNo ? ` · permit ${j.permitNo}` : ""} · target {j.targetDate}</div></td>
+                    <td className="capitalize">{j.type}</td>
+                    <td>{name(j.supervisorId)}<div className="text-xs text-[var(--sge-ink-3)]">{firm(j.contractorId)}</div></td>
+                    <td className="whitespace-nowrap text-right tabular-nums">{fmt(j.scopeM3)} m³</td>
+                    <td className="text-right tabular-nums">{fmt(p.erected)}</td>
+                    <td className="text-right tabular-nums">{fmt(p.removed)}</td>
+                    <td><StatusPill tone={TONE[status]}>{STATUS_LABEL[status]}</StatusPill>{j.approvalNote ? <div className="text-xs text-[var(--sge-ink-3)]">{j.approvalNote}</div> : null}</td>
+                    <td className="whitespace-nowrap text-right">
+                      {canStart && (status === "standing" || status === "removal" || status === "erection") ? <Button size="sm" variant="ghost" onClick={() => closeScaffoldJob(j.id, true)}>Close</Button> : null}
+                      {canStart && status === "closed" ? <Button size="sm" variant="ghost" onClick={() => closeScaffoldJob(j.id, false)}>Reopen</Button> : null}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Panel>
+    </div>
+  );
+}
