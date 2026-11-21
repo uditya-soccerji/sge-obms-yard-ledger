@@ -391,7 +391,7 @@ export interface ScaffoldJob {
   bayTo?: string;
   scopeM3: number;
   /** How the scope was worked out: L × B × H × E per piece (the Scaffold calc), summed */
-  scopeCalc?: { l: number; b: number; h: number; e: number }[];
+  scopeCalc?: { l: number; b: number; h: number; e: number; planks?: number }[];
   /** Additional platform: planks / plates of 2 m × 0.3 m (owner, 2026-11-21) */
   platformPlanks?: number;
   /** Which work it is for — several (owner, 2026-11-21); `purpose` keeps them as text */

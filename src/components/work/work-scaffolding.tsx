@@ -39,11 +39,11 @@ export function WorkScaffolding() {
   const [place, setPlace] = useState<Place>({ location: "" });
   const [type, setType] = useState<ScaffoldType>("standing");
   const [sup, setSup] = useState("");
-  const [calc, setCalc] = useState<{ l: string; b: string; h: string; e: string }[]>([{ l: "", b: "", h: "", e: "1" }]);
+  // Owner, 2026-11-21: each piece has its own platform (planks / plates), scoped separately
+  const [calc, setCalc] = useState<{ l: string; b: string; h: string; e: string; planks: string }[]>([{ l: "", b: "", h: "", e: "1", planks: "" }]);
   const [target, setTarget] = useState("");
   const [purposes, setPurposes] = useState<string[]>([SCAFFOLD_PURPOSES[0]]);
   const [otherWork, setOtherWork] = useState("");
-  const [planks, setPlanks] = useState("");
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [why, setWhy] = useState<Record<string, string>>({});
 
@@ -66,7 +66,7 @@ export function WorkScaffolding() {
     const b = place.bayTo ? rack.bays.findIndex((x) => x.label === place.bayTo) : a;
     return rack.bays.slice(Math.min(a, b), Math.max(a, b) + 1).reduce((n, x) => n + (x.m3 ?? 0), 0);
   }, [rack, place.bayFrom, place.bayTo]);
-  const pieceM3 = (r: { l: string; b: string; h: string; e: string }) => scaffoldVolume(Number(r.l) || 0, Number(r.b) || 0, Number(r.h) || 0, Number(r.e) || 0);
+  const pieceM3 = (r: { l: string; b: string; h: string; e: string; planks: string }) => scaffoldVolume(Number(r.l) || 0, Number(r.b) || 0, Number(r.h) || 0, Number(r.e) || 0);
   const scopeM3 = Math.round(calc.reduce((n, r) => n + pieceM3(r), 0) * 1000) / 1000;
 
   const jobs = (work.scaffoldJobs ?? []).filter((j) => state.currentSiteId === ALL_SITES || j.siteId === state.currentSiteId);
@@ -86,8 +86,9 @@ export function WorkScaffolding() {
   const name = (id: string) => fullState.staff.find((x) => x.id === id)?.name ?? id;
   const firm = (id: string) => fullState.masterCatalog.contractors.find((c) => c.id === id)?.name ?? id;
 
-  const reset = () => { setPlace({ location: "" }); setCalc([{ l: "", b: "", h: "", e: "1" }]); setPlanks(""); };
-  const plat = platformM2(Number(planks) || 0);
+  const reset = () => { setPlace({ location: "" }); setCalc([{ l: "", b: "", h: "", e: "1", planks: "" }]); };
+  const totalPlanks = calc.reduce((n, r) => n + (Number(r.planks) || 0), 0);
+  const plat = platformM2(totalPlanks);
   const linePlatform = lines.reduce((n, l) => n + (l.platformM2 ?? 0), 0);
 
   return (
@@ -150,7 +151,7 @@ export function WorkScaffolding() {
               <div className="mt-1 overflow-x-auto">
                 <table className="w-full min-w-[520px] text-sm [&_td]:px-1.5 [&_td]:py-1 [&_th]:px-1.5 [&_th]:py-1">
                   <thead className="text-left text-[10px] uppercase tracking-wider text-[var(--sge-ink-3)]">
-                    <tr><th>Piece</th><th>L (m)</th><th>B (m)</th><th>H (m)</th><th>E (factor)</th><th className="text-right">m³</th><th /></tr>
+                    <tr><th>Piece</th><th>L (m)</th><th>B (m)</th><th>H (m)</th><th>E (factor)</th><th className="text-right">m³</th><th>Platform planks</th><th className="text-right">Platform m²</th><th /></tr>
                   </thead>
                   <tbody>
                     {calc.map((row, i) => (
@@ -171,6 +172,20 @@ export function WorkScaffolding() {
                           </td>
                         ))}
                         <td className="whitespace-nowrap text-right font-semibold tabular-nums">{pieceM3(row) ? fmt3(pieceM3(row)) : "—"}</td>
+                        <td>
+                          <Input
+                            id={`sj-calc-${i}-planks`}
+                            aria-label={`Piece ${i + 1} platform planks`}
+                            type="number"
+                            min={0}
+                            step={1}
+                            className="h-8 w-24"
+                            value={row.planks}
+                            placeholder="0"
+                            onChange={(e) => setCalc(calc.map((r, j) => (j === i ? { ...r, planks: e.target.value.replace(/[^\d]/g, "") } : r)))}
+                          />
+                        </td>
+                        <td className="whitespace-nowrap text-right tabular-nums">{Number(row.planks) ? fmt3(platformM2(Number(row.planks))) : "—"}</td>
                         <td>{calc.length > 1 ? <button type="button" className="text-xs text-[var(--sge-ink-3)] underline" onClick={() => setCalc(calc.filter((_, j) => j !== i))}>Remove</button> : null}</td>
                       </tr>
                     ))}
@@ -178,19 +193,12 @@ export function WorkScaffolding() {
                 </table>
               </div>
               <div className="mt-1 flex flex-wrap items-center gap-3 text-xs">
-                <button type="button" className="font-semibold text-[var(--sge-brass-ink)] underline" onClick={() => setCalc([...calc, { l: "", b: "", h: "", e: "1" }])}>+ Add piece</button>
-                <span className="font-semibold">Job scope: {scopeM3 ? `${fmt3(scopeM3)} m³` : "—"}</span>
+                <button type="button" className="font-semibold text-[var(--sge-brass-ink)] underline" onClick={() => setCalc([...calc, { l: "", b: "", h: "", e: "1", planks: "" }])}>+ Add piece</button>
+                <span className="font-semibold">Job scope: {scopeM3 ? `${fmt3(scopeM3)} m³` : "—"}{plat ? ` + ${fmt3(plat)} m² platform (${totalPlanks} planks)` : ""}</span>
                 {bayScope ? <span className="text-[var(--sge-ink-3)]">MIS scope for these bays: {fmt(bayScope)} m³ (to compare)</span> : null}
               </div>
             </div>
-            {/* Owner, 2026-11-21: platform on top of the m³ scope — planks / plates of 2 m × 0.3 m */}
-            <div>
-              <Label htmlFor="sj-planks">Platform (additional) · planks / plates</Label>
-              <Input id="sj-planks" type="number" min={0} step={1} className="mt-1" value={planks} onChange={(e) => setPlanks(e.target.value.replace(/[^\d]/g, ""))} placeholder="e.g. 30" />
-              <p className="mt-1 text-xs text-[var(--sge-ink-3)]">
-                1 plank / plate = 2 m × 0.3 m = {PLANK_M2} m²{plat ? ` · ${planks} × ${PLANK_M2} = ${plat.toLocaleString("en-IN")} m² platform` : ""}
-              </p>
-            </div>
+            <p className="text-xs text-[var(--sge-ink-3)] lg:col-span-2">Platform: 1 plank / plate = 2 m × 0.3 m = {PLANK_M2} m². Each piece has its own platform; the job adds them up.</p>
             <div className="flex items-end">
               <div className="w-full rounded-sm bg-[var(--sge-paper-2)] px-3 py-2 text-sm">
                 <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--sge-ink-3)]">Overall scope</span>
@@ -241,8 +249,8 @@ export function WorkScaffolding() {
                   ...(place.bayFrom ? { bayFrom: place.bayFrom } : {}),
                   ...(place.bayTo ? { bayTo: place.bayTo } : {}),
                   scopeM3,
-                  scopeCalc: calc.filter((r) => pieceM3(r) > 0).map((r) => ({ l: Number(r.l), b: Number(r.b), h: Number(r.h), e: Number(r.e) })),
-                  ...(Number(planks) > 0 ? { platformPlanks: Number(planks) } : {}),
+                  scopeCalc: calc.filter((r) => pieceM3(r) > 0 || Number(r.planks) > 0).map((r) => ({ l: Number(r.l) || 0, b: Number(r.b) || 0, h: Number(r.h) || 0, e: Number(r.e) || 0, ...(Number(r.planks) ? { planks: Number(r.planks) } : {}) })),
+                  ...(totalPlanks > 0 ? { platformPlanks: totalPlanks } : {}),
                   purposes,
                   purpose: purposes.join(", "),
                   targetDate: target,
@@ -298,7 +306,14 @@ export function WorkScaffolding() {
                     <td className="max-w-[260px]">{j.location}<div className="text-xs text-[var(--sge-ink-3)]">{j.purpose} · target {j.targetDate}{p.permits.length ? ` · permit ${p.permits.join(", ")}` : " · permit: from the DPR"}</div></td>
                     <td className="capitalize">{j.type}</td>
                     <td>{name(j.supervisorId)}<div className="text-xs text-[var(--sge-ink-3)]">{firm(j.contractorId)}</div></td>
-                    <td className="whitespace-nowrap text-right tabular-nums">{fmt3(j.scopeM3)} m³{j.platformPlanks ? <div className="text-xs text-[var(--sge-ink-3)]">+ {platformM2(j.platformPlanks).toLocaleString("en-IN")} m² platform ({j.platformPlanks} planks)</div> : null}</td>
+                    <td className="whitespace-nowrap text-right tabular-nums">{fmt3(j.scopeM3)} m³{j.platformPlanks ? <div className="text-xs text-[var(--sge-ink-3)]">+ {platformM2(j.platformPlanks).toLocaleString("en-IN")} m² platform ({j.platformPlanks} planks)</div> : null}
+                      {(j.scopeCalc?.length ?? 0) > 1 ? (
+                        <div className="mt-1 space-y-0.5 text-[11px] text-[var(--sge-ink-3)]">
+                          {j.scopeCalc!.map((c, i) => (
+                            <div key={i}>Piece {i + 1}: {fmt3(scaffoldVolume(c.l, c.b, c.h, c.e))} m³{c.planks ? ` + ${fmt3(platformM2(c.planks))} m²` : ""}</div>
+                          ))}
+                        </div>
+                      ) : null}</td>
                     <td className="text-right tabular-nums">{fmt(p.erected)}</td>
                     <td className="text-right tabular-nums">{fmt(p.removed)}</td>
                     <td><StatusPill tone={TONE[status]}>{STATUS_LABEL[status]}</StatusPill>{j.approvalNote ? <div className="text-xs text-[var(--sge-ink-3)]">{j.approvalNote}</div> : null}</td>
