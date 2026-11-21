@@ -17,6 +17,8 @@ export const TAGGED: { type: TaggedType; label: string; value?: number }[] = [
   { type: "harness", label: "Full-body harness" },
   { type: "ifr", label: "IFR body suit", value: 5000 },
   { type: "rope_access", label: "Rope access kit" },
+  // Owner, 2026-11-21: vehicles go on the DPR like machinery (tag = vehicle number)
+  { type: "vehicle", label: "Vehicle" },
 ];
 export const KITS: { item: KitType; label: string }[] = [
   { item: "gloves", label: "Gloves (pair)" },

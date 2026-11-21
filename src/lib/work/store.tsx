@@ -16,7 +16,7 @@ import { reasonText, type WorkEvent } from "./events";
 import { entryArea } from "./logic";
 import { workRights } from "./permissions";
 import { addDays, weekStart } from "../progress";
-import type { DprEntry, DprReport, Expense, Jms, JmsPayment, JmsStatus, JmsSubmission, Job, PlanLine, PlanLineRequest, ScaffoldJob, ScaffoldMaterialEntry, ScaffoldPlanLine, Stage, WorkState } from "./types";
+import type { DprEntry, DprReport, Expense, Jms, JmsPayment, JmsStatus, JmsSubmission, Job, JobStructure, PlanLine, PlanLineRequest, ScaffoldJob, ScaffoldMaterialEntry, ScaffoldPlanLine, Stage, WorkState } from "./types";
 import { findScaffoldLine, nextScaffoldJobNo, platformM2, typeLabel } from "./scaffold";
 import { compareJms, linkCandidates } from "./jms-compare";
 import { inStock, LIFECYCLE, LIFECYCLE_LABEL, paintUsedInMonth, stepVariance } from "./paint-steps";
@@ -60,7 +60,7 @@ interface WorkApi {
   updatePlanLine: (id: string, patch: { plant?: string; serviceCode?: string; jobType?: string; planM2?: number; supervisorId?: string }) => Result;
   /** Remove a plan line that has nothing on it yet */
   removePlanLine: (id: string) => Result;
-  startJob: (input: { planLineId: string; location: string; stages: Stage[]; startDate: string; plannedM2?: number; plannedEnd?: string }) => Result;
+  startJob: (input: { planLineId: string; location: string; structure?: JobStructure; stages: Stage[]; startDate: string; plannedM2?: number; plannedEnd?: string }) => Result;
   /** 2026-10-24: SIC (on the site) / Owner / SA approve or reject the Admin's plan line; reject needs a reason */
   decidePlanRequest: (id: string, approve: boolean, note: string) => Result;
   /** The Admin takes a waiting plan line back (Undo) */
@@ -757,6 +757,7 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
     if (notMine(line.supervisorId)) return { ok: false, error: "That plan line belongs to another supervisor" };
     if (isMonthClosed(w, line.siteId, line.month)) return { ok: false, error: "That plan month is closed" };
     if (!input.location.trim()) return { ok: false, error: "Location is required" };
+    if (!input.structure) return { ok: false, error: "Pick what the job is on: Pipeline, Structures or Tanks / vessels" };
     if (input.stages.length === 0) return { ok: false, error: "Pick at least one stage" };
     if (!/^\d{4}-\d{2}-\d{2}$/.test(input.startDate)) return { ok: false, error: "Pick the start date" };
     if (input.startDate > today()) return { ok: false, error: "A job can't start in the future" };
@@ -779,6 +780,7 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
       jobNo: nextJobNo(w.jobs, siteCode),
       planLineId: line.id,
       location: input.location.trim(),
+      structure: input.structure,
       startDate: input.startDate,
       stages: input.stages,
       status: "open",

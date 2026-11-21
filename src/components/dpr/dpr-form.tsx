@@ -35,7 +35,8 @@ import { entryArea, round3 } from "@/lib/work/logic";
 import { STAGES } from "@/lib/work/types";
 import { JobEntryForm } from "@/components/work/work-jobs";
 import { PlanWorkLineForm } from "@/components/dpr/plan-work-lines";
-import { lineLabel } from "@/components/work/common";
+import { lineLabel, StructurePicker } from "@/components/work/common";
+import { structureLabel, type JobStructure } from "@/lib/work/types";
 import type { Stage } from "@/lib/work/types";
 import { useStore } from "@/lib/store";
 import { cn } from "@/lib/utils";
@@ -44,6 +45,7 @@ import { worksAt } from "@/lib/site-scope";
 import { workRights } from "@/lib/work/permissions";
 import { PlacePicker, racksFor, type Place } from "@/components/shared/place-picker";
 import { scaffoldProgress, scaffoldStatus, STATUS_LABEL, typeLabel } from "@/lib/work/scaffold";
+import { TAGGED, taggedLabel } from "@/lib/equipment-register";
 
 function uid(prefix: string) {
   return `${prefix}-${Math.random().toString(36).slice(2, 9)}`;
@@ -58,7 +60,7 @@ export const PPE_OPTIONS: { value: NonNullable<DprLabourMark["ppe"]>; label: str
 ];
 
 /** Machinery whose run is logged on the DPR: start / end time and meter (diesel for compressors) */
-export const MACHINERY: EquipmentItem["type"][] = ["hopper", "compressor", "airless"];
+export const MACHINERY: EquipmentItem["type"][] = ["hopper", "compressor", "airless", "vehicle"];
 
 /** Hours between start and end (HH:MM), to 0.1 h; -1 when the end isn't after the start */
 export function runHours(start?: string, end?: string): number | null {
@@ -643,8 +645,41 @@ export function DprForm({
         <h3 className="mb-3 font-heading text-sm font-bold uppercase tracking-wide text-[var(--sge-ink-3)]">
           Equipment &amp; material on crew
         </h3>
+        {/* Owner, 2026-11-21: pick the machinery / equipment / vehicle on the crew from the register */}
+        {!readOnly ? (
+          <div className="mb-3 flex flex-wrap items-end gap-2">
+            <div className="min-w-[260px] flex-1">
+              <Label className="text-xs">Add equipment, machinery or vehicle</Label>
+              <select
+                aria-label="Add equipment"
+                className="mt-1 h-9 w-full rounded-md border border-[var(--sge-line)] bg-[var(--sge-paper)] px-2 text-sm"
+                value=""
+                onChange={(e) => e.target.value && toggleEquipment(e.target.value)}
+              >
+                <option value="">{equipment.length ? "Pick from the register…" : "Nothing in this site's register yet"}</option>
+                {TAGGED.map((t) => {
+                  const free = equipment.filter((eq) => eq.type === t.type && !eq.scrapped && !value.equipmentMarks.some((m) => m.equipmentId === eq.id));
+                  return free.length ? (
+                    <optgroup key={t.type} label={t.label}>
+                      {free.map((eq) => (
+                        <option key={eq.id} value={eq.id}>
+                          {eq.tag}{eq.name ? ` · ${eq.name}` : ""}{eq.status !== "ok" ? ` (${eq.status})` : ""}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ) : null;
+                })}
+              </select>
+            </div>
+          </div>
+        ) : null}
+        {!equipment.length ? (
+          <p className="text-xs text-[var(--sge-ink-3)]">The store adds machinery and vehicles under Operations → Store → Other stock → Stock → Add an item → Machinery (tagged).</p>
+        ) : !value.equipmentMarks.length ? (
+          <p className="text-xs text-[var(--sge-ink-3)]">None on the crew today.</p>
+        ) : null}
         <div className="space-y-2">
-          {equipment.map((eq) => {
+          {equipment.filter((eq) => value.equipmentMarks.some((m) => m.equipmentId === eq.id)).map((eq) => {
             const marked = value.equipmentMarks.find(
               (e) => e.equipmentId === eq.id
             );
@@ -656,16 +691,15 @@ export function DprForm({
                 className="rounded-md border border-[var(--sge-line)] px-3 py-2 text-sm"
               >
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <label className="flex items-center gap-2">
-                  <Checkbox
-                    disabled={readOnly}
-                    checked={!!marked}
-                    onCheckedChange={() => toggleEquipment(eq.id)}
-                  />
-                  <span>
-                    {eq.tag} · {eq.type}
-                  </span>
-                </label>
+                <span className="flex items-center gap-2">
+                  <span className="font-medium">{eq.tag}</span>
+                  <span className="text-[var(--sge-ink-3)]">· {taggedLabel(eq.type)}{eq.name ? ` · ${eq.name}` : ""}</span>
+                  {!readOnly ? (
+                    <button type="button" className="text-xs font-semibold text-[var(--sge-crit)] underline" onClick={() => toggleEquipment(eq.id)}>
+                      Remove
+                    </button>
+                  ) : null}
+                </span>
                 <div className="flex items-center gap-2 text-xs">
                   <StatusPill
                     tone={
@@ -726,7 +760,7 @@ export function DprForm({
                         <Label className="text-xs">Meter reading</Label>
                         <Input aria-label={`Meter reading ${eq.tag}`} type="number" min="0" step="any" disabled={readOnly} className="mt-1 h-8 w-[120px] text-xs" value={marked.meterReading ?? ""} onChange={(e) => setEquipment(eq.id, { meterReading: e.target.value === "" ? undefined : Number(e.target.value) })} />
                       </div>
-                      {eq.type === "compressor" ? (
+                      {eq.type === "compressor" || eq.type === "vehicle" ? (
                         <div>
                           <Label className="text-xs">Diesel used (L)</Label>
                           <Input aria-label={`Diesel litres ${eq.tag}`} type="number" min="0" step="any" disabled={readOnly} className="mt-1 h-8 w-[110px] text-xs" value={marked.dieselL ?? ""} onChange={(e) => setEquipment(eq.id, { dieselL: e.target.value === "" ? undefined : Number(e.target.value) })} />
@@ -1137,7 +1171,7 @@ function JobLines({
                 >
                   <option value="">Pick a job…</option>
                   {jobs.map((j) => (
-                    <option key={j.id} value={j.id}>{j.jobNo}{report.plant ? "" : ` · ${plantOf(j.id)}`} · {j.location}</option>
+                    <option key={j.id} value={j.id}>{j.jobNo}{report.plant ? "" : ` · ${plantOf(j.id)}`} · {j.location}{j.structure ? ` · ${structureLabel(j.structure)}` : ""}</option>
                   ))}
                 </select>
               </div>
@@ -1209,6 +1243,7 @@ function DprStartJob({
   const line = lines.find((l) => l.id === lineId);
   const item = line ? work.serviceItems.find((x) => x.code === line.serviceCode) : undefined;
   const [location, setLocation] = useState("");
+  const [structure, setStructure] = useState<JobStructure | undefined>();
   const [place, setPlace] = useState<Place>({ location: "" });
   const [plannedM2, setPlannedM2] = useState("");
   const [plannedEnd, setPlannedEnd] = useState("");
@@ -1245,6 +1280,9 @@ function DprStartJob({
               <Input id="dpr-job-loc" className="mt-1" value={location} onChange={(e) => setLocation(e.target.value)} placeholder="e.g. TT4 NORTH SIDE SR NO. 269–276" />
             </>
           )}
+        </div>
+        <div className="sm:col-span-2">
+          <StructurePicker idPrefix="dpr-job" value={structure} onChange={setStructure} />
         </div>
         <div>
           <Label htmlFor="dpr-job-m2">Planned m² (final shade)</Label>
@@ -1286,10 +1324,11 @@ function DprStartJob({
           onClick={() => {
             setErr(null);
             if (!location.trim()) return setErr("Give the location / area");
+            if (!structure) return setErr("Pick the structure: Pipeline, Structures or Tanks / vessels");
             if (!(Number(plannedM2) > 0) || !plannedEnd) return setErr("Give the planned m² and the planned end date");
             // With the plant already set the draft saves first; otherwise it saves once the job fills the plant in
             if (report.plant && !saveFirst()) return;
-            const r = startJob({ planLineId: lineId, location, stages: chosen, startDate: report.date, plannedM2: Number(plannedM2), plannedEnd });
+            const r = startJob({ planLineId: lineId, location, structure, stages: chosen, startDate: report.date, plannedM2: Number(plannedM2), plannedEnd });
             if (!r.ok) return setErr(r.error);
             onStarted(r.id!, "Job started (its plan goes to the SIC) — add today's line below.", line!.plant);
           }}

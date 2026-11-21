@@ -14,10 +14,10 @@ import { today } from "@/lib/today";
 import { useWork } from "@/lib/work/store";
 import { pendingReports, reportOpen } from "@/lib/work/reports";
 import Link from "next/link";
-import type { Job, Member, Stage } from "@/lib/work/types";
-import { STAGES } from "@/lib/work/types";
+import type { Job, JobStructure, Member, Stage } from "@/lib/work/types";
+import { STAGES, structureLabel } from "@/lib/work/types";
 import { cn } from "@/lib/utils";
-import { fmtM2, lineLabel, Msg, selectCls, StageChips, useWorkScope } from "./common";
+import { fmtM2, lineLabel, Msg, selectCls, StageChips, StructurePicker, useWorkScope } from "./common";
 import { WorkExcelTransferStack } from "./work-excel-transfer";
 
 type Filter = "open" | "awaiting_sic" | "closed";
@@ -110,7 +110,7 @@ export function WorkJobs() {
                 </div>
                 <div className="mt-0.5 text-sm">{lineLabel(line, it)}</div>
                 <div className="text-xs text-[var(--sge-ink-3)]">
-                  {job.location} · {s.staffName(job.supervisorId)} · started {job.startDate}
+                  {job.location}{job.structure ? ` · ${structureLabel(job.structure)}` : ""} · {s.staffName(job.supervisorId)} · started {job.startDate}
                   {job.endDate ? ` · ended ${job.endDate}` : ""}
                   {s.allSites ? ` · ${s.siteCode(line.siteId)}` : ""}
                 </div>
@@ -521,6 +521,7 @@ function StartJob({ onDone }: { onDone: (m: { ok: boolean; msg: string }) => voi
   const line = s.line(lineId);
   const it = line ? s.item(line.serviceCode) : undefined;
   const [location, setLocation] = useState("");
+  const [structure, setStructure] = useState<JobStructure | undefined>();
   const [startDate, setStartDate] = useState(today());
   const [plannedM2, setPlannedM2] = useState("");
   const [plannedEnd, setPlannedEnd] = useState("");
@@ -539,10 +540,11 @@ function StartJob({ onDone }: { onDone: (m: { ok: boolean; msg: string }) => voi
           onSubmit={(e) => {
             e.preventDefault();
             // docs §24: the plan (m² and end date) is what the SIC approves and progress is measured against
+            if (!structure) return onDone({ ok: false, msg: "Pick the structure: Pipeline, Structures or Tanks / vessels" });
             if (!(Number(plannedM2) > 0) || !plannedEnd) return onDone({ ok: false, msg: "Give the planned m² and the planned end date" });
-            const r = startJob({ planLineId: lineId, location, stages: chosen, startDate, plannedM2: Number(plannedM2), plannedEnd });
+            const r = startJob({ planLineId: lineId, location, structure, stages: chosen, startDate, plannedM2: Number(plannedM2), plannedEnd });
             onDone(r.ok ? { ok: true, msg: "Job plan sent to the SIC — add DPR entries as work progresses." } : { ok: false, msg: r.error });
-            if (r.ok) { setLocation(""); setStages(null); setPlannedM2(""); setPlannedEnd(""); }
+            if (r.ok) { setLocation(""); setStructure(undefined); setStages(null); setPlannedM2(""); setPlannedEnd(""); }
           }}
         >
           <div className="grid gap-3 sm:grid-cols-2">
@@ -560,6 +562,7 @@ function StartJob({ onDone }: { onDone: (m: { ok: boolean; msg: string }) => voi
               <Label>Location / area</Label>
               <Input className="mt-1" value={location} onChange={(e) => setLocation(e.target.value)} placeholder="e.g. TT4 NORTH SIDE SR NO. 269–276" />
             </div>
+            <StructurePicker idPrefix="start-job" value={structure} onChange={setStructure} />
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <Label htmlFor="plan-m2">Planned m² (final shade)</Label>

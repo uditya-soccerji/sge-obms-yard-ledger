@@ -96,11 +96,22 @@ export interface PlanLineRequest {
 
 export type JobStatus = "open" | "awaiting_sic" | "closed";
 
+/** What the painting & blasting job is on — same kinds as the estimator (owner, 2026-11-21) */
+export type JobStructure = "pipeline" | "structures" | "tanks";
+export const JOB_STRUCTURES: { id: JobStructure; label: string }[] = [
+  { id: "pipeline", label: "Pipeline" },
+  { id: "structures", label: "Structures" },
+  { id: "tanks", label: "Tanks / vessels" },
+];
+export const structureLabel = (s?: JobStructure) => JOB_STRUCTURES.find((x) => x.id === s)?.label ?? "";
+
 export interface Job {
   id: string;
   jobNo: string;
   planLineId: string;
   location: string;
+  /** Pipeline / Structures / Tanks; required on new jobs from 2026-11-21 */
+  structure?: JobStructure;
   startDate: string;
   stages: Stage[];
   status: JobStatus;

@@ -248,7 +248,7 @@ interface StoreApi {
   raiseObservation: (input: Omit<SiteObservation, "id" | "status" | "raisedBy" | "raisedAt">) => { ok: boolean; error?: string; id?: string };
   moveObservation: (id: string, to: "fixed" | "closed" | "open", note?: string) => { ok: boolean; error?: string };
   /** Store equipment register (round 2, §27) */
-  addTagged: (input: { type: EquipmentItem["type"]; tag: string; expiryDate?: string; value?: number }) => { ok: boolean; error?: string };
+  addTagged: (input: { type: EquipmentItem["type"]; tag: string; name?: string; expiryDate?: string; value?: number }) => { ok: boolean; error?: string };
   receiveKit: (input: { item: KitLot["item"]; qty: number; expiryDate?: string; note?: string }) => { ok: boolean; error?: string };
   issueTagged: (equipmentId: string, supervisorId: string) => { ok: boolean; error?: string };
   issueKit: (item: KitLot["item"], qty: number, supervisorId: string) => { ok: boolean; error?: string; lots?: KitIssue["lots"] };
@@ -2281,7 +2281,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
 
   // ---- Store equipment register (round 2, §27) ----
   const isStore = (s: AppState) => can(s, "store", "update");
-  const addTagged = useCallback((input: { type: EquipmentItem["type"]; tag: string; expiryDate?: string; value?: number }) => {
+  const addTagged = useCallback((input: { type: EquipmentItem["type"]; tag: string; name?: string; expiryDate?: string; value?: number }) => {
     const cur = stateRef.current;
     if (!isStore(cur)) return DENIED;
     const tag = input.tag.trim().toUpperCase();
@@ -2289,7 +2289,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     if (cur.equipment.some((e) => e.tag.toUpperCase() === tag)) return { ok: false, error: `Tag ${tag} is already in the register` };
     const siteId = entrySiteId(cur);
     setState((s) => {
-      const item: EquipmentItem = { id: uid("eq"), type: input.type, tag, status: "ok", lastCheck: todayDate(), expiryDate: input.expiryDate || undefined, checklist: [], siteId, value: input.value || undefined };
+      const item: EquipmentItem = { id: uid("eq"), type: input.type, tag, name: input.name?.trim() || undefined, status: "ok", lastCheck: todayDate(), expiryDate: input.expiryDate || undefined, checklist: [], siteId, value: input.value || undefined };
       const next = { ...s, equipment: [...s.equipment, item] };
       return { ...next, auditLog: [makeAudit(next, "store", "create", `Equipment ${tag} (${input.type}) added${input.expiryDate ? ` · expires ${input.expiryDate}` : ""}`), ...s.auditLog] };
     });

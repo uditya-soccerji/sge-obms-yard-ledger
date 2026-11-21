@@ -182,7 +182,7 @@ export function StoreEquipmentDesk() {
               {inStoreTagged.map((e) => (
                 <tr key={e.id} className="border-t border-[var(--sge-line)]">
                   <td className="py-1.5 font-mono text-xs">{e.tag}</td>
-                  <td>{taggedLabel(e.type)}{e.value ? <span className="text-xs text-[var(--sge-ink-3)]"> · ₹{e.value.toLocaleString("en-IN")}</span> : null}</td>
+                  <td>{taggedLabel(e.type)}{e.name ? <span className="text-xs text-[var(--sge-ink-3)]"> · {e.name}</span> : null}{e.value ? <span className="text-xs text-[var(--sge-ink-3)]"> · ₹{e.value.toLocaleString("en-IN")}</span> : null}</td>
                   <td><Expiry date={e.expiryDate} /></td>
                   <td><StatusPill tone={e.status === "ok" ? "ok" : e.status === "due" ? "warn" : "crit"}>{e.status}</StatusPill></td>
                   <td className="whitespace-nowrap text-right">

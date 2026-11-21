@@ -69,7 +69,14 @@ export function StoreWorkspace({ panels, counts }: { panels: Partial<Record<Stor
   const pathname = usePathname();
   const sec = SECTIONS.find((x) => x.id === params.get("sec")) ?? SECTIONS[0];
   const tab = (sec.tabs.find((t) => t.id === params.get("tab"))?.id ?? sec.tabs[0]?.id ?? sec.id) as StoreTabId;
-  const go = (s: SectionId, t?: StoreTabId) => router.replace(`${pathname}?sec=${s}${t ? `&tab=${t}` : ""}`);
+  // Keep the page's other params (e.g. ?p=store inside Operations), or the tabs jump back to its first page
+  const go = (s: SectionId, t?: StoreTabId) => {
+    const q = new URLSearchParams(params.toString());
+    q.set("sec", s);
+    if (t) q.set("tab", t);
+    else q.delete("tab");
+    router.replace(`${pathname}?${q.toString()}`);
+  };
   // The store's site: the header's site; on All sites (central, Owner, SA) pick one here
   const allSites = state.currentSiteId === ALL_SITES;
   const [picked, setPicked] = useState("");

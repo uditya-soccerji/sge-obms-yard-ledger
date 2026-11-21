@@ -7,8 +7,8 @@ import { useStore } from "@/lib/store";
 import { useWork } from "@/lib/work/store";
 import { currentMonthOf, DEFAULT_WAGE } from "@/lib/work/logic";
 import { workRights } from "@/lib/work/permissions";
-import type { PlanLine, Stage } from "@/lib/work/types";
-import { STAGES } from "@/lib/work/types";
+import type { JobStructure, PlanLine, Stage } from "@/lib/work/types";
+import { JOB_STRUCTURES, STAGES } from "@/lib/work/types";
 
 export const fmtM2 = (n: number) =>
   n.toLocaleString("en-IN", { minimumFractionDigits: 0, maximumFractionDigits: 3 });
@@ -132,5 +132,31 @@ export function Msg({ text }: { text: { ok: boolean; msg: string } | null }) {
     >
       {text.msg}
     </p>
+  );
+}
+
+/** Pipeline / Structures / Tanks — what a painting & blasting job is on (owner, 2026-11-21) */
+export function StructurePicker({ value, onChange, idPrefix = "job" }: { value?: JobStructure; onChange: (v: JobStructure) => void; idPrefix?: string }) {
+  return (
+    <div>
+      <span className="text-sm font-medium" id={`${idPrefix}-structure`}>Structure</span>
+      <div role="radiogroup" aria-labelledby={`${idPrefix}-structure`} className="mt-1 flex flex-wrap gap-1">
+        {JOB_STRUCTURES.map((x) => (
+          <button
+            key={x.id}
+            type="button"
+            role="radio"
+            aria-checked={value === x.id}
+            onClick={() => onChange(x.id)}
+            className={cn(
+              "rounded-sm px-3 py-1.5 text-xs font-semibold",
+              value === x.id ? "bg-[var(--sge-night)] text-[var(--sge-brass-wash)]" : "bg-[var(--sge-paper-2)] text-[var(--sge-ink-2)] hover:bg-[var(--sge-brass-wash)]"
+            )}
+          >
+            {x.label}
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }

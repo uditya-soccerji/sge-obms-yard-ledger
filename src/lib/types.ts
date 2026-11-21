@@ -591,7 +591,9 @@ export interface AttendanceRecord {
 export interface EquipmentItem {
   id: string;
   /** Round 2 (§27) adds IFR body suit and rope access to the tagged items */
-  type: "hopper" | "compressor" | "airless" | "harness" | "ifr" | "rope_access";
+  type: "hopper" | "compressor" | "airless" | "harness" | "ifr" | "rope_access" | "vehicle";
+  /** Optional name / model, e.g. "Tata Ace" for a vehicle (2026-11-21) */
+  name?: string;
   tag: string;
   status: "ok" | "due" | "fault";
   assignedTo?: string;

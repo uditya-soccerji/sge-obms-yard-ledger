@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { selectCls } from "@/components/work/common";
+import { taggedLabel } from "@/lib/equipment-register";
 import { cell, downloadXlsxWithHeaders, readSpreadsheet } from "@/lib/excel-io";
 import { useStore } from "@/lib/store";
 import { allStoreItems, batchesFor, GROUP_LABEL, heldBy, inScope, inStore, paintTypeOf, paintTypes, type StockScope } from "@/lib/store-ledger";
@@ -335,11 +336,11 @@ const ADD_KINDS: { id: AddKind; label: string; unit: string; hint: string }[] = 
   { id: "material", label: "Materials", unit: "nos", hint: "Pipes, hoses, brushes, abrasives, fittings…" },
   { id: "equipment", label: "Equipment", unit: "nos", hint: "Hand tools, guns, machines counted by number" },
   { id: "ppe", label: "PPE", unit: "nos", hint: "Gloves, masks, goggles, helmets, harness…" },
-  { id: "machinery", label: "Machinery (tagged)", unit: "", hint: "Hopper, compressor, airless… one per tag no." },
+  { id: "machinery", label: "Machinery (tagged)", unit: "", hint: "Hopper, compressor, airless, vehicle… one per tag no. (a vehicle's tag is its number)" },
   { id: "fuel", label: "Fuel", unit: "L", hint: "Diesel and the like" },
   { id: "other", label: "Others", unit: "nos", hint: "Stationery and anything else" },
 ];
-const MACHINE_TYPES: EquipmentItem["type"][] = ["hopper", "compressor", "airless", "harness", "ifr", "rope_access"];
+const MACHINE_TYPES: EquipmentItem["type"][] = ["hopper", "compressor", "airless", "harness", "ifr", "rope_access", "vehicle"];
 
 /** Add an item to the store's list — paint, materials, equipment, PPE, tagged machinery, fuel or others */
 export function AddItemForm({ scope }: { scope: StockScope }) {
@@ -350,7 +351,7 @@ export function AddItemForm({ scope }: { scope: StockScope }) {
   const [kind, setKind] = useState<AddKind>(scope === "paint" ? "paint" : "material");
   const k = ADD_KINDS.find((x) => x.id === kind)!;
   const categories = [...new Set(items.filter((i) => i.group === kind).map((i) => i.category))];
-  const [f, setF] = useState({ category: "", name: "", code: "", unit: "", trackExpiry: false, machine: "hopper" as EquipmentItem["type"], tag: "", expiry: "", value: "" });
+  const [f, setF] = useState({ category: "", name: "", code: "", unit: "", trackExpiry: false, machine: "hopper" as EquipmentItem["type"], tag: "", mname: "", expiry: "", value: "" });
   const [msg, setMsg] = useState<Msg>(null);
   return (
     <Panel>
@@ -372,23 +373,27 @@ export function AddItemForm({ scope }: { scope: StockScope }) {
       <p className="mb-3 text-xs text-[var(--sge-ink-3)]">{k.hint}</p>
       {kind === "machinery" ? (
         <form
-          className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5"
+          className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6"
           onSubmit={(e) => {
             e.preventDefault();
-            const r = addTagged({ type: f.machine, tag: f.tag, expiryDate: f.expiry || undefined, value: Number(f.value) || undefined });
+            const r = addTagged({ type: f.machine, tag: f.tag, name: f.mname, expiryDate: f.expiry || undefined, value: Number(f.value) || undefined });
             setMsg(r.ok ? { ok: true, text: `Added ${f.machine} ${f.tag.toUpperCase()} to the equipment register (Machinery tab).` } : { ok: false, text: r.error ?? "Couldn't add" });
-            if (r.ok) setF({ ...f, tag: "", expiry: "", value: "" });
+            if (r.ok) setF({ ...f, tag: "", mname: "", expiry: "", value: "" });
           }}
         >
           <div>
             <Label>Type</Label>
             <select aria-label="Machine type" className={selectCls + " mt-1"} value={f.machine} onChange={(e) => setF({ ...f, machine: e.target.value as EquipmentItem["type"] })}>
-              {MACHINE_TYPES.map((t) => <option key={t} value={t}>{t.replace("_", " ")}</option>)}
+              {MACHINE_TYPES.map((t) => <option key={t} value={t}>{taggedLabel(t)}</option>)}
             </select>
           </div>
           <div>
             <Label>Tag / serial no.</Label>
-            <Input aria-label="Tag no." className="mt-1" placeholder="e.g. CMP-DTA-02" value={f.tag} onChange={(e) => setF({ ...f, tag: e.target.value })} />
+            <Input aria-label="Tag no." className="mt-1" placeholder={f.machine === "vehicle" ? "e.g. GJ10AB1234" : "e.g. CMP-DTA-02"} value={f.tag} onChange={(e) => setF({ ...f, tag: e.target.value })} />
+          </div>
+          <div>
+            <Label>Name / model (optional)</Label>
+            <Input aria-label="Name or model" className="mt-1" placeholder={f.machine === "vehicle" ? "e.g. Tata Ace, Hydra crane" : "e.g. Atlas Copco 750 cfm"} value={f.mname} onChange={(e) => setF({ ...f, mname: e.target.value })} />
           </div>
           <div>
             <Label>Inspection expiry</Label>
@@ -399,7 +404,7 @@ export function AddItemForm({ scope }: { scope: StockScope }) {
             <Input aria-label="Value" className="mt-1" type="number" min="0" value={f.value} onChange={(e) => setF({ ...f, value: e.target.value })} />
           </div>
           <div className="flex items-end"><Button type="submit" variant="outline">Add machine</Button></div>
-          <div className="sm:col-span-2 lg:col-span-5">{show(msg)}</div>
+          <div className="sm:col-span-2 lg:col-span-6">{show(msg)}</div>
         </form>
       ) : (
         <form
