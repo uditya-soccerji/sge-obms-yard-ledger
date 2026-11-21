@@ -9,6 +9,7 @@ import {
 } from "@/components/shared/ui-bits";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { NumberInput } from "@/components/ui/number-input";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -102,23 +103,11 @@ function PaintCalculatorPage() {
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label>Area (m²)</Label>
-              <Input
-                type="number"
-                className="mt-1"
-                value={area}
-                min={0}
-                onChange={(e) => setArea(Math.max(0, Number(e.target.value) || 0))}
-              />
+              <NumberInput className="mt-1" min={0} value={area} onValue={(n) => setArea(Math.max(0, n))} />
             </div>
             <div>
               <Label>Contingency %</Label>
-              <Input
-                type="number"
-                className="mt-1"
-                value={contingency}
-                min={0}
-                onChange={(e) => setContingency(Math.max(0, Number(e.target.value) || 0))}
-              />
+              <NumberInput className="mt-1" min={0} value={contingency} onValue={(n) => setContingency(Math.max(0, n))} />
             </div>
           </div>
 

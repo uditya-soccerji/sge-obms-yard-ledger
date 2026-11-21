@@ -7,6 +7,7 @@ import { Panel, StatusPill } from "@/components/shared/ui-bits";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
+import { NumberInput } from "@/components/ui/number-input";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -964,15 +965,14 @@ export function DprForm({
                 <option value="">Pick plant…</option>
                 {plants.map((p) => <option key={p} value={p}>{p}</option>)}
               </select>
-                <Input
+                <NumberInput
                   disabled={readOnly}
-                  type="number"
                   value={row.paintLitres}
-                  onChange={(e) => {
+                  onValue={(n) => {
                     const stockByPlant = value.storeBody!.stockByPlant.map(
                       (r, i) =>
                         i === idx
-                          ? { ...r, paintLitres: Number(e.target.value) }
+                          ? { ...r, paintLitres: n }
                           : r
                     );
                     onChange({
@@ -1462,14 +1462,13 @@ function ScaffoldWorkEditor({
           ).map(([key, label]) => (
             <div key={key}>
               <Label>{label}</Label>
-              <Input
-                type="number"
+              <NumberInput
                 className="mt-1"
                 disabled={readOnly}
                 value={line[key] ?? 0}
-                onChange={(e) => {
+                onValue={(n) => {
                   const next = lines.map((l, i) =>
-                    i === idx ? { ...l, [key]: Number(e.target.value) } : l
+                    i === idx ? { ...l, [key]: n } : l
                   );
                   onChange(next);
                 }}

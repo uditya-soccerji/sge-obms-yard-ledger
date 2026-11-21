@@ -3,6 +3,7 @@
 import { Panel } from "@/components/shared/ui-bits";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { NumberInput } from "@/components/ui/number-input";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -51,14 +52,18 @@ function GlanceField({
       <Label className="text-[10px] uppercase tracking-wide text-[var(--sge-ink-3)]">
         {label}
       </Label>
-      <Input
-        type="number"
-        className="mt-0.5 h-8"
-        disabled={readOnly || computed}
-        title={computed ? "Counted from the observations in section A" : undefined}
-        value={value}
-        onChange={(e) => onChange(Number(e.target.value))}
-      />
+      {computed ? (
+        <Input
+          type="number"
+          className="mt-0.5 h-8"
+          disabled
+          title="Counted from the observations in section A"
+          value={value}
+          readOnly
+        />
+      ) : (
+        <NumberInput className="mt-0.5 h-8" disabled={readOnly} value={value} onValue={onChange} />
+      )}
     </div>
   );
 }
@@ -604,14 +609,13 @@ export function SafetyDprForm({
                 </div>
                 <div>
                   <Label className="text-[10px]">Count</Label>
-                  <Input
-                    type="number"
+                  <NumberInput
                     className="mt-0.5 h-8"
                     disabled={readOnly}
                     value={row.count}
-                    onChange={(e) => {
+                    onValue={(n) => {
                       const permits = body.permits.map((p, i) =>
-                        i === idx ? { ...p, count: Number(e.target.value) } : p
+                        i === idx ? { ...p, count: n } : p
                       );
                       patch({ permits });
                     }}
@@ -633,16 +637,13 @@ export function SafetyDprForm({
                 </div>
                 <div>
                   <Label className="text-[10px]">Manpower</Label>
-                  <Input
-                    type="number"
+                  <NumberInput
                     className="mt-0.5 h-8"
                     disabled={readOnly}
                     value={row.manpower}
-                    onChange={(e) => {
+                    onValue={(n) => {
                       const permits = body.permits.map((p, i) =>
-                        i === idx
-                          ? { ...p, manpower: Number(e.target.value) }
-                          : p
+                        i === idx ? { ...p, manpower: n } : p
                       );
                       patch({ permits });
                     }}

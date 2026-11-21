@@ -560,3 +560,4 @@ Process page: "Store module — process" (Claude doc). Decisions there: reorder 
 - New register type **Vehicle** (tag = vehicle number) and an optional name / model for every tagged item. The owner will send the list of machinery and vehicles to load.
 - Every new painting & blasting job records its **Structure**: Pipeline, Structures or Tanks / vessels (the estimator's kinds). Required on the Work → Jobs form and the DPR's Start job; older jobs stay blank.
 - Store tabs inside Operations keep `?p=store` in the address, so Other stock / Machinery / Store DPRs no longer jump back to the DPR page.
+- Number boxes (2026-11-21): boxes start blank, not 0, and stay blank when cleared (`components/ui/number-input.tsx`); blank saves as 0. Fixed 30: scaffold DPR line (4), store DPR litres (1), safety DPR (15), paint / area / estimate / scaffold calculators (10). New number boxes should use `NumberInput` or a string state.

@@ -11,6 +11,7 @@ import {
 } from "@/components/shared/ui-bits";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { NumberInput } from "@/components/ui/number-input";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -91,13 +92,7 @@ function CostEstimatePage() {
             <Label>
               Quantity ({kind === "scaffolding" ? "m³" : "m²"})
             </Label>
-            <Input
-              type="number"
-              className="mt-1"
-              min={0}
-              value={qty}
-              onChange={(e) => setQty(Math.max(0, Number(e.target.value) || 0))}
-            />
+            <NumberInput className="mt-1" min={0} value={qty} onValue={(n) => setQty(Math.max(0, n))} />
           </div>
         </Panel>
 

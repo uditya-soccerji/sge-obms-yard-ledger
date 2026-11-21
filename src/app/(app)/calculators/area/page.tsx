@@ -3,7 +3,7 @@
 import { guarded } from "@/components/shared/require-module";
 import { useState } from "react";
 import { Panel, SectionHeader } from "@/components/shared/ui-bits";
-import { Input } from "@/components/ui/input";
+import { NumberInput } from "@/components/ui/number-input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { areaFromDims } from "@/lib/paint-calc";
@@ -34,33 +34,15 @@ function AreaScopePage() {
         <div className="grid grid-cols-3 gap-3">
           <div>
             <Label>Length (m)</Label>
-            <Input
-              type="number"
-              className="mt-1"
-              value={length}
-              min={0}
-              onChange={(e) => setLength(Math.max(0, Number(e.target.value) || 0))}
-            />
+            <NumberInput className="mt-1" min={0} value={length} onValue={(n) => setLength(Math.max(0, n))} />
           </div>
           <div>
             <Label>Width / height (m)</Label>
-            <Input
-              type="number"
-              className="mt-1"
-              value={width}
-              min={0}
-              onChange={(e) => setWidth(Math.max(0, Number(e.target.value) || 0))}
-            />
+            <NumberInput className="mt-1" min={0} value={width} onValue={(n) => setWidth(Math.max(0, n))} />
           </div>
           <div>
             <Label>Faces</Label>
-            <Input
-              type="number"
-              className="mt-1"
-              value={faces}
-              min={0}
-              onChange={(e) => setFaces(Math.max(0, Number(e.target.value) || 0))}
-            />
+            <NumberInput className="mt-1" min={0} value={faces} onValue={(n) => setFaces(Math.max(0, n))} />
           </div>
         </div>
         <div className="rounded-md border border-[var(--sge-accent)]/30 bg-[var(--sge-accent-wash)] p-4">

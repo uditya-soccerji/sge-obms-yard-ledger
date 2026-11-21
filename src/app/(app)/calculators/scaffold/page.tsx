@@ -3,7 +3,7 @@
 import { guarded } from "@/components/shared/require-module";
 import { useState } from "react";
 import { Panel, SectionHeader } from "@/components/shared/ui-bits";
-import { Input } from "@/components/ui/input";
+import { NumberInput } from "@/components/ui/number-input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { scaffoldVolume } from "@/lib/paint-calc";
@@ -35,39 +35,19 @@ function ScaffoldPage() {
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
           <div>
             <Label>L (m)</Label>
-            <Input
-              type="number"
-              className="mt-1"
-              value={l}
-              onChange={(e) => setL(Number(e.target.value))}
-            />
+            <NumberInput className="mt-1" min={0} value={l} onValue={setL} />
           </div>
           <div>
             <Label>W (m)</Label>
-            <Input
-              type="number"
-              className="mt-1"
-              value={b}
-              onChange={(e) => setB(Number(e.target.value))}
-            />
+            <NumberInput className="mt-1" min={0} value={b} onValue={setB} />
           </div>
           <div>
             <Label>H (m)</Label>
-            <Input
-              type="number"
-              className="mt-1"
-              value={h}
-              onChange={(e) => setH(Number(e.target.value))}
-            />
+            <NumberInput className="mt-1" min={0} value={h} onValue={setH} />
           </div>
           <div>
             <Label>E (factor)</Label>
-            <Input
-              type="number"
-              className="mt-1"
-              value={e}
-              onChange={(ev) => setE(Number(ev.target.value))}
-            />
+            <NumberInput className="mt-1" min={0} value={e} onValue={setE} />
           </div>
         </div>
         <div className="rounded-md border border-[var(--sge-steel)]/30 bg-[var(--sge-surface-2)] p-4">
