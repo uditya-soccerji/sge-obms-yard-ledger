@@ -594,7 +594,8 @@ export function labourByJob(
   for (const e of effectiveEntries(w.dprs)) {
     for (const lab of e.crew ?? []) {
       const key = markKey(lab, e.date);
-      slots.set(key, (slots.get(key) ?? new Set()).add(e.jobId));
+      // 2026-11-21: a no-job line (Admin, from the plan) keeps its crew cost under its plan line
+      slots.set(key, (slots.get(key) ?? new Set()).add(e.jobId || `plan|${e.planLineId ?? e.id}`));
     }
   }
   for (const [key, jobs] of slots) {
@@ -654,9 +655,9 @@ export interface JobPnl {
 function siteLabourDays(w: WorkState, labour: Map<string, JobLabour>): Map<string, number> {
   const lineOf = new Map(w.planLines.map((l) => [l.id, l]));
   const out = new Map<string, number>();
-  for (const job of w.jobs) {
-    const site = lineOf.get(job.planLineId)?.siteId ?? "";
-    for (const [m, d] of Object.entries(labour.get(job.id)?.byMonth ?? {})) {
+  for (const [id, lab] of labour) {
+    const site = lineOf.get(id.startsWith("plan|") ? id.slice(5) : w.jobs.find((j) => j.id === id)?.planLineId ?? "")?.siteId ?? "";
+    for (const [m, d] of Object.entries(lab.byMonth)) {
       out.set(`${site}|${m}`, (out.get(`${site}|${m}`) ?? 0) + d);
     }
   }
@@ -735,6 +736,25 @@ export function pnlRows(
       profit: income - cost,
       earnedProfit: earned - cost,
     });
+  }
+  // Crew on the Admin's no-job lines (from the plan): labour and its share of overhead, no income
+  for (const [id, lab] of labour) {
+    if (!id.startsWith("plan|")) continue;
+    const line = lineOf.get(id.slice(5));
+    if (!line) continue;
+    let labourCost = 0;
+    let labourDays = 0;
+    let overhead = 0;
+    for (const [m, d] of Object.entries(lab.byMonth)) {
+      if (!inMonth(m, month)) continue;
+      labourDays += d;
+      labourCost += lab.costByMonth[m] ?? 0;
+      const total = siteDays.get(`${line.siteId}|${m}`) ?? 0;
+      if (total > 0) overhead += (fixed.get(`${line.siteId}|${m}`) ?? 0) * (d / total);
+    }
+    if (!labourDays && !labourCost) continue;
+    const cost = labourCost + overhead;
+    rows.push({ jobId: id, kind: "job", siteId: line.siteId, supervisorId: line.supervisorId, serviceCode: line.serviceCode, month: month === "all" ? line.month : month, qty: 0, paidQty: 0, earned: 0, income: 0, labour: labourCost, labourDays, direct: 0, overhead, profit: -cost, earnedProfit: -cost });
   }
   for (const [key, amount] of fixed) {
     const [siteId, m] = key.split("|");

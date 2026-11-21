@@ -12,7 +12,7 @@
  */
 import type { StaffMember } from "./types";
 import type { DprEntry, DprReport, Jms, Job, PlanLine } from "./work/types";
-import { effectiveEntries, entryArea, entryPlanLineId } from "./work/logic";
+import { effectiveEntries, entryArea, entryPlanLineId, finalStage } from "./work/logic";
 
 export type JobKind = "pb" | "scaf" | "rope";
 /** The job-type filter: "blast" / "paint" are the painting kinds narrowed to one side */
@@ -84,6 +84,7 @@ export function buildFacts(w: WorkData, staff: StaffMember[], from: string, to: 
   const lineById = new Map(w.planLines.map((l) => [l.id, l]));
   const staffById = new Map(staff.map((s) => [s.id, s]));
   const blank = { blast: 0, coat: 0, final: 0, litres: 0, erect: 0, dism: 0, mandays: 0, ppe: 0 };
+  const jobById = new Map(w.jobs.map((j) => [j.id, j]));
 
   for (const e of effectiveEntries(w.dprs)) {
     if (e.date < from || e.date > to) continue;
@@ -98,9 +99,11 @@ export function buildFacts(w: WorkData, staff: StaffMember[], from: string, to: 
       plant: P(line?.plant ?? rep?.plant ?? ""),
       supervisorId: e.supervisorId,
       kind: kindOf(staffById.get(e.supervisorId), rep?.submitterType) === "rope" ? "rope" : "pb",
-      blast: e.stage === "prep" ? area : 0,
-      coat: e.stage === "coat1" || e.stage === "coat2" ? area : 0,
-      final: e.stage === "final" ? area : 0,
+      // 2026-11-21: "final" is the job's own last stage (a job may end at 2nd coat), not only "Final shade"
+      ...(() => {
+        const fin = isFinal(e, jobById);
+        return { blast: e.stage === "prep" && !fin ? area : 0, coat: (e.stage === "coat1" || e.stage === "coat2") && !fin ? area : 0, final: fin ? area : 0 };
+      })(),
       litres: e.litres || 0,
     });
   }
@@ -119,6 +122,12 @@ export function buildFacts(w: WorkData, staff: StaffMember[], from: string, to: 
     if (mandays || ppe) out.push({ ...blank, date: r.date, siteId: r.siteId, plant: P(r.plant), supervisorId: r.submitterId, kind, mandays, ppe });
   }
   return out;
+}
+
+/** The line is the job's final shade: its last required stage; a no-job line counts at "Final shade" */
+function isFinal(e: DprEntry, jobs: Map<string, Job>): boolean {
+  const job = e.jobId ? jobs.get(e.jobId) : undefined;
+  return job ? e.stage === finalStage(job) : e.stage === "final";
 }
 
 export function matches(f: Fact, x: Filters): boolean {
@@ -270,22 +279,32 @@ export function planVsActual(w: WorkData, month: string, x: Pick<Filters, "siteI
       (!x.supervisorId || l.supervisorId === x.supervisorId) &&
       (!x.supervisorIds || x.supervisorIds.includes(l.supervisorId))
   );
-  const entries = effectiveEntries(w.dprs).filter((e) => e.stage === "final");
+  // 2026-11-21: only submitted / approved DPR lines count (as everywhere else on the dashboard),
+  // and the final shade is each job's own last stage
+  const reportById = new Map(w.reports.map((r) => [r.id, r]));
+  const jobById = new Map(w.jobs.map((j) => [j.id, j]));
+  const entries = effectiveEntries(w.dprs).filter((e) => (!e.reportId || counts(reportById.get(e.reportId))) && isFinal(e, jobById));
+  const sum = (es: DprEntry[]) => es.reduce((n, e) => n + entryArea(e), 0);
   const bySup = new Map<string, PlanRow>();
   for (const l of lines) {
     const row = bySup.get(l.supervisorId) ?? { supervisorId: l.supervisorId, plan: 0, actual: 0, fromJms: 0 };
     row.plan += (l.planM2 || 0) + (l.carriedM2 || 0);
+    // A job carried in from last month brings only this month's work: its plan is just the leftover
+    const start = `${l.month}-01`;
     for (const j of w.jobs.filter((jb) => jb.planLineId === l.id)) {
       const jms = j.jmsId ? w.jms.find((m) => m.id === j.jmsId) : undefined;
+      const mine = entries.filter((e) => e.jobId === j.id);
       if (jms) {
-        row.actual += jms.qty || 0;
-        row.fromJms += jms.qty || 0;
+        const before = sum(mine.filter((e) => e.date < start));
+        const q = Math.max(0, (jms.qty || 0) - before);
+        row.actual += q;
+        row.fromJms += q;
       } else {
-        row.actual += entries.filter((e) => e.jobId === j.id).reduce((n, e) => n + entryArea(e), 0);
+        row.actual += sum(mine.filter((e) => e.date >= start));
       }
     }
     // Work lines straight from the plan (no job)
-    row.actual += entries.filter((e) => !e.jobId && e.planLineId === l.id).reduce((n, e) => n + entryArea(e), 0);
+    row.actual += sum(entries.filter((e) => !e.jobId && e.planLineId === l.id));
     bySup.set(l.supervisorId, row);
   }
   return [...bySup.values()];

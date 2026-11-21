@@ -561,3 +561,10 @@ Process page: "Store module — process" (Claude doc). Decisions there: reorder 
 - Every new painting & blasting job records its **Structure**: Pipeline, Structures or Tanks / vessels (the estimator's kinds). Required on the Work → Jobs form and the DPR's Start job; older jobs stay blank.
 - Store tabs inside Operations keep `?p=store` in the address, so Other stock / Machinery / Store DPRs no longer jump back to the DPR page.
 - Number boxes (2026-11-21): boxes start blank, not 0, and stay blank when cleared (`components/ui/number-input.tsx`); blank saves as 0. Fixed 30: scaffold DPR line (4), store DPR litres (1), safety DPR (15), paint / area / estimate / scaffold calculators (10). New number boxes should use `NumberInput` or a string state.
+
+## 50. Bug review fixes (owner, 2026-11-21)
+- A DPR line from Work → Jobs no longer starts a second DPR for the same supervisor · plant · day when that day's DPR is already with the SIC or approved; it asks for the DPR to be sent back first.
+- When the Admin sends a JMS back, the job's approved DPRs go back to the supervisor as "sent back" (so the lines can be fixed) and any RIL JMS linked to it is unlinked.
+- Progress dashboard: "final" is each job's own last stage (a job may end at 2nd coat); plan vs actual counts only submitted / approved DPR lines; a job carried into a new month counts only that month's work (its JMS less what was done before the month).
+- P&L: crew on the Admin's no-job lines (from the plan) keeps its labour cost and overhead share, shown as "From the plan (no job)".
+- Database (migration 018): JMS, expenses, scaffold material, store moves, wage ledger / advances / vendor bills only from the roles whose screens write them; closing a job, approving a job plan or a scaffold job, and creating an already-approved DPR only by the approving roles (a refused new record is stored as deleted). The Admin may send an approved DPR back. Supervisors write attendance only for the last 7 days.

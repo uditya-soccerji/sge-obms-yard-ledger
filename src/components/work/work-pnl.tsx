@@ -58,6 +58,10 @@ export function WorkPnl() {
       return { main: "Unallocated overhead", sub: `${s.siteCode(site)} · ${monthLabel(m)} · no DPR crew that month to share it over` };
     }
     if (key === "" && view !== "site_month") return { main: "Unallocated overhead", sub: "Fixed costs in months with no DPR crew" };
+    if (view === "job" && key.startsWith("plan|")) {
+      const l = s.line(key.slice(5));
+      return { main: "From the plan (no job)", sub: `${l?.plant ?? ""} · ${l?.serviceCode ?? ""} · crew on the Admin's work lines` };
+    }
     if (view === "job") {
       const j = work.jobs.find((x) => x.id === key);
       const l = j && s.line(j.planLineId);

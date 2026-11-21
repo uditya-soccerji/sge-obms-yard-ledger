@@ -841,6 +841,12 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
       if (report.siteId !== plan.siteId || (report.plant && report.plant !== plan.plant)) return { ok: false, error: `${job.jobNo} is on ${plan.plant}; this report is for ${report.plant || "another site"}` };
       if (report.submitterId !== job.supervisorId) return { ok: false, error: `${job.jobNo} belongs to another supervisor` };
     }
+    // Owner, 2026-11-16: one DPR per supervisor · plant · day — when that day's DPR is already with
+    // the SIC (or approved), a new line must not quietly start a second one (2026-11-21)
+    if (!report) {
+      const sent = w.reports.find((r) => !reportOpen(r) && sameDay(r, key));
+      if (sent) return { ok: false, error: `The ${input.date} DPR for ${plan.plant} is already ${sent.status === "submitted" ? "with the SIC" : "approved"} — ask the SIC to send it back, then add the line to it` };
+    }
     const fresh = !report;
     if (!report) report = { ...blankReport({ submitterId: job.supervisorId, submitterType: "painting_blasting", siteId: plan.siteId, plant: plan.plant, date: input.date }), enteredBy: enteredBy === "admin" ? "admin" : undefined, enteredByName: enteredBy === "admin" ? actor.current.name : undefined };
     // Crew on the line must be on the report as working; add anyone missing as present 08:00–18:00
@@ -1002,11 +1008,17 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
     const why = reason.trim();
     if (!why) return { ok: false, error: "Say what's wrong so the supervisor can fix the DPRs" };
     const job = w.jobs.find((x) => x.id === j.jobId);
-    const sentBack = { by: actor.current.name, at: new Date().toISOString(), reason: `JMS ${j.jmsNo}: ${why}` };
+    const at = new Date().toISOString();
+    const sentBack = { by: actor.current.name, at, reason: `JMS ${j.jmsNo}: ${why}` };
+    // 2026-11-21: the job's approved DPRs go back to the supervisor as "sent back", so the lines can
+    // actually be corrected (they were locked), and a RIL JMS linked to this one is unlinked
+    const reportIds = new Set(w.dprs.filter((d) => d.jobId === j.jobId && d.reportId).map((d) => d.reportId!));
     setWork((s) => ({
       ...s,
       jms: s.jms.filter((x) => x.id !== jmsId),
       jobs: s.jobs.map((x) => (x.id === j.jobId ? { ...x, status: "open", jmsId: undefined, closedAt: undefined, closeRequestedAt: undefined, closeRequestedBy: undefined, sentBack } : x)),
+      reports: s.reports.map((r) => (reportIds.has(r.id) && r.status === "sic_approved" ? { ...r, status: "sic_rejected", sicNote: `JMS ${j.jmsNo} sent back by Admin: ${why}`, sicReviewedBy: `${actor.current.name} (Admin)`, sicReviewedAt: at, updatedAt: at } : r)),
+      submissions: s.submissions.map((x) => (x.jmsId === jmsId ? { ...x, jmsId: undefined } : x)),
     }));
     log({ kind: "jms_returned", problem: true, siteId: job ? siteOfJob(w, job) : "", subjectStaffId: job?.supervisorId, title: `JMS ${j.jmsNo} sent back by Admin · ${job?.jobNo ?? ""}`, detail: `${why} · job reopened ${j.periodFrom} → ${j.periodTo}, ${j.qty} m²`, tab: "jobs", refId: j.jobId });
     return { ok: true };
