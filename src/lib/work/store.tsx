@@ -17,7 +17,7 @@ import { entryArea } from "./logic";
 import { workRights } from "./permissions";
 import { addDays, weekStart } from "../progress";
 import type { DprEntry, DprReport, Expense, Jms, JmsPayment, JmsStatus, JmsSubmission, Job, PlanLine, PlanLineRequest, ScaffoldJob, ScaffoldPlanLine, Stage, WorkState } from "./types";
-import { findScaffoldLine, nextScaffoldJobNo, platformM2 } from "./scaffold";
+import { findScaffoldLine, nextScaffoldJobNo, platformM2, typeLabel } from "./scaffold";
 import { compareJms, linkCandidates } from "./jms-compare";
 import { inStock, LIFECYCLE, LIFECYCLE_LABEL, paintUsedInMonth, stepVariance } from "./paint-steps";
 import type { PaintBatch, PaintStep } from "./types";
@@ -634,7 +634,7 @@ export function WorkProvider({ children }: { children: React.ReactNode }) {
       }
       return next;
     });
-    auditOnly(job.approval === "pending" ? "scaffold_job_requested" : "scaffold_job_started", job.siteId, `${job.jobNo} · ${job.plant} · ${job.location} · ${job.type} · ${job.scopeM3} m³${job.platformPlanks ? ` + ${job.platformPlanks} planks (${platformM2(job.platformPlanks)} m² platform)` : ""} · ${sup.name}`);
+    auditOnly(job.approval === "pending" ? "scaffold_job_requested" : "scaffold_job_started", job.siteId, `${job.jobNo} · ${job.plant} · ${job.location} · ${typeLabel(job.type)} · ${job.scopeM3} m³${job.platformPlanks ? ` + ${job.platformPlanks} planks (${platformM2(job.platformPlanks)} m² platform)` : ""} · ${sup.name}`);
     return { ok: true, id: job.id, requested: job.approval === "pending" };
   }, []);
 

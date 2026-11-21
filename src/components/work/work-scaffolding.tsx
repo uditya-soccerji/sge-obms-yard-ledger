@@ -15,7 +15,7 @@ import { ALL_SITES, entrySiteId, worksAt } from "@/lib/site-scope";
 import { scaffoldVolume } from "@/lib/paint-calc";
 import { useStore } from "@/lib/store";
 import { today } from "@/lib/today";
-import { PLANK_M2, platformM2, SCAFFOLD_PURPOSES, SCAFFOLD_TYPES, STATUS_LABEL, scaffoldProgress, scaffoldStatus, type ScaffoldStatus } from "@/lib/work/scaffold";
+import { PLANK_M2, platformM2, typeLabel, SCAFFOLD_PURPOSES, SCAFFOLD_TYPES, STATUS_LABEL, scaffoldProgress, scaffoldStatus, type ScaffoldStatus } from "@/lib/work/scaffold";
 import { useWork } from "@/lib/work/store";
 import type { ScaffoldType } from "@/lib/work/types";
 import { cn } from "@/lib/utils";
@@ -276,7 +276,7 @@ export function WorkScaffolding() {
           <ul className="divide-y divide-[var(--sge-line)]">
             {waiting.map(({ j }) => (
               <li key={j.id} className="flex flex-wrap items-end justify-between gap-2 py-2 text-sm">
-                <span className="min-w-0"><b>{j.jobNo}</b> · {j.plant} · {j.location} · {j.type} · {fmt(j.scopeM3)} m³ · {name(j.supervisorId)} ({firm(j.contractorId)}) <span className="text-xs text-[var(--sge-ink-3)]">by {j.createdBy}</span></span>
+                <span className="min-w-0"><b>{j.jobNo}</b> · {j.plant} · {j.location} · {typeLabel(j.type)} · {fmt(j.scopeM3)} m³ · {name(j.supervisorId)} ({firm(j.contractorId)}) <span className="text-xs text-[var(--sge-ink-3)]">by {j.createdBy}</span></span>
                 <span className="flex flex-wrap items-center gap-2">
                   <input aria-label="Reason, if rejecting" className="h-8 w-44 rounded-md border border-[var(--sge-line)] bg-[var(--sge-paper)] px-2 text-xs" placeholder="Reason, if rejecting" value={why[j.id] ?? ""} onChange={(e) => setWhy({ ...why, [j.id]: e.target.value })} />
                   <Button size="sm" variant="ghost" onClick={() => { const r = decideScaffoldJob(j.id, false, why[j.id]); if (!r.ok) setMsg({ ok: false, text: r.error }); }}>Reject</Button>
@@ -304,7 +304,7 @@ export function WorkScaffolding() {
                     <td className="whitespace-nowrap font-mono text-xs">{j.jobNo}</td>
                     <td>{j.plant}</td>
                     <td className="max-w-[260px]">{j.location}<div className="text-xs text-[var(--sge-ink-3)]">{j.purpose} · target {j.targetDate}{p.permits.length ? ` · permit ${p.permits.join(", ")}` : " · permit: from the DPR"}</div></td>
-                    <td className="capitalize">{j.type}</td>
+                    <td>{typeLabel(j.type)}</td>
                     <td>{name(j.supervisorId)}<div className="text-xs text-[var(--sge-ink-3)]">{firm(j.contractorId)}</div></td>
                     <td className="whitespace-nowrap text-right tabular-nums">{fmt3(j.scopeM3)} m³{j.platformPlanks ? <div className="text-xs text-[var(--sge-ink-3)]">+ {platformM2(j.platformPlanks).toLocaleString("en-IN")} m² platform ({j.platformPlanks} planks)</div> : null}
                       {(j.scopeCalc?.length ?? 0) > 1 ? (

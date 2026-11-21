@@ -5,10 +5,12 @@
  */
 import type { DprReport, ScaffoldJob, ScaffoldPlanLine, ScaffoldType } from "./types";
 
+// Owner, 2026-11-21: "Standing" is called "Tower" (the saved value stays "standing")
 export const SCAFFOLD_TYPES: { id: ScaffoldType; label: string }[] = [
-  { id: "standing", label: "Standing" },
+  { id: "standing", label: "Tower" },
   { id: "hanging", label: "Hanging" },
 ];
+export const typeLabel = (t: ScaffoldType) => SCAFFOLD_TYPES.find((x) => x.id === t)?.label ?? t;
 /** One plank / plate is 2 m × 0.3 m (owner, 2026-11-21) */
 export const PLANK_M2 = 0.6;
 export const platformM2 = (planks?: number) => Math.round((planks ?? 0) * PLANK_M2 * 100) / 100;

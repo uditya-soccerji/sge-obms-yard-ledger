@@ -43,6 +43,7 @@ import { ATTENDANCE_OPTIONS } from "@/lib/attendance";
 import { worksAt } from "@/lib/site-scope";
 import { workRights } from "@/lib/work/permissions";
 import { PlacePicker, racksFor, type Place } from "@/components/shared/place-picker";
+import { typeLabel } from "@/lib/work/scaffold";
 
 function uid(prefix: string) {
   return `${prefix}-${Math.random().toString(36).slice(2, 9)}`;
@@ -1381,7 +1382,7 @@ function ScaffoldWorkEditor({
                 }}
               >
                 <option value="">No job (one-off work)</option>
-                {openJobs.map((x) => <option key={x.id} value={x.id}>{x.jobNo} · {x.plant} · {x.location} · {x.type} · {x.scopeM3} m³</option>)}
+                {openJobs.map((x) => <option key={x.id} value={x.id}>{x.jobNo} · {x.plant} · {x.location} · {typeLabel(x.type)} · {x.scopeM3} m³</option>)}
               </select>
             </div>
           ) : null}
